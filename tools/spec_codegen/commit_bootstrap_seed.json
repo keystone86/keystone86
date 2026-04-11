@@ -1,0 +1,22 @@
+{
+  "bits": {
+    "CM_GPR": 0,
+    "CM_EIP": 1,
+    "CM_EFLAGS": 2,
+    "CM_SEG": 3,
+    "CM_STACK": 4,
+    "CM_MISC": 5,
+    "CM_CLR03": 6,
+    "CM_CLR47": 7,
+    "CM_CLRF": 8,
+    "CM_FLUSHQ": 9
+  },
+  "combined": {
+    "CM_NOP": ["CM_CLR03", "CM_CLR47", "CM_CLRF"],
+    "CM_FAULT_END": ["CM_CLR03"]
+  },
+  "endi_rules": {
+    "apply_eip_only_if_no_fault_pending": true,
+    "clear_fault_only_if_clrf_set": true
+  }
+}

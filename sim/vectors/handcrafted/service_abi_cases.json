@@ -1,0 +1,30 @@
+[
+  {
+    "name": "non_wait_service_ok_with_svc",
+    "service": "ALU_ADD32",
+    "invoke": "SVC",
+    "expected_valid": true,
+    "expected_sr": "SR_OK"
+  },
+  {
+    "name": "wait_service_with_svcw",
+    "service": "FETCH_IMM8",
+    "invoke": "SVCW",
+    "expected_valid": true,
+    "expected_sr": "SR_WAIT"
+  },
+  {
+    "name": "wait_service_with_svc_is_violation",
+    "service": "FETCH_IMM8",
+    "invoke": "SVC",
+    "expected_valid": false,
+    "expected_sr": "VIOLATION"
+  },
+  {
+    "name": "fault_capable_wait_service_fault_path",
+    "service": "PUSH32",
+    "invoke": "SVCW",
+    "expected_valid": true,
+    "expected_sr": "SR_FAULT"
+  }
+]

@@ -1,0 +1,20 @@
+; SUB_FAULT_HANDLER
+; Phase-1: real-mode exception delivery via IVT.
+; FC and FE are already set by the faulting service when this is called.
+; Does not return — issues ENDI directly.
+;
+; Phase-1 bootstrap version: extracts fault vector from FC via FC_TO_VECTOR
+; hardware mapping, then calls INT_ENTER to deliver via IVT.
+;
+; Note: in the bootstrap ROM this is a simplified stub.
+; The full phase-1 version requires INT_ENTER service to be implemented.
+; Until INT_ENTER is available (Rung 5), this stub halts cleanly.
+
+SUB_FAULT_HANDLER:
+    ; TODO(rung5): Replace with full delivery:
+    ;   EXTRACT T4, MF_FC_TO_VECTOR
+    ;   SVCW    INT_ENTER
+    ;   ENDI    CM_FAULT_END
+    ;
+    ; Bootstrap stub — safe no-op fault landing:
+    ENDI CM_FAULT_END

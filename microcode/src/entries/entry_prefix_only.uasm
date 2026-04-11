@@ -1,0 +1,5 @@
+.entry ENTRY_PREFIX_ONLY, 0x12
+
+; Planned bootstrap ROM address: 0x030
+ENTRY_PREFIX_ONLY:
+    ENDI CM_NOP

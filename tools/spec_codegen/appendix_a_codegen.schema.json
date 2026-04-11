@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Keystone86 Appendix A Codegen Schema",
+  "type": "object",
+  "required": ["entries", "services", "faults", "commit_masks", "stage_fields", "extract_fields", "conditions", "registers"],
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": {"type": "string"},
+          "value": {"type": "integer"}
+        }
+      }
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": {"type": "string"},
+          "value": {"type": "integer"}
+        }
+      }
+    },
+    "faults": {
+      "type": "object",
+      "required": ["service_results", "fault_classes"],
+      "properties": {
+        "service_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "value"],
+            "properties": {"name": {"type": "string"}, "value": {"type": "integer"}}
+          }
+        },
+        "fault_classes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "value"],
+            "properties": {"name": {"type": "string"}, "value": {"type": "integer"}}
+          }
+        }
+      }
+    },
+    "commit_masks": {
+      "type": "object",
+      "required": ["bits", "combined"],
+      "properties": {
+        "bits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "bit"],
+            "properties": {"name": {"type": "string"}, "bit": {"type": "integer"}}
+          }
+        },
+        "combined": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "expr"],
+            "properties": {"name": {"type": "string"}, "expr": {"type": "string"}}
+          }
+        }
+      }
+    },
+    "stage_fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {"name": {"type": "string"}, "value": {"type": "integer"}}
+      }
+    },
+    "extract_fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {"name": {"type": "string"}, "value": {"type": "integer"}}
+      }
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {"name": {"type": "string"}, "value": {"type": "integer"}}
+      }
+    },
+    "registers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {"name": {"type": "string"}, "value": {"type": "integer"}}
+      }
+    }
+  }
+}

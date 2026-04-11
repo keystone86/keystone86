@@ -1,0 +1,16 @@
+; Keystone86 / Aegis
+; Top-level phase-1 bootstrap microcode source
+
+; Suggested generated include imports:
+; .include "../tools/generators/exports/entry_ids.inc"
+; .include "../tools/generators/exports/service_ids.inc"
+; .include "../tools/generators/exports/conditions.inc"
+; .include "../tools/generators/exports/commit_masks.inc"
+
+.include "shared/sub_fault_handler.uasm"
+.include "entries/entry_reset.uasm"
+.include "entries/entry_null.uasm"
+.include "entries/entry_nop_xchg_ax.uasm"
+.include "entries/entry_prefix_only.uasm"
+
+.end

@@ -1,0 +1,674 @@
+{
+  "entries": [
+    {
+      "name": "ENTRY_NULL",
+      "value": 0
+    },
+    {
+      "name": "ENTRY_MOV",
+      "value": 1
+    },
+    {
+      "name": "ENTRY_ALU_RM_R",
+      "value": 2
+    },
+    {
+      "name": "ENTRY_ALU_R_RM",
+      "value": 3
+    },
+    {
+      "name": "ENTRY_ALU_RM_IMM",
+      "value": 4
+    },
+    {
+      "name": "ENTRY_PUSH",
+      "value": 5
+    },
+    {
+      "name": "ENTRY_POP",
+      "value": 6
+    },
+    {
+      "name": "ENTRY_JMP_NEAR",
+      "value": 7
+    },
+    {
+      "name": "ENTRY_CALL_NEAR",
+      "value": 9
+    },
+    {
+      "name": "ENTRY_RET_NEAR",
+      "value": 11
+    },
+    {
+      "name": "ENTRY_JCC",
+      "value": 13
+    },
+    {
+      "name": "ENTRY_INT",
+      "value": 14
+    },
+    {
+      "name": "ENTRY_IRET",
+      "value": 15
+    },
+    {
+      "name": "ENTRY_PREFIX_ONLY",
+      "value": 18
+    },
+    {
+      "name": "ENTRY_NOP_XCHG_AX",
+      "value": 19
+    },
+    {
+      "name": "ENTRY_INC_DEC_REG",
+      "value": 20
+    },
+    {
+      "name": "ENTRY_TEST",
+      "value": 21
+    },
+    {
+      "name": "ENTRY_LEA",
+      "value": 22
+    },
+    {
+      "name": "ENTRY_FLAGS_SIMPLE",
+      "value": 23
+    },
+    {
+      "name": "ENTRY_RESET",
+      "value": 255
+    }
+  ],
+  "services": [
+    {
+      "name": "FETCH_IMM8",
+      "value": 1
+    },
+    {
+      "name": "FETCH_IMM16",
+      "value": 2
+    },
+    {
+      "name": "FETCH_IMM32",
+      "value": 3
+    },
+    {
+      "name": "FETCH_DISP8",
+      "value": 4
+    },
+    {
+      "name": "FETCH_DISP16",
+      "value": 5
+    },
+    {
+      "name": "FETCH_DISP32",
+      "value": 6
+    },
+    {
+      "name": "EA_CALC_16",
+      "value": 16
+    },
+    {
+      "name": "EA_CALC_32",
+      "value": 17
+    },
+    {
+      "name": "LOAD_RM8",
+      "value": 32
+    },
+    {
+      "name": "LOAD_RM16",
+      "value": 33
+    },
+    {
+      "name": "LOAD_RM32",
+      "value": 34
+    },
+    {
+      "name": "STORE_RM8",
+      "value": 35
+    },
+    {
+      "name": "STORE_RM16",
+      "value": 36
+    },
+    {
+      "name": "STORE_RM32",
+      "value": 37
+    },
+    {
+      "name": "LOAD_REG_META",
+      "value": 38
+    },
+    {
+      "name": "STORE_REG_META",
+      "value": 39
+    },
+    {
+      "name": "ALU_ADD8",
+      "value": 48
+    },
+    {
+      "name": "ALU_ADD16",
+      "value": 49
+    },
+    {
+      "name": "ALU_ADD32",
+      "value": 50
+    },
+    {
+      "name": "ALU_SUB8",
+      "value": 51
+    },
+    {
+      "name": "ALU_SUB16",
+      "value": 52
+    },
+    {
+      "name": "ALU_SUB32",
+      "value": 53
+    },
+    {
+      "name": "ALU_LOGIC8",
+      "value": 54
+    },
+    {
+      "name": "ALU_LOGIC16",
+      "value": 55
+    },
+    {
+      "name": "ALU_LOGIC32",
+      "value": 56
+    },
+    {
+      "name": "ALU_CMP8",
+      "value": 57
+    },
+    {
+      "name": "ALU_CMP16",
+      "value": 58
+    },
+    {
+      "name": "ALU_CMP32",
+      "value": 59
+    },
+    {
+      "name": "PUSH16",
+      "value": 64
+    },
+    {
+      "name": "PUSH32",
+      "value": 65
+    },
+    {
+      "name": "POP16",
+      "value": 66
+    },
+    {
+      "name": "POP32",
+      "value": 67
+    },
+    {
+      "name": "VALIDATE_NEAR_TRANSFER",
+      "value": 68
+    },
+    {
+      "name": "COMPUTE_REL_TARGET",
+      "value": 70
+    },
+    {
+      "name": "CONDITION_EVAL",
+      "value": 71
+    },
+    {
+      "name": "INT_ENTER",
+      "value": 98
+    },
+    {
+      "name": "IRET_FLOW",
+      "value": 99
+    },
+    {
+      "name": "COMMIT_GPR",
+      "value": 128
+    },
+    {
+      "name": "COMMIT_EIP",
+      "value": 129
+    },
+    {
+      "name": "COMMIT_EFLAGS",
+      "value": 130
+    },
+    {
+      "name": "COMMIT_STACK",
+      "value": 132
+    },
+    {
+      "name": "END_INSTRUCTION",
+      "value": 133
+    }
+  ],
+  "faults": {
+    "service_results": [
+      {
+        "name": "SR_OK",
+        "value": 0
+      },
+      {
+        "name": "SR_WAIT",
+        "value": 1
+      },
+      {
+        "name": "SR_FAULT",
+        "value": 2
+      }
+    ],
+    "fault_classes": [
+      {
+        "name": "FC_NONE",
+        "value": 0
+      },
+      {
+        "name": "FC_GP",
+        "value": 1
+      },
+      {
+        "name": "FC_SS",
+        "value": 2
+      },
+      {
+        "name": "FC_NP",
+        "value": 3
+      },
+      {
+        "name": "FC_PF",
+        "value": 4
+      },
+      {
+        "name": "FC_TS",
+        "value": 5
+      },
+      {
+        "name": "FC_UD",
+        "value": 6
+      },
+      {
+        "name": "FC_DE",
+        "value": 7
+      },
+      {
+        "name": "FC_NM",
+        "value": 8
+      },
+      {
+        "name": "FC_AC",
+        "value": 9
+      },
+      {
+        "name": "FC_INT",
+        "value": 10
+      },
+      {
+        "name": "FC_DF",
+        "value": 11
+      },
+      {
+        "name": "FC_BR",
+        "value": 12
+      },
+      {
+        "name": "FC_OF",
+        "value": 13
+      }
+    ]
+  },
+  "commit_masks": {
+    "bits": [
+      {
+        "name": "CM_GPR",
+        "bit": 0
+      },
+      {
+        "name": "CM_EIP",
+        "bit": 1
+      },
+      {
+        "name": "CM_EFLAGS",
+        "bit": 2
+      },
+      {
+        "name": "CM_SEG",
+        "bit": 3
+      },
+      {
+        "name": "CM_STACK",
+        "bit": 4
+      },
+      {
+        "name": "CM_MISC",
+        "bit": 5
+      },
+      {
+        "name": "CM_CLR03",
+        "bit": 6
+      },
+      {
+        "name": "CM_CLR47",
+        "bit": 7
+      },
+      {
+        "name": "CM_CLRF",
+        "bit": 8
+      },
+      {
+        "name": "CM_FLUSHQ",
+        "bit": 9
+      }
+    ],
+    "combined": [
+      {
+        "name": "CM_ALU_REG",
+        "expr": "CM_GPR | CM_EFLAGS | CM_CLR03 | CM_CLR47 | CM_CLRF"
+      },
+      {
+        "name": "CM_MOV_REG",
+        "expr": "CM_GPR | CM_CLR03 | CM_CLR47 | CM_CLRF"
+      },
+      {
+        "name": "CM_JMP",
+        "expr": "CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ"
+      },
+      {
+        "name": "CM_CALL",
+        "expr": "CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ"
+      },
+      {
+        "name": "CM_RET",
+        "expr": "CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ"
+      },
+      {
+        "name": "CM_INT",
+        "expr": "CM_SEG | CM_STACK | CM_EFLAGS | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ"
+      },
+      {
+        "name": "CM_IRET",
+        "expr": "CM_SEG | CM_STACK | CM_EFLAGS | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ"
+      },
+      {
+        "name": "CM_FLAGS",
+        "expr": "CM_EFLAGS | CM_CLR03 | CM_CLR47 | CM_CLRF"
+      },
+      {
+        "name": "CM_NOP",
+        "expr": "CM_CLR03 | CM_CLR47 | CM_CLRF"
+      },
+      {
+        "name": "CM_FAULT_END",
+        "expr": "CM_CLR03"
+      },
+      {
+        "name": "CM_STACK_ONLY",
+        "expr": "CM_STACK | CM_CLR03 | CM_CLR47 | CM_CLRF"
+      }
+    ]
+  },
+  "stage_fields": [
+    {
+      "name": "STAGE_GPR",
+      "value": 0
+    },
+    {
+      "name": "STAGE_EIP",
+      "value": 1
+    },
+    {
+      "name": "STAGE_EFLAGS",
+      "value": 2
+    },
+    {
+      "name": "STAGE_SEG",
+      "value": 3
+    },
+    {
+      "name": "STAGE_STACK",
+      "value": 4
+    },
+    {
+      "name": "STAGE_MISC",
+      "value": 5
+    },
+    {
+      "name": "STAGE_STACK_ADJ",
+      "value": 6
+    },
+    {
+      "name": "STAGE_EFLAGS_MASK",
+      "value": 7
+    }
+  ],
+  "extract_fields": [
+    {
+      "name": "MF_ENTRY_ID",
+      "value": 0
+    },
+    {
+      "name": "MF_OPSZ",
+      "value": 1
+    },
+    {
+      "name": "MF_ADDRSZ",
+      "value": 2
+    },
+    {
+      "name": "MF_MODRM_CLASS",
+      "value": 3
+    },
+    {
+      "name": "MF_IMM_CLASS",
+      "value": 4
+    },
+    {
+      "name": "MF_DISP_CLASS",
+      "value": 5
+    },
+    {
+      "name": "MF_OPCODE_CLASS",
+      "value": 6
+    },
+    {
+      "name": "MF_ALU_OP",
+      "value": 7
+    },
+    {
+      "name": "MF_IS_CMP",
+      "value": 8
+    },
+    {
+      "name": "MF_REG_DST",
+      "value": 9
+    },
+    {
+      "name": "MF_REG_SRC",
+      "value": 10
+    },
+    {
+      "name": "MF_REG_RM",
+      "value": 11
+    },
+    {
+      "name": "MF_SIB_SCALE",
+      "value": 12
+    },
+    {
+      "name": "MF_SIB_INDEX",
+      "value": 13
+    },
+    {
+      "name": "MF_SIB_BASE",
+      "value": 14
+    },
+    {
+      "name": "MF_COND_CODE",
+      "value": 15
+    },
+    {
+      "name": "MF_FLAG_BIT",
+      "value": 16
+    },
+    {
+      "name": "MF_FLAG_VAL",
+      "value": 17
+    },
+    {
+      "name": "MF_NEXT_EIP",
+      "value": 18
+    },
+    {
+      "name": "MF_FC_TO_VECTOR",
+      "value": 19
+    },
+    {
+      "name": "MF_PREFIX1",
+      "value": 20
+    },
+    {
+      "name": "MF_PREFIX2",
+      "value": 21
+    }
+  ],
+  "conditions": [
+    {
+      "name": "C_ALWAYS",
+      "value": 0
+    },
+    {
+      "name": "C_OK",
+      "value": 1
+    },
+    {
+      "name": "C_WAIT",
+      "value": 2
+    },
+    {
+      "name": "C_FAULT",
+      "value": 3
+    },
+    {
+      "name": "C_T0Z",
+      "value": 4
+    },
+    {
+      "name": "C_T0NZ",
+      "value": 5
+    },
+    {
+      "name": "C_W16",
+      "value": 6
+    },
+    {
+      "name": "C_W32",
+      "value": 7
+    },
+    {
+      "name": "C_REAL",
+      "value": 8
+    },
+    {
+      "name": "C_PROT",
+      "value": 9
+    },
+    {
+      "name": "C_REP",
+      "value": 10
+    },
+    {
+      "name": "C_W8",
+      "value": 11
+    },
+    {
+      "name": "C_T3Z",
+      "value": 12
+    },
+    {
+      "name": "C_T3NZ",
+      "value": 13
+    },
+    {
+      "name": "C_ADDR16",
+      "value": 14
+    },
+    {
+      "name": "C_ADDR32",
+      "value": 15
+    }
+  ],
+  "registers": [
+    {
+      "name": "REG_T0",
+      "value": 0
+    },
+    {
+      "name": "REG_T1",
+      "value": 1
+    },
+    {
+      "name": "REG_T2",
+      "value": 2
+    },
+    {
+      "name": "REG_T3",
+      "value": 3
+    },
+    {
+      "name": "REG_T4",
+      "value": 4
+    },
+    {
+      "name": "REG_T5",
+      "value": 5
+    },
+    {
+      "name": "REG_T6",
+      "value": 6
+    },
+    {
+      "name": "REG_T7",
+      "value": 7
+    },
+    {
+      "name": "REG_S0",
+      "value": 8
+    },
+    {
+      "name": "REG_S1",
+      "value": 9
+    },
+    {
+      "name": "REG_SR",
+      "value": 10
+    },
+    {
+      "name": "REG_FC",
+      "value": 11
+    },
+    {
+      "name": "REG_FE",
+      "value": 12
+    },
+    {
+      "name": "REG_D0L",
+      "value": 13
+    },
+    {
+      "name": "REG_D0H",
+      "value": 14
+    },
+    {
+      "name": "REG_SPECIAL",
+      "value": 15
+    }
+  ]
+}

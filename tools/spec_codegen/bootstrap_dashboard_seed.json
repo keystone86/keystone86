@@ -1,0 +1,23 @@
+{
+  "checks": [
+    {"name": "spec-check", "command": "make spec-check", "supports": ["constitutional"]},
+    {"name": "frozen-manifest-check", "command": "make frozen-manifest-check", "supports": ["constitutional"]},
+    {"name": "namespace-check", "command": "make namespace-check", "supports": ["rung0", "rung1"]},
+    {"name": "spec-sync-status", "command": "make spec-sync-status", "supports": ["rung0", "rung1"]},
+    {"name": "ucode", "command": "make ucode", "supports": ["rung0"]},
+    {"name": "ucode-bootstrap-check", "command": "make ucode-bootstrap-check", "supports": ["rung0"]},
+    {"name": "decode-dispatch-smoke", "command": "make decode-dispatch-smoke", "supports": ["rung1"]},
+    {"name": "microseq-smoke", "command": "make microseq-smoke", "supports": ["rung0", "rung1"]},
+    {"name": "commit-smoke", "command": "make commit-smoke", "supports": ["rung0"]},
+    {"name": "service-abi-smoke", "command": "make service-abi-smoke", "supports": ["rung0"]},
+    {"name": "prefetch-decode-smoke", "command": "make prefetch-decode-smoke", "supports": ["rung0", "rung1"]},
+    {"name": "version-status", "command": "make version-status", "supports": ["project"]}
+  ],
+  "rungs": [
+    {"name": "rung0", "title": "Reset / fetch-decode loop"},
+    {"name": "rung1", "title": "NOP / dispatch sanity"},
+    {"name": "rung2", "title": "Near control flow"},
+    {"name": "rung3", "title": "INT / IRET"},
+    {"name": "rung4plus", "title": "Remaining phase-1 growth"}
+  ]
+}

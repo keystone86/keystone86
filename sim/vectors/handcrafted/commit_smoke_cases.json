@@ -1,0 +1,50 @@
+[
+  {
+    "name": "cm_nop_clears_temps_and_fault",
+    "mask_symbol": "CM_NOP",
+    "fault_pending_before": true,
+    "pc_eip_en": false,
+    "pc_eip_val": "0x00000000",
+    "expect_commit_eip": false,
+    "expect_eip_after": "UNCHANGED",
+    "expect_clear_t0_t3": true,
+    "expect_clear_t4_t7": true,
+    "expect_clear_fault": true
+  },
+  {
+    "name": "cm_fault_end_preserves_fault",
+    "mask_symbol": "CM_FAULT_END",
+    "fault_pending_before": true,
+    "pc_eip_en": false,
+    "pc_eip_val": "0x00000000",
+    "expect_commit_eip": false,
+    "expect_eip_after": "UNCHANGED",
+    "expect_clear_t0_t3": true,
+    "expect_clear_t4_t7": false,
+    "expect_clear_fault": false
+  },
+  {
+    "name": "eip_only_commit_without_fault",
+    "mask_symbol": "CM_EIP",
+    "fault_pending_before": false,
+    "pc_eip_en": true,
+    "pc_eip_val": "0x00001000",
+    "expect_commit_eip": true,
+    "expect_eip_after": "0x00001000",
+    "expect_clear_t0_t3": false,
+    "expect_clear_t4_t7": false,
+    "expect_clear_fault": false
+  },
+  {
+    "name": "eip_plus_clrf_commit",
+    "mask_symbol": "CM_EIP|CM_CLRF",
+    "fault_pending_before": false,
+    "pc_eip_en": true,
+    "pc_eip_val": "0x00002000",
+    "expect_commit_eip": true,
+    "expect_eip_after": "0x00002000",
+    "expect_clear_t0_t3": false,
+    "expect_clear_t4_t7": false,
+    "expect_clear_fault": true
+  }
+]

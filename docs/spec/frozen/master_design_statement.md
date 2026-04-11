@@ -1,0 +1,1557 @@
+# Microcoded 486 — Complete Master Design Choice Statement
+## Version 1.1 — Expanded and Completed
+
+---
+
+# PART I — FOUNDATIONAL STATEMENT OF PURPOSE
+
+## 1. What We Are Building
+
+We are building a true microcoded x86 CPU delivering 80486-class architectural
+compatibility — meaning correct execution of 80486-class software — but not
+replication of Intel's internal 80486 microarchitecture, and not retention of
+ao486's pipeline-centric organization.
+
+The design goal is a machine that is:
+
+- Small in RTL footprint, targeting a fraction of ao486's ~91,000 LUT cost
+- Fast in Fmax, targeting well above ao486's 39 MHz ceiling
+- Correct in 486-class semantics, grounded in ao486's proven behavioral corpus
+- Comprehensible throughout, where every instruction's behavior is a legible
+  microcode routine rather than distributed combinational logic
+- Extensible in phases, where new phases add capability without architectural surgery
+
+This is a control-first simplification project, not a hardware-first optimization
+project. Lower IPC is explicitly acceptable. Correctness and clarity come first.
+
+---
+
+## 2. The Two Source Projects and How They Are Used
+
+### 2.1 z8086 — Structural Template
+
+z8086 is used because it proves the structural model works in practice. It
+implements a real microcoded x86-class CPU in approximately 2,500 LUTs on
+a Gowin GW5A, running at 60 MHz, passing all single-instruction test vectors.
+
+From z8086 we take:
+
+- The microsequencer as the genuine center of the machine
+- The decoder as a pure combinational classifier that selects an entry point
+  and does nothing else
+- The translate() / dispatch table pattern: opcode + ModRM → entry ID →
+  micro-PC, implemented as a frozen combinational lookup
+- The move→action microinstruction loop, extended to 32 bits for our richer
+  service model
+- The stall/wait mechanism: freeze the micro-PC when a wait-capable service
+  is pending
+- The single clock domain, no vendor primitives discipline
+- The philosophy that a small, clean machine can implement a large ISA surface
+  through ROM sequencing rather than hardware explosion
+
+z8086's {AR, CR} address pair model maps directly to our design: AR is the
+entry ID (our 8-bit ENTRY_* namespace), CR is the sequence counter within a
+routine. The dispatch table is a combinational block mapping opcode + ModRM
+to AR. The microsequencer walks CR forward from there.
+
+### 2.2 ao486 — Semantic Corpus
+
+ao486 is used because it contains a large body of compatibility-proven
+behavioral descriptions that have been validated against real software
+including DOS, Windows 95, and Linux 3.13.
+
+From ao486 we take ONLY:
+
+- CMD_*.txt files: top-level instruction-family semantic descriptions
+- common_*.txt files: shared semantic library material
+
+ao486's CMD_*.txt format has five sections per file:
+
+    <defines>   — constant and step ID definitions
+    <decode>    — classification and entry selection logic
+    <microcode> — LOOP/CMDEX step control structure
+    <read>      — operand fetch, EA calc, memory reads, hazard waits
+    <execute>   — ALU operations, semantic checks, fault detection
+    <write>     — SAVE() calls, architectural commit, pipeline reset
+
+Our translation recipe maps each section mechanically:
+
+    <decode>    → dispatch metadata fields and ENTRY_* selection
+    <microcode> → explicit microcode routine labels and step structure
+    <read>      → service calls (LOAD_RM*, EA_CALC_*, FETCH_*) with WAIT returns
+    <execute>   → ALU service calls, semantic checks, fault staging
+    <write>     → commit staging calls (COMMIT_GPR, COMMIT_EIP, etc.) and ENDI
+    common_*.txt → shared service library material, named helpers
+
+The SAVE() calls in ao486's write stage are replaced by explicit STAGE +
+COMMIT service calls under microcode control. The rd_waiting/rd_mutex_busy
+stall network is replaced by the WAIT return convention. The
+wr_req_reset_micro / wr_req_reset_rd / wr_req_reset_exe pipeline flush
+signals are replaced entirely by the pending-commit model and fault convention.
+
+We do NOT take from ao486:
+
+- The 4-stage pipeline as architectural center
+- The read/execute/write split as the programming model
+- The generated combinational control network (AutogenGenerator output)
+- Stage-driven distributed control as architecture
+- The pipeline reset/interlock structure
+- The mc_cmd token passing model between stages
+- The rd_mutex_busy hazard inference network
+- Any of the Verilog RTL
+
+ao486 is a semantic donor, not an architectural blueprint.
+
+---
+
+## 3. Core Authority Rule
+
+Microcode is the authority. Microcode owns:
+
+- Instruction meaning
+- Sequencing
+- Control flow
+- Privilege and protection flow
+- Exception ordering
+- Architectural commit
+
+Hardware blocks are subordinate and may only provide execution mechanisms.
+No hardware block may own instruction policy, distributed instruction
+semantics, or architectural commit policy.
+
+This is the fundamental departure from ao486, where the autogenerated
+combinational network owns instruction policy across four pipeline stages.
+
+---
+
+# PART II — MACHINE STRUCTURE
+
+## 4. Structural Model
+
+The structural model is z8086-style, extended for 486-class semantics:
+
+- The decoder classifies the instruction and selects a top-level entry point
+- A real microsequencer executes explicit routines
+- Top-level routines are composed from calls to shared semantic services
+- Control remains explicit and sequential rather than flattened into a large
+  distributed combinational control structure
+
+### 4.1 Decoder Responsibilities
+
+The decoder may determine:
+
+- Opcode family
+- Operand size (8/16/32)
+- Address size (16/32)
+- Prefix state (up to two legacy prefixes)
+- ModRM class (register, memory-no-disp, memory-disp8, memory-disp32, SIB)
+- Operand form (reg/reg, reg/mem, mem/reg, reg/imm, acc/imm)
+- Immediate class (imm8, imm16, imm32, imm8sx)
+- Displacement class (disp8, disp16, disp32)
+- Special mode metadata (real/protected, CPL, current operand/address size)
+- Entry ID selection
+
+The decoder must not become a giant instruction-implementation block.
+The decoder does not implement instruction semantics.
+The decoder output is a set of metadata latches (M_*) plus an entry ID.
+
+### 4.2 Decoder Implementation Model
+
+The decoder is a combinational block structured as two lookup stages,
+mirroring z8086's approach:
+
+Stage 1 — Prefix accumulation and opcode recognition:
+Consumes bytes from the prefetch queue. Accumulates up to two legacy
+prefix bytes. Recognizes the opcode byte (and two-byte 0F escape).
+Determines whether a ModRM byte follows and if so, consumes it.
+
+Stage 2 — Entry selection and metadata assembly:
+Maps {opcode, ModRM.reg, prefix_state, operand_size, address_size} to
+an ENTRY_* ID. Populates all M_* metadata latches. Signals decode_done
+to the microsequencer.
+
+This is precisely z8086's translate() + group_decode() functions,
+extended for 32-bit prefix handling and 486-class instruction coverage.
+
+### 4.3 Prefetch Queue
+
+A prefetch queue feeds the decoder. The queue runs ahead on idle bus cycles
+exactly as in z8086. The decoder consumes bytes from the queue one at a time.
+FETCH_IMM* and FETCH_DISP* services also consume from the queue.
+
+Minimum queue depth: 8 bytes.
+Queue flush occurs at ENDI when EIP changes (JMP, CALL, RET, INT, IRET).
+Queue flush is staged through the pending-commit model and occurs at the
+commit boundary, not mid-instruction.
+
+---
+
+## 5. Microsequencer
+
+### 5.1 Microsequencer Structure
+
+The microsequencer maintains:
+
+- micro-PC (uPC): current execution address in the microcode ROM
+- Return stack: preferred depth 8, minimum 4
+- Stall register: one bit, set when a wait-capable service is pending
+- Fault pending register: one bit, set when FC/FE contain a staged fault
+
+The microsequencer executes one microinstruction per clock when not stalled.
+When stalled, uPC is frozen. The service hardware asserts done when ready,
+clearing the stall.
+
+### 5.2 Entry Dispatch Mechanism
+
+This is the critical mechanism that was implicit in the original spec and
+is now made explicit by studying z8086's AR/CR model.
+
+The decoder outputs an 8-bit ENTRY_ID. The microsequencer dispatch table
+is a small combinational ROM that maps ENTRY_ID → base micro-PC address.
+
+    uPC_base = dispatch_table[ENTRY_ID]
+
+When decode_done is asserted:
+
+1. The microsequencer loads uPC from dispatch_table[ENTRY_ID]
+2. The metadata latches M_* are stable
+3. The microsequencer begins executing the entry routine
+
+The dispatch table is implemented as a small synchronous ROM or registered
+combinational block, no larger than 256 × 12 bits (256 entries, 12-bit
+micro-PC space for up to 4096 microcode words).
+
+### 5.3 Multi-Step Routine Addressing
+
+This was an implicit gap in the original spec. ao486 uses CMDEX_STEP_*
+constants auto-generated per instruction. In our model:
+
+Each entry routine is a sequence of labeled microcode words at consecutive
+addresses in the ROM. The microsequencer walks forward through them.
+CALL pushes uPC+1 onto the return stack and jumps to the target.
+RET pops the return stack and resumes.
+BR cond, offset performs a conditional relative branch within the routine.
+LOOP cond, offset implements counted/conditional loops.
+
+Multi-step instructions (those with ao486 CMDEX_STEP_N structure) are
+translated as straight-line or lightly branching microcode sequences
+within the entry routine, with CALL used for shared service invocations.
+No separate step constant namespace is needed — the microcode address IS
+the step identity.
+
+### 5.4 Reset and Startup Sequence
+
+On reset assertion:
+
+1. All pending-commit state is cleared
+2. All fault state is cleared
+3. All temp registers T0-T7 are cleared
+4. Segment caches are reset to real-mode reset values:
+   - CS: selector=F000h, base=FFFF0000h, limit=FFFFh
+   - DS/ES/FS/GS/SS: selector=0000h, base=0, limit=FFFFh
+5. EIP is set to FFF0h
+6. EFLAGS is set to 00000002h (reserved bit 1 set, all others clear)
+7. The microsequencer begins at a fixed ENTRY_RESET micro-PC
+
+ENTRY_RESET (id: 0xFF, reserved, not in phase-1 dispatch table) performs:
+- Clears all M_* metadata latches
+- Asserts queue flush
+- Issues a dummy ENDI with empty commit mask
+- Returns control to fetch/decode loop
+
+The first instruction fetched after reset is at CS:EIP = FFFF:FFF0,
+physical address FFFFFFF0h, which is standard 486 reset vector behavior.
+
+### 5.5 Microsequencer State Machine
+
+The microsequencer has four states:
+
+    FETCH_DECODE   — waiting for decoder to assert decode_done
+    EXECUTE        — running microcode, one microinstruction per clock
+    WAIT_SERVICE   — stalled on a SVCW return of WAIT
+    FAULT_HOLD     — fault staged, awaiting microcode decision
+
+Transitions:
+
+    FETCH_DECODE → EXECUTE      on decode_done
+    EXECUTE → FETCH_DECODE      on ENDI (end of instruction)
+    EXECUTE → WAIT_SERVICE      on any service returning WAIT
+    WAIT_SERVICE → EXECUTE      on service asserting done
+    EXECUTE → FAULT_HOLD        on any service returning FAULT (if microcode
+                                does not immediately handle it)
+    FAULT_HOLD → EXECUTE        on microcode issuing RAISE or CLEAR_FAULT
+
+---
+
+## 6. Service ABI
+
+### 6.1 Shared State Bank
+
+Temporary registers:
+
+    T0   primary operand / primary result
+    T1   secondary operand / secondary result
+    T2   effective address / linear address / branch destination
+    T3   width/mode/flags helper
+    T4   immediate / displacement / count
+    T5   selector / segment helper
+    T6   complex-path scratch A
+    T7   complex-path scratch B
+
+Descriptor latches:
+
+    D0   primary descriptor (64-bit cached descriptor value)
+    D1   secondary descriptor (gate/task/outer-transfer cases)
+
+Selector temps:
+
+    S0   primary selector (16-bit)
+    S1   secondary selector (16-bit)
+
+Status/fault registers:
+
+    SR   service result (OK=0, WAIT=1, FAULT=2)
+    FC   fault class (4-bit, see fault class encoding)
+    FE   fault error code (32-bit, selector-derived or page-fault code)
+
+Metadata latches (written by decoder, read-only to services):
+
+    M_ENTRY_ID       8-bit entry identifier
+    M_OPCODE_CLASS   decoded opcode family
+    M_OPSZ           operand size (8/16/32)
+    M_ADDRSZ         address size (16/32)
+    M_PREFIX1        first prefix byte (or 0)
+    M_PREFIX2        second prefix byte (or 0)
+    M_MODRM_CLASS    ModRM addressing class
+    M_IMM_CLASS      immediate class
+    M_DISP_CLASS     displacement class
+    M_FLAGS          miscellaneous decode flags
+
+### 6.2 Caller/Callee Save Rules
+
+Caller-saved (microcode must preserve across calls if needed):
+
+    T0, T1, T2, T3
+    SR, FC, FE
+
+Callee-saved by default (services must preserve):
+
+    T4, T5, T6, T7
+    D0, D1
+    S0, S1
+
+Services may not directly modify visible architectural state (GPRs, EIP,
+EFLAGS, segment registers, ESP) unless explicitly designated as final-commit
+helpers, and even then only by staging into the pending-commit record.
+
+### 6.3 Service Return Convention
+
+Every service returns exactly one of:
+
+    OK     (SR=0)   — service completed successfully
+    WAIT   (SR=1)   — service is pending, micro-PC frozen until done
+    FAULT  (SR=2)   — service detected a fault; FC and FE are valid
+
+When SR=FAULT:
+    FC = fault class code
+    FE = fault error code (zero, selector value, or page-fault code)
+
+Microcode alone decides whether to retry, vector the exception, suppress
+commit, or continue sequencing. Services only report faults they are
+responsible for detecting.
+
+### 6.4 Service Invocation
+
+SVC target    — invoke service, continue immediately after OK
+SVCW target   — invoke service, stall on WAIT, continue after done or FAULT
+
+If a service is marked may_wait: true in the catalog, it MUST be invoked
+with SVCW. Invoking a wait-capable service with SVC is an implementation
+error.
+
+---
+
+## 7. Microinstruction Set
+
+### 7.1 Design Philosophy
+
+The microinstruction set is sequencing-oriented, not wire-wiggle-oriented.
+Microinstructions describe operations at the service/register level, not
+at the hardware signal level. The hardware figures out the wires.
+
+### 7.2 Microinstruction Classes
+
+Control flow:
+
+    CALL target           push uPC+1, jump to target
+    RET                   pop return stack, resume
+    JMP target            unconditional jump
+    BR cond, target       conditional relative branch
+    LOOP cond, target     conditional loop with implicit counter
+
+State movement:
+
+    MOV dst, src          register-to-register move
+    LOADI dst, imm        load immediate value
+    EXTRACT dst, field    extract field from metadata latch
+    PACK dst, fields      pack multiple fields into register
+
+Service invocation:
+
+    SVC target            invoke service (non-waiting)
+    SVCW target           invoke service (wait-capable)
+
+Commit/fault:
+
+    STAGE field, src      stage a value into the pending-commit record
+    COMMIT mask           apply pending commit fields per mask
+    RAISE fault_class, error_src   stage fault and set FC/FE
+    CLEAR_FAULT           clear pending fault state
+
+Utility:
+
+    NOP                   no operation
+    ENDI                  end of instruction — apply all pending commit
+                          fields in architectural order, clear pending
+                          commit state, handle pending fault if present,
+                          flush prefetch queue if EIP changed, return
+                          control to FETCH_DECODE state
+
+### 7.3 Frozen 32-Bit Encoding
+
+Primary microinstruction word (32 bits):
+
+    bits [31:28]  UOP_CLASS   (4 bits — 16 classes)
+    bits [27:22]  TARGET       (6 bits — 64 direct targets or service IDs)
+    bits [21:18]  COND         (4 bits — condition encoding)
+    bits [17:14]  DST          (4 bits — destination register)
+    bits [13:10]  SRC          (4 bits — source register)
+    bits [9:0]    IMM10_OR_SUBOP (10 bits — immediate or sub-operation)
+
+An optional 32-bit extension word may follow for larger literals or
+jump targets that exceed the primary encoding range.
+
+### 7.4 Condition Encoding
+
+    0000  always
+    0001  SR == OK
+    0010  SR == WAIT
+    0011  SR == FAULT
+    0100  T0 == 0
+    0101  T0 != 0
+    0110  width == 16
+    0111  width == 32
+    1000  mode == real
+    1001  mode == protected
+    1010  REP prefix active
+    1011  width == 8
+    1100  T0 < 0 (signed)
+    1101  T0 >= 0 (signed)
+    1110  reserved
+    1111  reserved
+
+### 7.5 Register Namespace
+
+    0000  T0        0001  T1        0010  T2        0011  T3
+    0100  T4        0101  T5        0110  T6        0111  T7
+    1000  S0        1001  S1        1010  SR        1011  FC
+    1100  FE        1101  D0 handle 1110  D1 handle 1111  special
+
+---
+
+## 8. Pending-Commit Model
+
+### 8.1 Philosophy
+
+Services compute and stage results into the pending-commit record.
+Only microcode, through COMMIT or ENDI, makes any result architecturally
+visible. This replaces ao486's distributed SAVE() calls and pipeline reset
+signals with a single clean boundary.
+
+Nothing is architecturally visible mid-instruction. This makes exception
+handling simple: if a fault is present when ENDI executes, normal commit
+is suppressed and the fault is vectored instead.
+
+### 8.2 Pending-Commit Record Fields
+
+GPR commit:
+    PC_GPR_EN       enable flag
+    PC_GPR_IDX      register index (0-7)
+    PC_GPR_VAL      new value (32-bit)
+
+EIP commit:
+    PC_EIP_EN       enable flag
+    PC_EIP_VAL      new EIP value (32-bit)
+
+EFLAGS commit:
+    PC_EFLAGS_EN    enable flag
+    PC_EFLAGS_MASK  which bits to update
+    PC_EFLAGS_VAL   new flag values
+
+Segment commit:
+    PC_SEG_EN       enable flag
+    PC_SEG_IDX      segment register index (CS/DS/ES/FS/GS/SS)
+    PC_SEG_SEL      new visible selector (16-bit)
+    PC_SEG_DESC     new hidden descriptor cache (64-bit)
+    PC_SEG_RPL      new RPL
+    PC_SEG_VALID    descriptor cache valid flag
+
+Stack commit:
+    PC_STACK_EN     enable flag
+    PC_STACK_VAL    new ESP/SP value (32-bit)
+
+Misc commit:
+    PC_MISC_EN      enable flag
+    PC_MISC_CLASS   class of miscellaneous architectural change
+    PC_MISC_VAL     value
+
+### 8.3 Commit Rules
+
+- If a pending fault exists, normal commit is suppressed unless
+  architecturally required (certain fault paths must partially commit
+  before vectoring — this is handled by explicit microcode, not hardware)
+- EIP changes become visible only at commit boundary
+- Segment selector and cache changes become visible only at commit boundary
+- Stack pointer updates become visible only at commit boundary
+- Far control transfer is not architecturally complete until commit boundary
+- Multiple STAGE calls to the same field within one instruction are legal;
+  last write wins
+
+### 8.4 Default Commit Order
+
+Applied by ENDI in this fixed order:
+
+1. GPR
+2. EFLAGS
+3. Segment visible selector and cache updates
+4. Stack pointer
+5. EIP
+6. Misc architectural completion hooks
+7. Prefetch queue flush (if EIP committed)
+
+### 8.5 Commit Mask Encoding (10-bit)
+
+    bit 0   GPR
+    bit 1   EIP
+    bit 2   EFLAGS
+    bit 3   SEG
+    bit 4   STACK
+    bit 5   MISC
+    bit 6   clear temps T0-T3
+    bit 7   clear temps T4-T7
+    bit 8   clear fault state after successful commit
+    bit 9   flush prefetch queue (implied when EIP bit set, but
+            can be set independently for pipeline management)
+
+### 8.6 ENDI Semantics
+
+ENDI:
+
+1. Checks for pending fault
+2. If no pending fault: applies all pending commit fields in architectural
+   order per the commit mask
+3. If pending fault: suppresses commit (except any architecturally-required
+   partial commits already staged), vectors exception through fault handler
+   entry point
+4. Clears pending commit state
+5. Clears temp registers per commit mask bits 6 and 7
+6. Flushes prefetch queue if EIP changed or bit 9 set
+7. Returns microsequencer to FETCH_DECODE state
+
+---
+
+## 9. Fault Model
+
+### 9.1 Fault Classes
+
+    0x0  NONE
+    0x1  GP    (#GP — general protection)
+    0x2  SS    (#SS — stack segment)
+    0x3  NP    (#NP — segment not present)
+    0x4  PF    (#PF — page fault)
+    0x5  TS    (#TS — invalid TSS)
+    0x6  UD    (#UD — invalid opcode)
+    0x7  DE    (#DE — divide error)
+    0x8  NM    (#NM — device not available)
+    0x9  AC    (#AC — alignment check)
+    0xA  INT_INTERNAL  (internal microcode exception path)
+    0xB  DF    (#DF — double fault, phase 3)
+    0xC  BR    (#BR — BOUND range exceeded, phase 2)
+    0xD  OF    (#OF — overflow, INT0)
+    others reserved
+
+### 9.2 FE Contents
+
+FE contains one of:
+
+- Literal zero (for faults with no error code)
+- Selector-derived code (for segment faults — bits [15:0] selector,
+  bits [17:16] source flags EXT/IDT)
+- Page-fault code (for #PF — P/W/U/RSV/ID bits)
+- Service-specific encoded code (for DE, NM, etc. — always zero)
+
+### 9.3 Fault Ownership
+
+Microcode owns:
+- Fault ordering (which fault takes priority when multiple detected)
+- Fault vectoring (loading IDT entry, pushing error frame)
+- Commit suppression decisions
+- Retry semantics
+
+Services only report faults they are individually responsible for detecting.
+A service must never report a fault that is another service's responsibility.
+
+### 9.4 Double Fault Handling (Phase 3)
+
+If a fault occurs during exception delivery, the machine must detect the
+double-fault condition and vector #DF. This is handled entirely in microcode
+through an explicit fault-during-fault check at the top of the exception
+delivery routine. The hardware carries no special double-fault logic.
+
+### 9.5 NMI Handling
+
+NMI is a non-maskable interrupt delivered at ENDI boundaries (never
+mid-instruction). The microsequencer checks an NMI_PENDING flag after
+each ENDI. If set, execution diverts to ENTRY_NMI instead of the next
+fetch/decode. NMI within NMI is suppressed until IRET. This is
+implemented as a single flag checked by the microsequencer, not as
+pipeline-level interrupt hardware.
+
+### 9.6 Exception Priority Ordering (Real Mode, Phase 1)
+
+Within a single instruction, when multiple faults could be detected,
+priority is:
+
+1. Fault from instruction fetch (before decode)
+2. Fault from decode (UD — invalid opcode)
+3. Fault from operand address generation
+4. Fault from operand fetch
+5. Fault from execution
+6. Fault from result store
+
+This ordering is enforced by microcode sequencing, not by hardware.
+Because microcode is sequential and each service returns one fault at a time,
+the first fault encountered wins. Subsequent service calls after a fault
+must check SR before proceeding — this is the microcode author's
+responsibility, enforced by convention.
+
+---
+
+## 10. Translation Rules From ao486 Text
+
+### 10.1 Formal Translation Rule
+
+    <decode>    → dispatch metadata population and ENTRY_* selection
+    <microcode> → entry routine body (labels, CALL/RET structure)
+    <read>      → operand-source service calls, memory/descriptor services,
+                  temp register loads, SVCW for wait-capable interactions
+    <execute>   → ALU/control service calls, semantic checks,
+                  fault staging via RAISE, pending-commit staging via STAGE
+    <write>     → finalization service calls, COMMIT_* staging,
+                  ENDI to close the instruction
+    common_*.txt → shared service-library material, split into named
+                   service helpers
+
+### 10.2 Specific Mapping Rules
+
+ao486 rd_waiting assertion → service returns WAIT, SVCW freezes uPC
+
+ao486 rd_mutex_busy_* check → caller-save convention: microcode saves T0-T3
+before calling a service that might clobber them; no hardware hazard network
+
+ao486 SAVE(reg, val) in write stage → STAGE PC_GPR_*, then COMMIT_GPR,
+then ENDI
+
+ao486 SAVE(eip, val) → STAGE PC_EIP_*, then COMMIT_EIP, then ENDI
+
+ao486 SET(wr_req_reset_micro) / SET(wr_req_reset_rd) / SET(wr_req_reset_exe)
+→ These are completely eliminated. The pending-commit model means no commit
+has occurred yet at the point these would have been set. ENDI with empty
+commit mask (or with RAISE preceding ENDI) handles the equivalent function.
+
+ao486 LOOP(CMDEX_STEP_LAST) → The LOOP construct maps to a microcode label
+at the top of the routine. Multi-step sequences become sequential microcode
+with BR or JMP for conditional paths.
+
+ao486 IF(rd_cmd == CMD_*) / IF(wr_cmd == CMD_*) → These per-stage
+instruction identity checks are completely eliminated. In our model the
+microsequencer is already within the correct entry routine — no runtime
+instruction-identity checks are needed in services.
+
+### 10.3 Anti-Rules
+
+- Do not preserve ao486's stage split as architecture
+- Do not import pipeline control meshes
+- Do not let hardware own instruction policy
+- Do not use rd_mutex_busy-style hazard inference
+- Do not use wr_req_reset-style pipeline flushing
+- Do not make services check mc_cmd or any instruction identity token
+
+---
+
+## 11. First Service Catalog
+
+### 11.1 Service ID Encoding
+
+Services use 8-bit IDs. The encoding matches the original spec exactly.
+Service groups and their ID ranges:
+
+    0x00        utility (SVC_NULL)
+    0x01-0x07   fetch/decode helpers
+    0x10-0x13   address generation
+    0x20-0x27   operand load/store
+    0x30-0x3F   ALU and flags
+    0x40-0x47   stack and flow helpers
+    0x50-0x57   descriptor and segment helpers
+    0x60-0x65   interrupt/return/control-transfer
+    0x70-0x78   paging and memory engine
+    0x80-0x85   commit helpers
+    0x86-0x9F   reserved for string helpers
+    0xA0-0xBF   reserved for system/control helpers
+    0xC0-0xFF   reserved
+
+### 11.2 Complete Phase-1 Service Signatures
+
+All phase-1 services are specified below. Phase-2 and phase-3 services
+that are named but not fully specified are marked accordingly.
+
+---
+
+**SVC_NULL (0x00)**
+Inputs: none | Outputs: none | Clobbers: none
+Returns: OK | May WAIT: no | May stage: no | Memory: no
+
+---
+
+**FETCH_IMM8 (0x01)**
+Inputs: prefetch queue context
+Outputs: T4 = sign-extended imm8 (zero-extend for unsigned contexts)
+Clobbers: none | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: no | Memory: yes (queue)
+
+**FETCH_IMM16 (0x02)**
+Inputs: prefetch queue context
+Outputs: T4 = imm16 | Clobbers: none
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: no | Memory: yes
+
+**FETCH_IMM32 (0x03)**
+Inputs: prefetch queue context
+Outputs: T4 = imm32 | Clobbers: none
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: no | Memory: yes
+
+**FETCH_DISP8 (0x04)**
+Inputs: prefetch queue context
+Outputs: T4 = sign-extended disp8 | Clobbers: none
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: no | Memory: yes
+
+**FETCH_DISP16 (0x05)**
+Inputs: prefetch queue context
+Outputs: T4 = disp16 | Clobbers: none
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: no | Memory: yes
+
+**FETCH_DISP32 (0x06)**
+Inputs: prefetch queue context
+Outputs: T4 = disp32 | Clobbers: none
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: no | Memory: yes
+
+**DECODE_MODRM_CLASS (0x07)**
+Inputs: M_MODRM_CLASS metadata
+Outputs: M_MODRM_CLASS (refines if needed)
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+
+---
+
+**EA_CALC_16 (0x10)**
+Inputs: M_MODRM_CLASS, selected registers, T4=displacement
+Outputs: T2=offset, T5=segment helper
+Clobbers: T3 | Returns: OK/FAULT
+May WAIT: no | May stage: no | Memory: no
+Note: Computes 16-bit effective address from BX/BP/SI/DI combinations
+per 8086/286/486 16-bit addressing mode table.
+
+**EA_CALC_32 (0x11)**
+Inputs: M_MODRM_CLASS, selected registers, T4=displacement (SIB if present)
+Outputs: T2=offset, T5=segment helper
+Clobbers: T3 | Returns: OK/FAULT
+May WAIT: no | May stage: no | Memory: no
+Note: Computes 32-bit effective address including SIB byte handling.
+Scale/Index/Base decoded from M_* metadata pre-populated by decoder.
+
+**SEG_DEFAULT_SELECT (0x12)** [Phase 2]
+Inputs: M_* metadata (base register, override prefix)
+Outputs: T5=segment register index
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+
+**LINEARIZE_OFFSET (0x13)** [Phase 2]
+Inputs: T2=offset, T5=segment index
+Outputs: T2=linear address
+Clobbers: none | Returns: OK/FAULT
+May WAIT: no | May stage: no | Memory: no
+Note: Adds segment base, checks limit. Real mode: simple base+offset.
+Protected mode: base+offset with limit check.
+
+---
+
+**LOAD_RM8 (0x20)**
+Inputs: M_MODRM_CLASS metadata, T2=address if memory form
+Outputs: T0=zero-extended byte value
+Clobbers: T3 | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: no | Memory: yes (if memory form)
+
+**LOAD_RM16 (0x21)**
+Inputs: M_MODRM_CLASS metadata, T2=address if memory form
+Outputs: T0=zero-extended word value
+Clobbers: T3 | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: no | Memory: yes (if memory form)
+
+**LOAD_RM32 (0x22)**
+Inputs: M_MODRM_CLASS metadata, T2=address if memory form
+Outputs: T0=dword value
+Clobbers: T3 | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: no | Memory: yes (if memory form)
+
+**STORE_RM8 (0x23)**
+Inputs: M_MODRM_CLASS metadata, T2=address if memory form, T0=value
+Outputs: none | Clobbers: T3
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: no | Memory: yes
+
+**STORE_RM16 (0x24)**
+Inputs: M_MODRM_CLASS metadata, T2=address if memory form, T0=value
+Outputs: none | Clobbers: T3
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: no | Memory: yes
+
+**STORE_RM32 (0x25)**
+Inputs: M_MODRM_CLASS metadata, T2=address if memory form, T0=value
+Outputs: none | Clobbers: T3
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: no | Memory: yes
+
+**LOAD_REG_META (0x26)**
+Inputs: M_* metadata (register index, operand size)
+Outputs: T0=register value (zero-extended to 32 bits)
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+Note: Reads from the architectural register file using the register
+index encoded in M_MODRM_CLASS or M_OPCODE_CLASS as appropriate.
+For 8-bit operands: reads byte lane per REX-like encoding in metadata.
+For 16-bit operands: reads low word.
+For 32-bit operands: reads full dword.
+
+**STORE_REG_META (0x27)**
+Inputs: M_* metadata (register index, operand size), T0=value
+Outputs: PC_GPR_EN, PC_GPR_IDX, PC_GPR_VAL staged
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: yes | Memory: no
+
+---
+
+**ALU_ADD8 (0x30)**
+Inputs: T0=operand1, T1=operand2
+Outputs: T0=result, T3=flags helper
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+
+**ALU_ADD16 (0x31)** — same contract, 16-bit width
+
+**ALU_ADD32 (0x32)** — same contract, 32-bit width
+
+**ALU_SUB8 (0x33)** — T0=T0-T1, flags in T3
+
+**ALU_SUB16 (0x34)** — 16-bit subtract
+
+**ALU_SUB32 (0x35)** — 32-bit subtract
+
+**ALU_LOGIC8 (0x36)**
+Inputs: T0, T1, logic-op selector in IMM10_OR_SUBOP field
+Outputs: T0=result, T3=flags helper
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+Subop encoding: 0=AND, 1=OR, 2=XOR, 3=NOT (T1 unused for NOT)
+
+**ALU_LOGIC16 (0x37)** — same contract, 16-bit
+
+**ALU_LOGIC32 (0x38)** — same contract, 32-bit
+
+**ALU_CMP8 (0x39)**
+Inputs: T0, T1 | Outputs: T3=flags helper (T0 unchanged)
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+
+**ALU_CMP16 (0x3A)** — 16-bit compare
+
+**ALU_CMP32 (0x3B)** — 32-bit compare
+
+**SHIFT_ROT (0x3C)** [Phase 2]
+Inputs: T0=value, T1=count, subop=shift/rotate operation
+Outputs: T0=result, T3=flags helper
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+Subop: SHL/SHR/SAR/ROL/ROR/RCL/RCR
+
+**MUL_IMUL (0x3D)** [Phase 2]
+Inputs: T0=multiplicand, T1=multiplier
+Outputs: T0=low result, T1=high result, T3=flags helper
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+
+**DIV_IDIV (0x3E)** [Phase 2]
+Inputs: T0=dividend low, T1=dividend high, T4=divisor
+Outputs: T0=quotient, T1=remainder, T3=flags helper
+Clobbers: none | Returns: OK/FAULT (FAULT on divide-by-zero or overflow)
+May WAIT: no | May stage: no | Memory: no
+
+**FLAGS_FROM_T3 (0x3F)**
+Inputs: T3=flags helper value
+Outputs: PC_EFLAGS_EN, PC_EFLAGS_MASK, PC_EFLAGS_VAL staged
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: yes | Memory: no
+Note: Translates the T3 flags helper encoding into the EFLAGS pending-commit
+fields. The T3 encoding is internal and may differ from EFLAGS bit positions
+for implementation efficiency.
+
+---
+
+**PUSH16 (0x40)**
+Inputs: T0=value to push
+Outputs: PC_STACK_* staged (SP decremented by 2, value written)
+Clobbers: T3 | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: yes | Memory: yes
+
+**PUSH32 (0x41)**
+Inputs: T0=value to push
+Outputs: PC_STACK_* staged (ESP decremented by 4, value written)
+Clobbers: T3 | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: yes | Memory: yes
+
+**POP16 (0x42)**
+Inputs: none (uses current SS:SP)
+Outputs: T0=popped value, PC_STACK_* staged (SP incremented by 2)
+Clobbers: T3 | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: yes | Memory: yes
+
+**POP32 (0x43)**
+Inputs: none (uses current SS:ESP)
+Outputs: T0=popped value, PC_STACK_* staged (ESP incremented by 4)
+Clobbers: T3 | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: yes | Memory: yes
+
+**VALIDATE_NEAR_TRANSFER (0x44)**
+Inputs: T2=target offset, current CS limit/context from metadata
+Outputs: T3=helper bits if needed
+Clobbers: none | Returns: OK/FAULT
+May WAIT: no | May stage: no | Memory: no
+Note: Real mode: checks target within 64K (or 4G if big bit set).
+Protected mode (phase 2): checks target within CS limit.
+
+**VALIDATE_FAR_TRANSFER (0x45)** [Phase 2]
+Inputs: T2=target, D0=descriptor, S0=selector, metadata
+Outputs: T3=helper bits
+Clobbers: none | Returns: OK/FAULT
+May WAIT: no | May stage: no | Memory: no
+
+**COMPUTE_REL_TARGET (0x46)**
+Inputs: current EIP (from architectural state), T4=signed displacement
+Outputs: T2=absolute target offset
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+Note: Computes EIP_next + displacement where EIP_next is EIP of the
+instruction following the current one (i.e., already advanced past
+the displacement field by the fetch stage).
+
+**CONDITION_EVAL (0x47)**
+Inputs: current EFLAGS (from architectural state), subop=condition code
+Outputs: T3=1 if condition true, 0 if false
+Clobbers: none | Returns: OK
+May WAIT: no | May stage: no | Memory: no
+Condition codes: 0=O, 1=NO, 2=B, 3=NB, 4=Z, 5=NZ, 6=BE, 7=NBE,
+                 8=S, 9=NS, 10=P, 11=NP, 12=L, 13=NL, 14=LE, 15=NLE
+
+---
+
+**LOAD_DESCRIPTOR (0x50)** [Phase 2]
+Inputs: S0=selector
+Outputs: D0=loaded descriptor (64-bit)
+Clobbers: T3 | Returns: OK/WAIT/FAULT
+May WAIT: yes | May stage: no | Memory: yes
+
+**CHECK_SEG_ACCESS (0x51)** [Phase 2]
+Inputs: D0, S0, metadata
+Outputs: T3=helper bits
+Clobbers: none | Returns: OK/FAULT
+May WAIT: no | May stage: no | Memory: no
+
+**CHECK_DESCRIPTOR_PRESENT (0x52)** [Phase 2]
+Inputs: D0
+Outputs: none | Clobbers: none | Returns: OK/FAULT
+May WAIT: no | May stage: no | Memory: no
+
+**CHECK_CODE_SEG_TRANSFER (0x53)** [Phase 2]
+Inputs: D0, S0, metadata
+Outputs: T3 | Clobbers: none | Returns: OK/FAULT
+
+**CHECK_STACK_SEG_TRANSFER (0x54)** [Phase 2]
+Inputs: D0, S0, metadata
+Outputs: T3 | Clobbers: none | Returns: OK/FAULT
+
+**LOAD_SEG_VISIBLE (0x55)** [Phase 2]
+Inputs: S0 | Outputs: PC_SEG_* staged (selector portion only)
+Clobbers: none | Returns: OK | May stage: yes
+
+**LOAD_SEG_HIDDEN (0x56)** [Phase 2]
+Inputs: D0 | Outputs: PC_SEG_* staged (descriptor cache portion)
+Clobbers: none | Returns: OK | May stage: yes
+
+**COMMIT_SEG_CACHE (0x57)** [Phase 2]
+Inputs: D0, S0 | Outputs: PC_SEG_* staged (both portions)
+Clobbers: none | Returns: OK | May stage: yes
+
+---
+
+**PREPARE_CALL_GATE (0x60)** [Phase 3]
+Inputs: D0, S0, metadata
+Outputs: D1, S1, T3 | Clobbers: T6, T7
+Returns: OK/WAIT/FAULT | May WAIT: yes | Memory: yes
+
+**PREPARE_TASK_SWITCH (0x61)** [Phase 3]
+Inputs: D0, S0, metadata
+Outputs: D1, S1, T3 | Clobbers: T6, T7
+Returns: OK/WAIT/FAULT | May WAIT: yes | Memory: yes
+
+**INT_ENTER (0x62)**
+Inputs: T4=vector number, metadata
+Outputs: PC_SEG_*, PC_EIP_*, PC_EFLAGS_*, PC_STACK_* all staged
+Clobbers: T0, T1, T2, T3
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: yes | Memory: yes
+Note: Phase-1 implements real-mode only. Looks up vector in IVT at
+linear address vector*4, pushes FLAGS/CS/IP, loads new CS:IP.
+IF and TF are cleared in staged EFLAGS.
+
+**IRET_FLOW (0x63)**
+Inputs: metadata
+Outputs: PC_SEG_*, PC_EIP_*, PC_EFLAGS_*, PC_STACK_* all staged
+Clobbers: T0, T1, T2, T3
+Returns: OK/WAIT/FAULT | May WAIT: yes | May stage: yes | Memory: yes
+Note: Phase-1 implements real-mode only. Pops IP/CS/FLAGS from stack.
+Validates CS and target IP minimally for real mode.
+
+**FAR_RETURN_VALIDATE (0x64)** [Phase 2]
+Inputs: D0, S0, T2
+Outputs: T3 | Clobbers: none | Returns: OK/FAULT
+
+**FAR_RETURN_OUTER_VALIDATE (0x65)** [Phase 3]
+Inputs: D0, D1, S0, S1, T2
+Outputs: T3 | Clobbers: none | Returns: OK/FAULT
+
+---
+
+**PAGE_XLATE_FETCH (0x70)** [Phase 3]
+Inputs: T2=linear address | Outputs: T2=physical address
+Clobbers: T3 | Returns: OK/WAIT/FAULT | Memory: yes (TLB/page walk)
+
+**PAGE_XLATE_READ (0x71)** [Phase 3]
+Same as FETCH but with read access semantics (U/S, R/W checks)
+
+**PAGE_XLATE_WRITE (0x72)** [Phase 3]
+Same as FETCH but with write access semantics and dirty bit update
+
+**MEM_READ8 (0x73)** [Phase 2]
+Inputs: T2=physical/linear address
+Outputs: T0=zero-extended byte
+Clobbers: T3 | Returns: OK/WAIT/FAULT | Memory: yes
+
+**MEM_READ16 (0x74)** [Phase 2] — same, 16-bit
+
+**MEM_READ32 (0x75)** [Phase 2] — same, 32-bit
+
+**MEM_WRITE8 (0x76)** [Phase 2]
+Inputs: T2=address, T0=value
+Outputs: none | Clobbers: T3 | Returns: OK/WAIT/FAULT | Memory: yes
+
+**MEM_WRITE16 (0x77)** [Phase 2] — same, 16-bit
+
+**MEM_WRITE32 (0x78)** [Phase 2] — same, 32-bit
+
+---
+
+**COMMIT_GPR (0x80)**
+Inputs: metadata (register index), T0=value
+Outputs: PC_GPR_EN, PC_GPR_IDX, PC_GPR_VAL staged
+Clobbers: none | Returns: OK | May stage: yes | Memory: no
+
+**COMMIT_EIP (0x81)**
+Inputs: T2=new EIP value
+Outputs: PC_EIP_EN, PC_EIP_VAL staged
+Clobbers: none | Returns: OK | May stage: yes | Memory: no
+
+**COMMIT_EFLAGS (0x82)**
+Inputs: T3=flags helper
+Outputs: PC_EFLAGS_EN, PC_EFLAGS_MASK, PC_EFLAGS_VAL staged
+Clobbers: none | Returns: OK | May stage: yes | Memory: no
+
+**COMMIT_SEG (0x83)** [Phase 2]
+Inputs: D0, S0
+Outputs: PC_SEG_* staged
+Clobbers: none | Returns: OK | May stage: yes | Memory: no
+
+**COMMIT_STACK (0x84)**
+Inputs: PC_STACK_* (already staged by PUSH*/POP*)
+Outputs: PC_STACK_* confirmed
+Clobbers: none | Returns: OK | May stage: yes | Memory: no
+Note: This service exists to allow microcode to explicitly confirm
+stack updates as a separate step from the stack operation itself,
+enabling clean separation of "perform the stack operation" from
+"commit the stack pointer change."
+
+**END_INSTRUCTION (0x85)**
+Inputs: commit mask (10-bit, in IMM10_OR_SUBOP field of ENDI microinstruction)
+Outputs: architectural visibility transition per mask
+Clobbers: pending commit state per mask
+Returns: OK, or FAULT only if commit path detects invariant violation
+May WAIT: no | May stage: finalizes all staged state | Memory: no
+Note: This is ENDI. It is the only instruction that drives the
+architectural commit boundary.
+
+---
+
+## 12. Entry Point Catalog
+
+### 12.1 Entry ID Encoding
+
+8-bit entry identifiers. 0x00-0x18 frozen for phase-1. 0x19-0xFE reserved.
+0xFF = ENTRY_RESET (startup only, not in normal dispatch table).
+
+    0x00  ENTRY_NULL
+    0x01  ENTRY_MOV
+    0x02  ENTRY_ALU_RM_R
+    0x03  ENTRY_ALU_R_RM
+    0x04  ENTRY_ALU_RM_IMM
+    0x05  ENTRY_PUSH
+    0x06  ENTRY_POP
+    0x07  ENTRY_JMP_NEAR
+    0x08  ENTRY_JMP_FAR        [Phase 2]
+    0x09  ENTRY_CALL_NEAR
+    0x0A  ENTRY_CALL_FAR       [Phase 2]
+    0x0B  ENTRY_RET_NEAR
+    0x0C  ENTRY_RET_FAR        [Phase 2]
+    0x0D  ENTRY_JCC
+    0x0E  ENTRY_INT
+    0x0F  ENTRY_IRET
+    0x10  ENTRY_SEG_LOAD       [Phase 2]
+    0x11  ENTRY_MISC_SYSTEM    [Phase 2]
+    0x12  ENTRY_PREFIX_ONLY
+    0x13  ENTRY_NOP_XCHG_AX
+    0x14  ENTRY_INC_DEC_REG
+    0x15  ENTRY_TEST
+    0x16  ENTRY_LEA
+    0x17  ENTRY_FLAGS_SIMPLE
+    0x18  ENTRY_STRING_BASIC   [Phase 3]
+    0xFF  ENTRY_RESET          [startup only]
+
+### 12.2 Entry Split Rule
+
+This set is frozen for phase-1 and early phase-2. New entries should be
+added only when:
+
+- Decode classification would otherwise become pathological, or
+- An existing entry would become dominated by privilege-heavy rare cases
+  that should be isolated to keep the common path clean
+
+---
+
+## 13. Frozen Dispatch Table
+
+### 13.1 Phase-1 Opcode Coverage
+
+    MOV:
+      88/89/8A/8B/C6/C7         → ENTRY_MOV
+      B0-BF                      → ENTRY_MOV (reg,imm)
+
+    ALU families:
+      00-03/08-0B/10-13/18-1B/
+      20-23/28-2B/30-33/38-3B    → ENTRY_ALU_RM_R or ENTRY_ALU_R_RM
+                                   (family-to-entry per direction bit)
+      80/81/83                   → ENTRY_ALU_RM_IMM
+      04/05/0C/0D/14/15/1C/1D/
+      24/25/2C/2D/34/35/3C/3D   → ENTRY_ALU_RM_IMM (implicit accumulator)
+
+    PUSH/POP:
+      50-57                      → ENTRY_PUSH
+      58-5F                      → ENTRY_POP
+      FF /6                      → ENTRY_PUSH
+      8F /0                      → ENTRY_POP
+
+    Control flow:
+      E9/EB                      → ENTRY_JMP_NEAR
+      FF /4                      → ENTRY_JMP_NEAR
+      E8                         → ENTRY_CALL_NEAR
+      FF /2                      → ENTRY_CALL_NEAR
+      C3/C2                      → ENTRY_RET_NEAR
+      70-7F                      → ENTRY_JCC
+
+    INT/IRET:
+      CD                         → ENTRY_INT
+      CF                         → ENTRY_IRET
+
+    Misc:
+      90                         → ENTRY_NOP_XCHG_AX
+      40-47/48-4F                → ENTRY_INC_DEC_REG
+      F8/F9/FA/FB/FC/FD          → ENTRY_FLAGS_SIMPLE
+      84/85/A8/A9                → ENTRY_TEST
+      8D                         → ENTRY_LEA
+
+    Undefined/unrecognized:
+      (any unrecognized opcode)  → ENTRY_NULL with RAISE UD staged
+
+---
+
+## 14. Frozen Entry Skeletons
+
+These are the first translation targets. They are chosen because together
+they exercise every major mechanism: dispatch, service calls, the service
+ABI, stack helpers, the pending-commit model, the fault model, and
+shared-library factoring.
+
+### ENTRY_MOV
+
+    decode operand roles from M_* metadata
+    if source needs displacement/immediate:
+        SVCW FETCH_DISP* or FETCH_IMM* as appropriate
+    if memory addressing involved:
+        SVCW EA_CALC_16 or EA_CALC_32 per M_ADDRSZ
+    if source is r/m:
+        SVCW LOAD_RM8/16/32 per M_OPSZ
+    if source is register:
+        SVC LOAD_REG_META
+    move result to correct temp if needed
+    if destination is r/m memory:
+        SVCW STORE_RM8/16/32
+    if destination is register:
+        SVC COMMIT_GPR
+    ENDI (commit mask: GPR | CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+
+### ENTRY_ALU_RM_IMM
+
+    SVCW FETCH_IMM8/16/32 per M_IMM_CLASS     ; result in T4
+    if r/m is memory form:
+        SVCW EA_CALC_16/32                     ; result in T2
+        SVCW LOAD_RM8/16/32                    ; result in T0
+    else:
+        SVC LOAD_REG_META                      ; result in T0
+    MOV T1, T4                                 ; move imm to T1
+    SVC ALU_ADD*/SUB*/LOGIC*/CMP* per opcode   ; result in T0, flags in T3
+    if CMP (no writeback):
+        SVC COMMIT_EFLAGS
+        ENDI (mask: EFLAGS | CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+    if r/m memory destination:
+        SVCW STORE_RM8/16/32
+    else:
+        SVC COMMIT_GPR
+    SVC COMMIT_EFLAGS
+    ENDI (mask: GPR | EFLAGS | CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+
+### ENTRY_JMP_NEAR
+
+    if relative form (E9/EB):
+        SVCW FETCH_DISP8/16/32                 ; result in T4
+        SVC COMPUTE_REL_TARGET                 ; result in T2
+    if indirect form (FF /4):
+        SVCW EA_CALC_16/32                     ; result in T2
+        SVCW LOAD_RM16/32                      ; result in T0
+        MOV T2, T0
+    SVC VALIDATE_NEAR_TRANSFER                 ; checks T2 within limit
+    BR FAULT, fault_handler                    ; if SR==FAULT
+    SVC COMMIT_EIP                             ; stages T2 → PC_EIP_*
+    ENDI (mask: EIP | CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+
+### ENTRY_CALL_NEAR
+
+    if relative form (E8):
+        SVCW FETCH_IMM16/32                    ; result in T4
+        SVC COMPUTE_REL_TARGET                 ; result in T2
+    if indirect form (FF /2):
+        SVCW EA_CALC_16/32
+        SVCW LOAD_RM16/32
+        MOV T2, T0
+    ; compute return address (EIP of next instruction, already in prefetch)
+    ; return address is EIP_after_decode, available as metadata or computed
+    LOADI T0, <return_address>                 ; load return EIP
+    SVCW PUSH16 or PUSH32 per stack mode       ; pushes T0, stages stack
+    SVC VALIDATE_NEAR_TRANSFER                 ; validates T2
+    BR FAULT, fault_handler
+    SVC COMMIT_EIP                             ; stages T2 → PC_EIP_*
+    ENDI (mask: STACK | EIP | CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+
+### ENTRY_RET_NEAR
+
+    SVCW POP16 or POP32 per stack mode         ; result in T0, stack staged
+    MOV T2, T0                                 ; move return address to T2
+    SVC VALIDATE_NEAR_TRANSFER
+    BR FAULT, fault_handler
+    SVC COMMIT_EIP
+    if C2 form (RET imm16):
+        SVCW FETCH_IMM16                       ; imm in T4
+        ; add T4 to staged stack pointer
+        ; (implemented as inline adjustment to PC_STACK_VAL)
+    ENDI (mask: STACK | EIP | CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+
+### ENTRY_JCC
+
+    SVCW FETCH_DISP8                           ; result in T4
+    SVC CONDITION_EVAL                         ; result in T3 (1=taken)
+    BR T3==0, jcc_not_taken
+    SVC COMPUTE_REL_TARGET                     ; result in T2
+    SVC VALIDATE_NEAR_TRANSFER
+    BR FAULT, fault_handler
+    SVC COMMIT_EIP
+    ENDI (mask: EIP | CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+  jcc_not_taken:
+    ENDI (mask: CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+
+### ENTRY_INT (real-mode phase-1)
+
+    SVCW FETCH_IMM8                            ; vector in T4
+    SVCW INT_ENTER                             ; handles full IVT lookup,
+                                               ; push FLAGS/CS/IP,
+                                               ; load CS:IP from IVT,
+                                               ; stage IF/TF clear,
+                                               ; stages all commit fields
+    BR FAULT, fault_handler
+    ENDI (mask: SEG | STACK | EFLAGS | EIP |
+               CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+
+### ENTRY_IRET (real-mode phase-1)
+
+    SVCW IRET_FLOW                             ; handles pop IP/CS/FLAGS,
+                                               ; minimal real-mode validation,
+                                               ; stages all commit fields
+    BR FAULT, fault_handler
+    ENDI (mask: SEG | STACK | EFLAGS | EIP |
+               CLEAR_T0_T3 | CLEAR_T4_T7 | CLEAR_FAULT)
+
+### Fault Handler Shared Stub
+
+All entry routines branch to this when SR==FAULT:
+
+  fault_handler:
+    ; FC and FE are already set by the faulting service
+    ; Stage exception delivery
+    ; (Phase 1: push CS:IP and FLAGS, load from IVT)
+    ; (Phase 2/3: full protected-mode exception delivery)
+    ENDI (mask: CLEAR_T0_T3 | CLEAR_T4_T7)
+    ; note: CLEAR_FAULT is NOT set here — the fault
+    ; must survive to direct exception delivery at ENDI
+
+---
+
+## 15. Hardware vs ROM Policy
+
+### 15.1 Hardware-First Services
+
+These are implemented as hardware leaf blocks because they are genuinely
+dense, compute-intensive, or timing-critical:
+
+    ALU_ADD8/16/32
+    ALU_SUB8/16/32
+    ALU_LOGIC8/16/32
+    ALU_CMP8/16/32
+    SHIFT_ROT
+    MUL_IMUL
+    DIV_IDIV
+
+The ALU hardware block is structured as in z8086 — a classic n×1-bit slice
+design with explicit flag computation. It is small, fast, and correctly
+implements all 486-class flag behaviors including AF (auxiliary carry).
+
+### 15.2 ROM-First Services
+
+These are implemented as microcode routines because they are control-rich,
+privileged-logic-heavy, or rarely executed:
+
+    INT_ENTER
+    IRET_FLOW
+    VALIDATE_FAR_TRANSFER
+    PREPARE_TASK_SWITCH
+    PREPARE_CALL_GATE
+    FAR_RETURN_VALIDATE
+    FAR_RETURN_OUTER_VALIDATE
+    All descriptor-heavy protected-mode paths
+
+### 15.3 Hybrid / Hardware-Accelerated Later
+
+These start as microcode and may gain hardware fast paths in later phases
+if profiling shows they dominate cycle counts:
+
+    EA_CALC_16 / EA_CALC_32
+    LOAD_RM8/16/32
+    STORE_RM8/16/32
+    LOAD_DESCRIPTOR
+    CHECK_SEG_ACCESS
+    PAGE_XLATE_FETCH/READ/WRITE
+
+### 15.4 RTL Size Philosophy
+
+The microcode ROM is cheap — it does not contribute to combinational path
+depth. Services that live in ROM add no logic elements to the critical path.
+Hardware blocks should only be introduced when there is a measurable,
+significant benefit. The default answer to "should this be hardware?" is no.
+
+---
+
+## 16. Memory Bus Interface
+
+This section was absent from the original spec and is now formally defined.
+
+### 16.1 External Bus Signals
+
+Following z8086's simplified bus interface model:
+
+    addr[31:0]    physical address (32-bit for 486-class)
+    din[31:0]     data input from memory
+    dout[31:0]    data output to memory
+    rd            read strobe (active high)
+    wr            write strobe (active high)
+    io            1=I/O access, 0=memory access
+    byteen[3:0]   byte enable (1111=dword, 0011=word, 0001/0010/0100/1000=byte)
+    ready         memory/IO ready handshake (active high)
+
+### 16.2 Bus Protocol
+
+1. The CPU asserts rd or wr with valid addr, byteen, and io
+2. External logic performs the operation
+3. External logic asserts ready=1; for reads, din must be valid
+4. The CPU deasserts rd/wr on the next cycle
+
+Unaligned accesses: the bus FSM splits unaligned word/dword accesses into
+multiple aligned byte transactions, exactly as in z8086. External logic
+never sees unaligned accesses.
+
+### 16.3 Bus Arbitration
+
+EU (execution unit) memory operations take priority over prefetch queue
+refills when both are pending. The prefetch queue pauses when the EU
+holds the bus. This is the same arbitration model as z8086.
+
+### 16.4 Cache Interface (Phase 3)
+
+The 486 has an internal 8KB unified L1 cache. For phase-1 and phase-2,
+the cache is absent and all accesses go to external memory.
+
+In phase-3, a cache module is inserted between the bus FSM and the
+external bus. The cache presents the same rd/wr/ready interface to the
+CPU, hiding the external bus timing. The cache is a pure leaf mechanism
+and owns no instruction policy.
+
+---
+
+## 17. Performance Philosophy
+
+- Lower IPC is acceptable
+- Explicit control, timing locality, and manageable complexity are preferred
+- Broad global combinational control is intentionally traded for explicit
+  sequencing
+- Higher Fmax is desirable — ROM-first design helps here by removing
+  combinational depth from the critical path
+- Correctness and clarity come first
+- ao486 achieves approximately 0.25× the per-clock performance of a real
+  486DX on Dhrystone due to its pipeline structure and FPGA mapping
+  inefficiencies. Our design accepts similar or lower IPC in exchange for
+  significantly smaller RTL and higher Fmax
+- Target: >60 MHz on a mid-range FPGA (Gowin GW5A class), comparable to
+  z8086's achieved clock rate
+
+---
+
+## 18. Staged Development Target
+
+### Phase 1 — Real Mode Core
+
+- Microsequencer, decoder, service ABI, pending-commit model, fault convention
+- Real mode only
+- Core integer subset (MOV, ADD/SUB/AND/OR/XOR/CMP, INC/DEC, TEST, LEA)
+- Basic memory operand forms (r/m, disp8, disp32)
+- Basic flags (CF, OF, ZF, SF, PF, AF)
+- Near JMP/CALL/RET/Jcc
+- PUSH/POP (register and r/m forms)
+- NOP, CLC/STC/CLI/STI/CLD/STD
+- INT imm8 / IRET (real mode)
+- Full service ABI and pending-commit infrastructure complete
+
+First translation targets (prove the machine):
+    ENTRY_JMP_NEAR
+    ENTRY_CALL_NEAR
+    ENTRY_RET_NEAR
+    ENTRY_INT
+    ENTRY_IRET
+
+### Phase 2 — Protected Mode Core
+
+- 32-bit support complete
+- Flat protected mode
+- Descriptor-correct segmentation
+- Segment cache correctness
+- Common far transfers (JMP far, CALL far, RET far)
+- Descriptor table loading (LGDT, LIDT, LLDT)
+- Segment load instructions (MOV seg, r/m)
+- SHIFT/ROT, MUL/IMUL, DIV/IDIV
+- Basic I/O (IN/OUT)
+- LMSW / CR0 bit manipulation (for protected mode enable)
+
+### Phase 3 — Paging and Complex Privilege
+
+- Paging (CR3, page tables, TLB)
+- Richer privilege transitions
+- Call gates
+- Task switching (if falls out naturally)
+- Full exception delivery hierarchy
+- Double fault handling
+- NMI handling
+
+### Deferred by Default
+
+- String instruction optimization (MOVS/STOS/LODS/CMPS/SCAS with REP)
+- Task switching if complex
+- FPU (487-class coprocessor interface)
+- Aggressive performance tuning
+- INVLPG and 486-class cache control semantics
+
+---
+
+## 19. Naming Conventions
+
+    Entries:         ENTRY_*
+    Services:        uppercase semantic verbs/nouns (LOAD_RM32, EA_CALC_32)
+    Commit fields:   PC_*
+    Temp registers:  T*, D*, S*
+    Fault classes:   GP, SS, NP, PF, TS, UD, DE, NM, AC, DF
+    Metadata:        M_*
+    Condition codes: named (OK, WAIT, FAULT)
+
+Width rule: where possible, one entry handles 8/16/32 via M_OPSZ metadata.
+Split entries only when required by semantic complexity (e.g., far vs near
+transfers genuinely require separate entries).
+
+---
+
+## 20. Development Philosophy
+
+Development is microcode-first:
+
+1. Define the microsequencer, microinstruction format, service ABI,
+   temp-state model, commit model, and fault convention
+2. Implement the decoder as a combinational classify-and-dispatch block
+3. Implement the first five entry routines from scratch as microcode
+4. Implement just enough hardware services to run those five entries
+   (ALU, PUSH/POP, LOAD_RM, STORE_RM, FETCH_*, EA_CALC_*, VALIDATE_NEAR)
+5. Verify against real-mode test vectors
+6. Extract CMD_*.txt content for remaining phase-1 instruction families
+   and translate systematically using the translation recipe
+7. Replace selected dense or hot services with hardware only when it
+   clearly helps and does not violate the abstraction
+
+This is a control-first simplification project. Hardware is added to
+serve the microcode, not the other way around.
+
+---
+
+*End of Complete Master Design Choice Statement v1.1*

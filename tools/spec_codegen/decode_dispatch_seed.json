@@ -1,0 +1,10 @@
+{
+  "opcode_map": {
+    "0x90": "ENTRY_NOP_XCHG_AX"
+  },
+  "fallback_entry": "ENTRY_NULL",
+  "symbolic_map": {
+    "PREFIX_ONLY": "ENTRY_PREFIX_ONLY",
+    "RESET": "ENTRY_RESET"
+  }
+}

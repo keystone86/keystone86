@@ -1,0 +1,17 @@
+{
+  "opcode_lengths": {
+    "0x90": 1,
+    "0xEB": 2
+  },
+  "opcode_entry_map": {
+    "0x90": "ENTRY_NOP_XCHG_AX",
+    "0xEB": "ENTRY_JMP_NEAR"
+  },
+  "fallback_entry": "ENTRY_NULL",
+  "decoder_handshake": {
+    "decode_done_held_until_ack": true
+  },
+  "flush_rule": {
+    "queue_clears_on_eip_changing_commit": true
+  }
+}

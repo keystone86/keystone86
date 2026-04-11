@@ -1,0 +1,26 @@
+[
+  {
+    "name": "nop_90",
+    "kind": "opcode",
+    "opcode": 144,
+    "expected_entry": "ENTRY_NOP_XCHG_AX"
+  },
+  {
+    "name": "unknown_f1",
+    "kind": "opcode",
+    "opcode": 241,
+    "expected_entry": "ENTRY_NULL"
+  },
+  {
+    "name": "prefix_only_case",
+    "kind": "symbolic",
+    "symbol": "PREFIX_ONLY",
+    "expected_entry": "ENTRY_PREFIX_ONLY"
+  },
+  {
+    "name": "reset_dispatch",
+    "kind": "symbolic",
+    "symbol": "RESET",
+    "expected_entry": "ENTRY_RESET"
+  }
+]

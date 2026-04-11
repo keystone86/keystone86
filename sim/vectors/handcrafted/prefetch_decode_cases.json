@@ -1,0 +1,40 @@
+[
+  {
+    "name": "nop_single_byte",
+    "bytes": [144],
+    "start_eip": "0x0000FFF0",
+    "expected_consumed": 1,
+    "expected_next_eip": "0x0000FFF1",
+    "expected_entry": "ENTRY_NOP_XCHG_AX",
+    "expect_decode_done_before_ack": true
+  },
+  {
+    "name": "unknown_single_byte",
+    "bytes": [241],
+    "start_eip": "0x00000100",
+    "expected_consumed": 1,
+    "expected_next_eip": "0x00000101",
+    "expected_entry": "ENTRY_NULL",
+    "expect_decode_done_before_ack": true
+  },
+  {
+    "name": "jmp_short_two_byte",
+    "bytes": [235, 254],
+    "start_eip": "0x00000200",
+    "expected_consumed": 2,
+    "expected_next_eip": "0x00000202",
+    "expected_entry": "ENTRY_JMP_NEAR",
+    "expect_decode_done_before_ack": true
+  },
+  {
+    "name": "flush_on_eip_commit",
+    "bytes": [144, 144, 144],
+    "start_eip": "0x00000300",
+    "expected_consumed": 1,
+    "expected_next_eip": "0x00000301",
+    "expected_entry": "ENTRY_NOP_XCHG_AX",
+    "expect_decode_done_before_ack": true,
+    "flush_after_commit": true,
+    "expected_queue_length_after_flush": 0
+  }
+]

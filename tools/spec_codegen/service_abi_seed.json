@@ -1,0 +1,22 @@
+{
+  "service_contracts": {
+    "ALU_ADD32": {
+      "may_wait": false,
+      "may_fault": false,
+      "sample_sr": "SR_OK"
+    },
+    "FETCH_IMM8": {
+      "may_wait": true,
+      "may_fault": false,
+      "sample_sr": "SR_WAIT"
+    },
+    "PUSH32": {
+      "may_wait": true,
+      "may_fault": true,
+      "sample_sr": "SR_FAULT"
+    }
+  },
+  "invoke_rules": {
+    "require_svcw_if_may_wait": true
+  }
+}

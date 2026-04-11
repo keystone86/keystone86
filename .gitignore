@@ -1,0 +1,188 @@
+# --------------------------------------------------
+# OS / editor noise
+# --------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --------------------------------------------------
+# Python tooling
+# --------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# --------------------------------------------------
+# Logs / temp files
+# --------------------------------------------------
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# --------------------------------------------------
+# Generic build/output directories
+# --------------------------------------------------
+build/
+dist/
+out/
+tmp/
+temp/
+
+# --------------------------------------------------
+# Simulation outputs
+# Keep source TBs and vectors, ignore generated run products
+# --------------------------------------------------
+sim/work/
+sim/run/
+sim/results/
+sim/output/
+sim/generated/
+sim/transcripts/
+sim/waves/
+sim/logs/
+sim/.cache/
+
+*.vcd
+*.fst
+*.wlf
+*.ghw
+*.lxt
+*.lxt2
+
+# Preserve checked-in trace placeholders if wanted
+!sim/traces/
+sim/traces/*
+!sim/traces/golden/
+!sim/traces/failures/
+sim/traces/golden/*
+sim/traces/failures/*
+!sim/traces/golden/.gitkeep
+!sim/traces/failures/.gitkeep
+
+# --------------------------------------------------
+# Formal outputs
+# --------------------------------------------------
+formal/work/
+formal/output/
+formal/results/
+formal/logs/
+
+# --------------------------------------------------
+# Synthesis / implementation outputs
+# Keep scripts and reports you intentionally check in
+# --------------------------------------------------
+synthesis/**/work/
+synthesis/**/run/
+synthesis/**/output/
+synthesis/**/generated/
+synthesis/**/db/
+synthesis/**/cache/
+
+# Vendor tool artifacts
+*.bit
+*.bin
+*.mcs
+*.sof
+*.pof
+*.jed
+*.svf
+
+*.rpt
+*.jou
+*.str
+*.dcp
+*.xpr
+*.qpf
+*.qsf
+*.xcf
+*.ngc
+*.ngd
+*.ncd
+*.twr
+*.mrp
+*.map
+*.par
+*.place
+*.route
+
+# If you want to keep selected reports checked in, remove these:
+# *.rpt
+
+# --------------------------------------------------
+# Platform / board local outputs
+# --------------------------------------------------
+platform/**/build/
+platform/**/out/
+platform/**/generated/
+
+# --------------------------------------------------
+# Microcode generated outputs
+# IMPORTANT:
+# This project may intentionally commit bootstrap/generated seed files.
+# So do NOT blanket-ignore microcode/build/.
+# Ignore only transient extras.
+# --------------------------------------------------
+microcode/build/*.tmp
+microcode/build/*.log
+microcode/build/*.bak
+
+# If later you decide generated ROM/listing files should NOT be committed,
+# then uncomment these lines:
+# microcode/build/ucode.hex
+# microcode/build/dispatch.hex
+# microcode/build/ucode.lst
+
+# --------------------------------------------------
+# Codegen outputs
+# Keep generated namespace files in repo if they are part of the baseline.
+# So do NOT ignore rtl/include/ or microcode/tools/generators/exports/
+# --------------------------------------------------
+
+# --------------------------------------------------
+# Archives / package outputs
+# --------------------------------------------------
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# But if you intentionally keep release packages in a dedicated folder,
+# comment out the above and ignore only specific output dirs instead.
+
+# --------------------------------------------------
+# Review / handoff artifacts not meant for repo history
+# --------------------------------------------------
+handoff/
+deliverables/
+review_package/
+exports/
+
+# --------------------------------------------------
+# Coverage outputs
+# --------------------------------------------------
+coverage/
+htmlcov/
+.coverage
+
+# --------------------------------------------------
+# Lock files (optional, depending on tooling policy)
+# --------------------------------------------------
+# poetry.lock
+# Pipfile.lock

@@ -1,0 +1,22 @@
+{
+  "states": ["FETCH_DECODE", "EXECUTE", "WAIT_SERVICE", "FAULT_HOLD"],
+  "state_notes": {
+    "FETCH_DECODE": "Waiting for decoder decode_done assertion",
+    "EXECUTE": "Running microcode, one microinstruction per clock",
+    "WAIT_SERVICE": "Stalled on SVCW awaiting service done signal",
+    "FAULT_HOLD": "Fault staged, awaiting microcode RAISE/CLEAR_FAULT decision"
+  },
+  "dispatch_upc": {
+    "ENTRY_NULL":        "0x010",
+    "ENTRY_NOP_XCHG_AX": "0x020",
+    "ENTRY_PREFIX_ONLY": "0x030",
+    "ENTRY_RESET":       "0x040"
+  },
+  "endi_behavior": {
+    "next_state": "FETCH_DECODE",
+    "checks_nmi_pending": true,
+    "flushes_queue_if_eip_committed": true
+  },
+  "bootstrap_only": true,
+  "note": "Bootstrap seed only covers 4 initial entries. Full phase-1 dispatch table is in dispatch.hex."
+}

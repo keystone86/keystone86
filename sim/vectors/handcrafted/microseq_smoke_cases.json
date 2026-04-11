@@ -1,0 +1,23 @@
+[
+  {
+    "name": "reset_to_entry_reset",
+    "start_state": "FETCH_DECODE",
+    "dispatch_symbol": "ENTRY_RESET",
+    "expected_upc": "0x040",
+    "expected_next_state_after_endi": "FETCH_DECODE"
+  },
+  {
+    "name": "nop_dispatch_path",
+    "start_state": "FETCH_DECODE",
+    "dispatch_symbol": "ENTRY_NOP_XCHG_AX",
+    "expected_upc": "0x020",
+    "expected_next_state_after_endi": "FETCH_DECODE"
+  },
+  {
+    "name": "unknown_opcode_path",
+    "start_state": "FETCH_DECODE",
+    "dispatch_symbol": "ENTRY_NULL",
+    "expected_upc": "0x010",
+    "expected_next_state_after_endi": "FETCH_DECODE"
+  }
+]

@@ -1,0 +1,5 @@
+.entry ENTRY_RESET, 0xFF
+
+; Planned bootstrap ROM address: 0x040
+ENTRY_RESET:
+    ENDI CM_NOP

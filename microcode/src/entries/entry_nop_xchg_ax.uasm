@@ -1,0 +1,5 @@
+.entry ENTRY_NOP_XCHG_AX, 0x13
+
+; Planned bootstrap ROM address: 0x020
+ENTRY_NOP_XCHG_AX:
+    ENDI CM_NOP
