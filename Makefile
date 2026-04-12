@@ -101,3 +101,42 @@ prefetch-decode-smoke:
 
 bootstrap-report:
 	@python3 scripts/bootstrap_report.py
+
+# ----------------------------------------------------------------
+# Rung 0 RTL simulation targets
+# Added by: bringup/rung0-reset-fetch-loop
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES = \
+  rtl/include/keystone86_pkg.sv \
+  rtl/core/bus_interface.sv \
+  rtl/core/prefetch_queue.sv \
+  rtl/core/decoder.sv \
+  rtl/core/microcode_rom.sv \
+  rtl/core/microsequencer.sv \
+  rtl/core/commit_engine.sv \
+  rtl/core/cpu_top.sv \
+  sim/models/bootstrap_mem.sv \
+  sim/tb/tb_rung0_reset_loop.sv
+
+IVERILOG_INCDIRS = -I rtl/include -I microcode/build
+
+rung0-sim:
+	@echo "--- Rung 0: compiling RTL ---"
+	@mkdir -p sim/build/rung0
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o sim/build/rung0/tb_rung0_reset_loop.vvp \
+		$(IVERILOG_SOURCES)
+	@echo "--- Rung 0: running simulation ---"
+	vvp sim/build/rung0/tb_rung0_reset_loop.vvp
+
+rung0-regress:
+	@echo "--- Rung 0 regression ---"
+	@python3 scripts/rung0_regress.py
+
+rung0-clean:
+	@rm -rf sim/build/rung0
+	@echo "Rung 0 build artifacts removed."
+
+.PHONY: rung0-sim rung0-regress rung0-clean
