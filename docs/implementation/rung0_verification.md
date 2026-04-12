@@ -117,8 +117,8 @@ This marks the first passing Rung 0 baseline for the repository.
 
 Record here when available:
 - Date: 2026-04-11
-- Commit: <commit-sha>
-- Tag: <optional tag name>
+- Commit: 4f076e3a8294fa79b22edea15e35097691ecd503
+- Tag: rung0-first-pass
 
 ## What Is NOT Covered
 
