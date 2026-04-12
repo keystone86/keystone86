@@ -35,7 +35,8 @@ module cpu_top (
     output logic [31:0] dbg_eip,
     output logic [1:0]  dbg_mseq_state,
     output logic [11:0] dbg_upc,
-    output logic [7:0]  dbg_entry_id,
+    output logic [7:0]  dbg_entry_id,       // microsequencer current entry
+    output logic [7:0]  dbg_dec_entry_id,   // decoder output entry_id
     output logic        dbg_endi_pulse,
     output logic        dbg_fault_pending,
     output logic [3:0]  dbg_fault_class,
@@ -93,22 +94,23 @@ module cpu_top (
     logic [3:0]  fault_class;
     logic [31:0] fault_error;
 
-    // ----------------------------------------------------------------
-    // Observability assignments
-    // ----------------------------------------------------------------
-    assign dbg_eip           = eip;
-    assign dbg_mseq_state    = dbg_mseq_state_w;
-    assign dbg_upc           = dbg_upc_w;
-    assign dbg_entry_id      = dbg_entry_id_w;
-    assign dbg_endi_pulse     = endi_req && endi_done;
-    assign dbg_fault_pending = fault_pending;
-    assign dbg_fault_class   = fault_class;
-    assign dbg_decode_done   = decode_done;
-    assign dbg_fetch_addr    = fetch_addr_internal;
-
     logic [1:0]  dbg_mseq_state_w;
     logic [11:0] dbg_upc_w;
     logic [7:0]  dbg_entry_id_w;
+
+    // ----------------------------------------------------------------
+    // Observability assignments
+    // ----------------------------------------------------------------
+    assign dbg_eip            = eip;
+    assign dbg_mseq_state     = dbg_mseq_state_w;
+    assign dbg_upc            = dbg_upc_w;
+    assign dbg_entry_id       = dbg_entry_id_w;
+    assign dbg_dec_entry_id   = entry_id;
+    assign dbg_endi_pulse     = endi_req && endi_done;
+    assign dbg_fault_pending  = fault_pending;
+    assign dbg_fault_class    = fault_class;
+    assign dbg_decode_done    = decode_done;
+    assign dbg_fetch_addr     = fetch_addr_internal;
 
     // ----------------------------------------------------------------
     // Module instantiations

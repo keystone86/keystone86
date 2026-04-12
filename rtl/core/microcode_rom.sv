@@ -16,11 +16,15 @@
 // Both files are generated bootstrap artifacts from the repo seed.
 // Format: ucode.hex  — one 32-bit word per line (hex, no 0x prefix)
 //         dispatch.hex — one 12-bit uPC per line (hex, no 0x prefix)
-//         (comment lines beginning with ; are skipped by $readmemh)
+//
+// IMPORTANT:
+//   These paths are resolved by the simulator at runtime from the repo root
+//   (where vvp is launched by the Makefile), not from this source file's
+//   directory. Therefore the defaults are repo-root-relative.
 
 module microcode_rom #(
-    parameter string UCODE_FILE    = "../../microcode/build/ucode.hex",
-    parameter string DISPATCH_FILE = "../../microcode/build/dispatch.hex"
+    parameter string UCODE_FILE    = "microcode/build/ucode.hex",
+    parameter string DISPATCH_FILE = "microcode/build/dispatch.hex"
 ) (
     input  logic        clk,
 
