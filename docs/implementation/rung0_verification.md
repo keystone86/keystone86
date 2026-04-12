@@ -9,72 +9,122 @@ From repo root:
     make rung0-regress   # run full regression suite
 
 Prerequisites:
-- Icarus Verilog installed (iverilog, vvp)
-- Bootstrap microcode artifacts present: run `make ucode` if not
+- Icarus Verilog installed (`iverilog`, `vvp`)
+- Bootstrap microcode artifacts present: `make ucode` is run automatically by the Rung 0 Make targets, but may also be run manually
 
 ## Tests
 
 ### Test A — Reset Vector Fetch
-**Proves:** first external bus read after reset is at physical address 0xFFFFFFF0.
-**Method:** monitors bus_rd and bus_addr, checks first assertion of bus_rd.
-**Pass condition:** bus_addr === 32'hFFFFFFF0 on first bus_rd.
+**Proves:** first external bus read after reset is at physical address `0xFFFFFFF0`.  
+**Method:** monitors `bus_rd` and `bus_addr`, checks first assertion of `bus_rd`.  
+**Pass condition:** `bus_addr === 32'hFFFFFFF0` on first `bus_rd`.
 
 ### Test B — Decoder decode_done with ENTRY_NULL
-**Proves:** decoder asserts decode_done and emits ENTRY_NULL (0x00).
-**Method:** monitors decode_done and entry_id debug outputs.
-**Pass condition:** when decode_done first asserts, entry_id === 8'h00.
+**Proves:** decoder asserts `decode_done` and emits `ENTRY_NULL` (`0x00`).  
+**Method:** monitors `dbg_decode_done` and decoder debug entry output.  
+**Pass condition:** when `dbg_decode_done` first asserts, decoder entry ID is `8'h00`.
 
-### Test C — Dispatch to Bootstrap uPC 0x010
-**Proves:** microsequencer dispatch table correctly routes ENTRY_NULL to
-bootstrap uPC 0x010.
-**Method:** monitors dbg_upc for value 12'h010.
-**Pass condition:** dbg_upc reaches 12'h010 after dispatch.
+### Test C — Dispatch to Bootstrap uPC `0x010`
+**Proves:** microsequencer dispatch table correctly routes `ENTRY_NULL` to bootstrap `uPC 0x010`.  
+**Method:** monitors `dbg_upc` for value `12'h010`.  
+**Pass condition:** `dbg_upc` reaches `12'h010` after dispatch.
 
-### Test D — RAISE FC_UD Staged
-**Proves:** bootstrap microcode RAISE FC_UD executes, staging fault class 0x6.
-**Method:** monitors fault_pending and fault_class debug outputs.
-**Pass condition:** fault_pending=1 and fault_class=0x6 (FC_UD) seen.
+### Test D — RAISE `FC_UD` Staged
+**Proves:** bootstrap microcode `RAISE FC_UD` executes, staging fault class `0x6`.  
+**Method:** monitors `dbg_fault_pending` and `dbg_fault_class`.  
+**Pass condition:** `dbg_fault_pending=1` and `dbg_fault_class=0x6` (`FC_UD`) are seen.
 
 ### Test E — ENDI Pulse
-**Proves:** ENDI microinstruction executes.
-**Method:** monitors endi_req AND endi_done for simultaneous assertion.
-**Pass condition:** dbg_endi_pulse seen.
+**Proves:** `ENDI` microinstruction executes.  
+**Method:** monitors `endi_req AND endi_done` for simultaneous assertion.  
+**Pass condition:** `dbg_endi_pulse` seen.
 
-### Test F — Return to FETCH_DECODE
-**Proves:** microsequencer returns to state FETCH_DECODE (2'h0) after ENDI.
-**Method:** waits for endi seen, then monitors dbg_mseq_state.
-**Pass condition:** dbg_mseq_state === 2'h0 after ENDI.
+### Test F — Return to `FETCH_DECODE`
+**Proves:** microsequencer returns to state `FETCH_DECODE` (`2'h0`) after `ENDI`.  
+**Method:** waits for `ENDI` seen, then monitors `dbg_mseq_state`.  
+**Pass condition:** `dbg_mseq_state === 2'h0` after `ENDI`.
 
 ### Test G — No Deadlock (implicit)
-**Proves:** machine does not deadlock; all above tests complete before
-TIMEOUT (200 cycles).
-**Method:** watchdog counter in testbench terminates simulation with FAIL
-if TIMEOUT cycles elapse before all tests complete.
-**Pass condition:** all tests complete within 200 cycles.
+**Proves:** machine does not deadlock; all above tests complete before `TIMEOUT` (`200` cycles).  
+**Method:** watchdog counter in testbench terminates simulation with `FAIL` if `TIMEOUT` cycles elapse before all tests complete.  
+**Pass condition:** all tests complete within `200` cycles.
 
 ## Expected Output (passing run)
 
+Direct simulation:
+
     --- Reset released, Rung 0 loop starting ---
-    PASS Test A: first fetch at 0xFFFFFFF0 (correct reset vector)
-    PASS Test B: decode_done asserted, entry_id=ENTRY_NULL (0x00)
+    PASS Test A: first fetch at 0xfffffff0 (correct reset vector)
+    PASS Test B: decode_done asserted, decoder entry_id=ENTRY_NULL (0x00)
     PASS Test C: uPC reached 0x010 (ENTRY_NULL dispatch address)
     PASS Test D: RAISE FC_UD staged (fault_class=0x6 = FC_UD)
     PASS Test E: ENDI occurred
     PASS Test F: microsequencer returned to FETCH_DECODE after ENDI
-    
+
     === Rung 0 Testbench Summary ===
-      Cycles elapsed: NN
+      Cycles elapsed: 28
       PASS: 6
       FAIL: 0
       RESULT: ALL TESTS PASSED
-    PASS Test G: no deadlock — all tests completed in NN cycles
+    PASS Test G: no deadlock — all tests completed in 28 cycles
     ================================
+
+Regression:
+
+    Keystone86 / Aegis — Rung 0 Regression
+    Root: /workspaces/keystone86
+
+    Running: rung0_reset_loop
+      Reset vector, ENTRY_NULL dispatch, RAISE FC_UD, ENDI, FETCH_DECODE return, no-hang
+      RESULT: PASS
+
+    ================================================
+    Rung 0 Regression Summary
+      Passed: 1
+      Failed: 0
+      Total:  1
+
+    RESULT: ALL RUNG 0 TESTS PASSED
+
+    Rung 0 gate criteria satisfied:
+      [x] reset vector fetch at 0xFFFFFFF0
+      [x] decoder stub emits ENTRY_NULL
+      [x] dispatch table routes to bootstrap uPC 0x010
+      [x] RAISE FC_UD staged
+      [x] ENDI executed
+      [x] microsequencer returned to FETCH_DECODE
+      [x] no deadlock in bounded run
+
+## Passing Rung 0 Baseline
+
+Rung 0 has been validated in live simulation.
+
+Passing commands:
+
+    make rung0-sim
+    make rung0-regress
+
+Observed result:
+- reset vector fetch at `0xFFFFFFF0`
+- decoder stub emits `ENTRY_NULL`
+- dispatch routes to bootstrap `uPC 0x010`
+- `RAISE FC_UD` is staged
+- `ENDI` executes
+- microsequencer returns to `FETCH_DECODE`
+- no deadlock in bounded run
+
+This marks the first passing Rung 0 baseline for the repository.
+
+Record here when available:
+- Date: 2026-04-11
+- Commit: <commit-sha>
+- Tag: <optional tag name>
 
 ## What Is NOT Covered
 
 These are correct gaps for Rung 0 — they are verified in later rungs:
 
-- NOP opcode (0x90) execution — Rung 1
+- NOP opcode (`0x90`) execution — Rung 1
 - EIP advancement for real instructions — Rung 1
 - Queue flush/refill after EIP-changing instruction — Rung 2+
 - Real instruction semantics — Rung 6+
