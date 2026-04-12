@@ -1,20 +1,19 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
-// Rung 0: Top-level CPU integration
+// Rung 1: Wire microsequencer EIP staging to commit_engine
 //
-// This module wires the Rung 0 RTL path together.
-// A reviewer must be able to follow this path clearly:
+// Rung 1 change from Rung 0:
+//   - pc_eip_en and pc_eip_val are now driven by microsequencer
+//     instead of hardwired to 1'b0 / 32'h0.
+//   - Added dbg_dec_entry_id observability output (decoder's entry_id)
+//     already present in Rung 0 live repo — preserved here.
 //
-//   reset → commit_engine holds EIP=FFFFFFF0
-//         → prefetch_queue fetches from 0xFFFFFFF0 via bus_interface
-//         → decoder consumes byte, emits ENTRY_NULL, asserts decode_done
-//         → microsequencer latches entry_id, dispatches via ROM
-//         → microsequencer executes RAISE FC_UD, then ENDI
-//         → commit_engine processes ENDI (with fault suppression)
+// Control path (same shape as Rung 0):
+//   reset → commit_engine drives flush → prefetch_queue fetches 0xFFFFFFF0
+//         → decoder classifies byte → microsequencer dispatches
+//         → microsequencer stages next_eip → commit_engine
+//         → bootstrap microcode executes → ENDI commits EIP
 //         → microsequencer returns to FETCH_DECODE
-//         → prefetch_queue continues fetching
-//
-// No instruction semantics live here. This is pure wiring and reset.
 
 import keystone86_pkg::*;
 
@@ -22,7 +21,6 @@ module cpu_top (
     input  logic        clk,
     input  logic        reset_n,
 
-    // --- External memory bus ---
     output logic [31:0] bus_addr,
     output logic        bus_rd,
     output logic        bus_wr,
@@ -31,12 +29,11 @@ module cpu_top (
     input  logic [31:0] bus_din,
     input  logic        bus_ready,
 
-    // --- Debug/observability outputs ---
     output logic [31:0] dbg_eip,
     output logic [1:0]  dbg_mseq_state,
     output logic [11:0] dbg_upc,
-    output logic [7:0]  dbg_entry_id,       // microsequencer current entry
-    output logic [7:0]  dbg_dec_entry_id,   // decoder output entry_id
+    output logic [7:0]  dbg_entry_id,
+    output logic [7:0]  dbg_dec_entry_id,
     output logic        dbg_endi_pulse,
     output logic        dbg_fault_pending,
     output logic [3:0]  dbg_fault_class,
@@ -44,39 +41,29 @@ module cpu_top (
     output logic [31:0] dbg_fetch_addr
 );
 
-    // ----------------------------------------------------------------
-    // Internal signals
-    // ----------------------------------------------------------------
-
-    // bus_interface <-> prefetch_queue
     logic        fetch_req;
     logic [31:0] fetch_addr_internal;
     logic        fetch_done;
     logic [7:0]  fetch_data;
 
-    // prefetch_queue <-> decoder
     logic [7:0]  q_data;
     logic        q_valid;
     logic        q_consume;
     logic [31:0] q_fetch_eip;
 
-    // commit_engine -> prefetch_queue (flush)
     logic        flush_req;
     logic [31:0] flush_addr;
 
-    // decoder <-> microsequencer
     logic        decode_done;
     logic [7:0]  entry_id;
     logic [31:0] next_eip;
     logic        dec_ack;
 
-    // microsequencer <-> microcode_rom
     logic [11:0] upc;
     logic [31:0] uinst;
     logic [7:0]  dispatch_entry;
     logic [11:0] dispatch_upc;
 
-    // microsequencer <-> commit_engine
     logic        endi_req;
     logic [9:0]  endi_mask;
     logic        endi_done;
@@ -84,11 +71,13 @@ module cpu_top (
     logic [3:0]  raise_fc;
     logic [31:0] raise_fe;
 
-    // commit_engine -> decoder (mode context)
+    // Rung 1: EIP staging from microsequencer to commit_engine
+    logic        pc_eip_en;
+    logic [31:0] pc_eip_val;
+
     logic        mode_prot;
     logic        cs_d_bit;
 
-    // commit_engine -> observability
     logic [31:0] eip;
     logic        fault_pending;
     logic [3:0]  fault_class;
@@ -98,23 +87,16 @@ module cpu_top (
     logic [11:0] dbg_upc_w;
     logic [7:0]  dbg_entry_id_w;
 
-    // ----------------------------------------------------------------
-    // Observability assignments
-    // ----------------------------------------------------------------
-    assign dbg_eip            = eip;
-    assign dbg_mseq_state     = dbg_mseq_state_w;
-    assign dbg_upc            = dbg_upc_w;
-    assign dbg_entry_id       = dbg_entry_id_w;
-    assign dbg_dec_entry_id   = entry_id;
-    assign dbg_endi_pulse     = endi_req && endi_done;
-    assign dbg_fault_pending  = fault_pending;
-    assign dbg_fault_class    = fault_class;
-    assign dbg_decode_done    = decode_done;
-    assign dbg_fetch_addr     = fetch_addr_internal;
-
-    // ----------------------------------------------------------------
-    // Module instantiations
-    // ----------------------------------------------------------------
+    assign dbg_eip           = eip;
+    assign dbg_mseq_state    = dbg_mseq_state_w;
+    assign dbg_upc           = dbg_upc_w;
+    assign dbg_entry_id      = dbg_entry_id_w;
+    assign dbg_dec_entry_id  = entry_id;
+    assign dbg_endi_pulse    = endi_req && endi_done;
+    assign dbg_fault_pending = fault_pending;
+    assign dbg_fault_class   = fault_class;
+    assign dbg_decode_done   = decode_done;
+    assign dbg_fetch_addr    = fetch_addr_internal;
 
     bus_interface u_bus (
         .clk        (clk),
@@ -179,6 +161,8 @@ module cpu_top (
         .raise_fc         (raise_fc),
         .raise_fe         (raise_fe),
         .endi_done        (endi_done),
+        .pc_eip_en        (pc_eip_en),         // Rung 1
+        .pc_eip_val       (pc_eip_val),        // Rung 1
         .dbg_state        (dbg_mseq_state_w),
         .dbg_upc          (dbg_upc_w),
         .dbg_entry_id     (dbg_entry_id_w)
@@ -204,8 +188,8 @@ module cpu_top (
         .pc_gpr_en     (1'b0),
         .pc_gpr_idx    (3'h0),
         .pc_gpr_val    (32'h0),
-        .pc_eip_en     (1'b0),
-        .pc_eip_val    (32'h0),
+        .pc_eip_en     (pc_eip_en),            // Rung 1: from microsequencer
+        .pc_eip_val    (pc_eip_val),           // Rung 1: from microsequencer
         .eip           (eip),
         .mode_prot     (mode_prot),
         .cs_d_bit      (cs_d_bit),

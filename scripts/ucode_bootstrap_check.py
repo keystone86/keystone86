@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """
 Keystone86 / Aegis bootstrap ROM consistency check.
-Verifies that dispatch.hex, ucode.hex, and ucode.lst are mutually consistent
-for the four bootstrap entries.
+Verifies dispatch.hex and ucode.hex against expected bootstrap values.
+
+Rung 1 note:
+  ENTRY_NOP_XCHG_AX and ENTRY_PREFIX_ONLY now use ENDI CM_NOP|CM_EIP
+  (word E00001C2) to enable visible EIP advancement.
+  ENTRY_RESET uses ENDI CM_NOP (word E00001C0, no EIP commit).
+
+Encoding uses correct Appendix A Section 7.1 format:
+  bits[31:28] = UOP_CLASS (RAISE=0xC, ENDI=0xE)
+  bits[9:0]   = IMM10 (commit mask for ENDI, fault class for RAISE)
 
 Run from repo root: python3 scripts/ucode_bootstrap_check.py
 """
@@ -18,18 +26,18 @@ EXPECTED_DISPATCH = {
     0xFF: 0x040,   # ENTRY_RESET
 }
 
+# Correct Appendix A encodings with Rung 1 NOP update
 EXPECTED_ROM = {
-    0x000: '0000E040',  # SUB_FAULT_HANDLER: ENDI CM_FAULT_END
-    0x010: '0000C600',  # ENTRY_NULL: RAISE FC_UD
-    0x011: '0000E040',  # ENTRY_NULL+1: ENDI CM_FAULT_END
-    0x020: '0000E3C0',  # ENTRY_NOP_XCHG_AX: ENDI CM_NOP
-    0x030: '0000E3C0',  # ENTRY_PREFIX_ONLY: ENDI CM_NOP
-    0x040: '0000E3C0',  # ENTRY_RESET: ENDI CM_NOP
+    0x000: 'E0000040',  # SUB_FAULT_HANDLER: ENDI CM_FAULT_END
+    0x010: 'C1800000',  # ENTRY_NULL: RAISE FC_UD
+    0x011: 'E0000040',  # ENTRY_NULL+1: ENDI CM_FAULT_END
+    0x020: 'E00001C2',  # ENTRY_NOP_XCHG_AX: ENDI CM_NOP|CM_EIP  (Rung 1)
+    0x030: 'E00001C2',  # ENTRY_PREFIX_ONLY: ENDI CM_NOP|CM_EIP   (Rung 1)
+    0x040: 'E00001C0',  # ENTRY_RESET: ENDI CM_NOP
 }
 
 failures = []
 
-# --- Check dispatch.hex ---
 dispatch_path = root / 'microcode/build/dispatch.hex'
 if not dispatch_path.exists():
     print('FAIL: microcode/build/dispatch.hex not found')
@@ -50,7 +58,6 @@ else:
                 f'dispatch.hex[0x{idx:02X}] ({sym}): '
                 f'expected 0x{expected_upc:03X}, got 0x{actual_upc:03X}')
 
-# --- Check ucode.hex ---
 ucode_path = root / 'microcode/build/ucode.hex'
 if not ucode_path.exists():
     print('FAIL: microcode/build/ucode.hex not found')
@@ -68,16 +75,23 @@ else:
             failures.append(
                 f'ucode.hex[0x{addr:03X}]: expected {expected_enc}, got {actual_enc}')
 
-# --- Report ---
+# Validate UOP_CLASS fields are non-zero for RAISE and ENDI
+if len(ucode_lines) == 4096:
+    for addr, expected_enc in EXPECTED_ROM.items():
+        word = int(ucode_lines[addr], 16)
+        uc = (word >> 28) & 0xF
+        if uc == 0 and int(expected_enc, 16) != 0:
+            failures.append(f'ucode.hex[0x{addr:03X}]: UOP_CLASS=0 (NOP) for non-NOP instruction')
+
 if failures:
     print('Bootstrap ROM check FAILED:')
     for f in failures:
         print(' -', f)
     sys.exit(1)
 
-print('Bootstrap ROM check PASSED.')
+print('Bootstrap ROM check PASSED (Rung 1 encodings).')
 print(f'  dispatch.hex: {len(dispatch_lines)} entries verified')
-print(f'  ucode.hex: key addresses verified')
+print(f'  ucode.hex: key addresses verified with Appendix A + Rung 1 encodings')
 for idx, upc in EXPECTED_DISPATCH.items():
     sym = {0x00: 'ENTRY_NULL', 0x12: 'ENTRY_PREFIX_ONLY',
            0x13: 'ENTRY_NOP_XCHG_AX', 0xFF: 'ENTRY_RESET'}[idx]

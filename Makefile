@@ -57,7 +57,7 @@ regress:
 formal:
 	@python3 scripts/formal.py
 
-clean: ucode-clean rung0-clean
+clean: ucode-clean rung0-clean rung1-clean
 	@echo "Project clean complete."
 
 bootstrap-info:
@@ -142,3 +142,38 @@ rung0-clean:
 	@echo "Rung 0 build artifacts removed."
 
 .PHONY: rung0-sim rung0-regress rung0-clean
+# ----------------------------------------------------------------
+# Rung 1 RTL simulation targets
+# Added by: bringup/rung1-nop-dispatch
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG1 = \
+  rtl/include/keystone86_pkg.sv \
+  rtl/core/bus_interface.sv \
+  rtl/core/prefetch_queue.sv \
+  rtl/core/decoder.sv \
+  rtl/core/microcode_rom.sv \
+  rtl/core/microsequencer.sv \
+  rtl/core/commit_engine.sv \
+  rtl/core/cpu_top.sv \
+  sim/tb/tb_rung1_nop_loop.sv
+
+rung1-sim: ucode
+	@echo "--- Rung 1: compiling RTL ---"
+	@mkdir -p sim/build/rung1
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o sim/build/rung1/tb_rung1_nop_loop.vvp \
+		$(IVERILOG_SOURCES_RUNG1)
+	@echo "--- Rung 1: running simulation ---"
+	vvp sim/build/rung1/tb_rung1_nop_loop.vvp
+
+rung1-regress: ucode
+	@echo "--- Rung 1 regression (includes Rung 0 baseline check) ---"
+	@python3 scripts/rung1_regress.py
+
+rung1-clean:
+	@rm -rf sim/build/rung1
+	@echo "Rung 1 build artifacts removed."
+
+.PHONY: rung1-sim rung1-regress rung1-clean
