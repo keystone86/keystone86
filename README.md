@@ -1,309 +1,224 @@
 # Keystone86
 
-**Keystone86** is a microcoded x86 CPU project aimed at **80486-class architectural compatibility** using a control-first design philosophy.
+Keystone86 is an in-progress clean-room x86 RTL core project focused on building a structured, understandable, and maintainable 80486-class-compatible design path.
 
-This project follows:
+The project is organized around **spec-first development**, explicit ownership boundaries between blocks, generated/shared definitions, and staged bring-up through simulation “rungs.” The current codebase includes working bootstrap infrastructure plus implemented early front-end/control-path bring-up through **Rung 2**.
 
-- **z8086 for structure**
-- **ao486 for semantic donor behavior**
-- **microcode as the authority**
-- **explicit service ABI and pending-commit execution**
-- **strict architectural guardrails to prevent drift**
+## Current status
 
-Current internal generation: **Aegis**
-
----
-
-## Current Status
-
-This repository is the **reviewed bootstrap baseline** for Keystone86/Aegis.
-
-It is **not** a finished CPU core yet.
+Keystone86 is **active early-stage RTL bring-up**, not a finished CPU core.
 
 What is present now:
 
-- frozen constitutional spec imported into the repo
-- reviewed repository structure and governance
-- namespace/codegen scaffolding aligned to Appendix A
-- bootstrap microcode ROM/dispatch seed
-- bootstrap smoke checks for:
-  - decode/dispatch
-  - microsequencer path
-  - commit/ENDI behavior
-  - service ABI rules
-  - prefetch/decode contract
-- CI and release/versioning scaffolding
-- reviewed corrected baseline after independent consistency pass
+- repository structure, frozen spec set, and design notes
+- generated microcode/bootstrap artifacts
+- working top-level RTL skeleton
+- prefetch queue RTL
+- decoder RTL with early multi-byte control-transfer support
+- microsequencer RTL
+- commit engine RTL
+- bus interface RTL
+- Rung 0 simulation target
+- Rung 1 simulation target
+- Rung 2 simulation target
+- self-checking simulation testbenches for early bring-up
 
 What is **not** present yet:
 
-- a complete working RTL implementation
-- full decoder RTL
-- full microsequencer RTL
-- full commit engine RTL
-- instruction-complete execution
-- full simulation or compliance proof
-- protected-mode or paging implementation
+- a complete 80486-compatible execution core
+- full instruction coverage
+- full addressing-mode implementation
+- memory-management/paging implementation
+- protected-mode completeness
+- caches, pipeline optimization, or performance tuning
+- broad regression coverage across real software workloads
+
+So the correct way to describe the project today is:
+
+> **A real RTL bring-up project with working early-stage front-end/control-path simulation, not yet a complete 80486 core.**
+
+## Bring-up ladder
+
+The repo currently uses staged bring-up targets.
+
+### Rung 0
+Bootstrap reset/fetch/dispatch plumbing.
+
+Goal:
+- reset vector ownership
+- fetch starts at the correct architectural address
+- basic microcode dispatch loop is alive
+
+Run:
+```bash
+make rung0-sim
+```
+
+### Rung 1
+Basic opcode classification and sequential architectural advance.
+
+Goal:
+- decode simple instructions such as NOP-class behavior
+- validate dispatch timing and ENDI/EIP commit path
+
+Run:
+```bash
+make rung1-sim
+```
+
+### Rung 2
+Early control-transfer correctness for short/near jump handling.
+
+Goal:
+- position-proven byte capture
+- explicit decode acceptance boundary
+- stale-work suppression on accepted control transfer
+- commit-owned redirect visibility
+- front-end retarget/flush behavior proven in simulation
+
+Run:
+```bash
+make rung2-sim
+```
+
+## Project principles
+
+This project is intentionally built around a few strong rules:
+
+### 1. Spec-first development
+The spec and ownership model define what each block is allowed to do before broader implementation grows around it.
+
+### 2. Explicit ownership boundaries
+Modules are supposed to do one job and not quietly absorb policy that belongs elsewhere.
+
+Examples:
+- **decoder** classifies and forms a decode payload
+- **microsequencer** owns accepted instruction/control sequencing
+- **commit_engine** owns architectural visibility and redirect commit
+- **prefetch_queue** owns buffering and fetch-side byte delivery
 
-This repo should be understood as the **implementation-start seed**, not as a completed processor.
+### 3. Staged correctness before optimization
+The project is currently prioritizing:
+- correctness
+- testbench proof
+- architectural boundaries
+- understandable control flow
 
----
+before attempting:
+- speculative behavior
+- aggressive overlap
+- front-end optimization
+- performance-oriented redesign
 
-## Project Direction
+### 4. Generated shared definitions
+The repo includes generated/shared include files and bootstrap microcode build outputs so that decode, dispatch, and commit definitions stay aligned.
 
-Keystone86 is intended to be:
+## Repository layout
+
+```text
+docs/            Specifications, design notes, implementation plans
+rtl/             Core RTL and shared include files
+microcode/       Microcode sources and generated bootstrap artifacts
+sim/             Testbenches and simulation build outputs
+scripts/         Repo checks, codegen, smoke scripts, reporting helpers
+```
 
-- **microcoded**
-- **modular**
-- **small and understandable**
-- **guardrail-driven**
-- **friendly to later hardware acceleration below stable service boundaries**
+## Main RTL blocks
 
-The project is **not** trying to reproduce Intel’s internal 80486 microarchitecture, and it is **not** trying to preserve ao486’s pipeline-centric organization.
+### `rtl/core/prefetch_queue.sv`
+Instruction-byte buffering and fetch-side queue management.
 
-Instead, it is building a new machine with:
+### `rtl/core/decoder.sv`
+Early instruction decode. Current bring-up includes:
+- opcode classification
+- multi-byte handling for early jump bring-up
+- instruction-local target EIP formation for current Rung 2 scope
 
-- decoder as classifier/dispatcher
-- microsequencer as control center
-- explicit entry routines
-- shared service helpers
-- pending architectural commit through `ENDI`
+### `rtl/core/microsequencer.sv`
+Microcode dispatch and execution control. Current bring-up includes:
+- decode acceptance handshake
+- dispatch timing management
+- control-transfer serialization for current bring-up scope
 
----
+### `rtl/core/commit_engine.sv`
+Architectural commit boundary. Current bring-up includes:
+- reset-visible state ownership
+- staged EIP/target-EIP commit
+- authoritative queue flush / redirect visibility
 
-## Repository Role
+### `rtl/core/cpu_top.sv`
+Top-level integration of fetch, decode, microsequencer, commit, ROM, and bus interface.
 
-This repository currently serves five purposes:
+## Build and simulation
 
-1. preserve the **constitutional architecture documents**
-2. provide a disciplined **implementation layout**
-3. provide a **bootstrap microcode/control seed**
-4. provide **early smoke checks** for critical architectural contracts
-5. provide a clean baseline for **Rung 0 RTL implementation**
+### Build bootstrap microcode artifacts
+```bash
+make ucode
+```
 
----
+### Run the early bring-up simulations
+```bash
+make rung0-sim
+make rung1-sim
+make rung2-sim
+```
 
-## Frozen Constitutional Spec
+### Clean build artifacts
+```bash
+make clean
+```
 
-The project constitution lives in:
+## Development workflow
 
-    docs/spec/frozen/
+A practical workflow for contributors is:
 
-That directory contains:
+1. update or add design/spec notes if the boundary changes
+2. implement the smallest RTL change that satisfies the contract
+3. prove the behavior in simulation
+4. keep earlier rungs passing
+5. avoid widening scope unless necessary
 
-- `master_design_statement.md`
-- `appendix_a_field_dictionary.md`
-- `appendix_b_ownership_matrix.md`
-- `appendix_c_assembler_spec.md`
-- `appendix_d_bringup_ladder.md`
-- `verification_plan.md`
+## What “Rung 2 complete” means here
 
-These files are the architectural source of truth.
+Rung 2 should be understood narrowly.
 
-Supporting files:
+It means the repo has an implemented and testable early control-transfer path for jump bring-up, including:
+- correct multi-byte decode for the covered cases
+- accepted decode/control ownership boundary
+- stale old-path suppression
+- commit-owned redirect visibility
+- regression coverage for earlier bring-up behavior
 
-- `IMPORT_MANIFEST.md`
-- `STATUS.md`
+It does **not** mean the project has finished the general front end, full x86 decode, or a complete 80486 execution machine.
 
-Changes to frozen constitutional files require explicit architecture review.
+## Near-term direction
 
----
+Likely next steps after the current state are:
 
-## Repository Layout
+- broaden decode coverage beyond the current bring-up subset
+- extend microcode/service-path execution coverage
+- strengthen regression depth
+- continue rung-based bring-up for additional instruction classes
+- maintain architectural ownership boundaries as the design grows
 
-Key areas:
+## Positioning
 
-    docs/         architecture, implementation notes, governance, legal/provenance
-    rtl/          core RTL, includes, and experimental RTL
-    microcode/    microcode source, build artifacts, tools, exports
-    sim/          smoke checks, vectors, and future simulation harnesses
-    formal/       formal-property placeholder area
-    tools/        code generation and spec-derived tooling
-    scripts/      repo task scripts and bootstrap checks
-    review/       optional preserved review artifacts
-    .github/      CI workflows
+Keystone86 is best viewed as:
 
-Important policy split:
+- **not** a toy example
+- **not** a production-ready CPU core
+- **not** a finished 486 clone
 
-- **Frozen / guarded**:
-  - `docs/spec/frozen/`
-  - `rtl/core/`
-  - `rtl/include/`
-  - `microcode/src/`
+It **is**:
+- a serious structured RTL build-out
+- a spec-driven CPU core project
+- a project with real early simulation bring-up already landed
+- a foundation that is now beyond “empty bootstrap,” but still well before completion
 
-- **Flexible / exploratory**:
-  - `docs/spec/working/`
-  - `rtl/experimental/`
-  - `proposals/`
-  - `experiments/`
+## License
 
----
+Add the intended license here if and when you decide it.
 
-## Bootstrap Checks
+## Notes
 
-The current repository includes bootstrap-level smoke checks.
-
-Useful commands:
-
-    make spec-check
-    make frozen-manifest-check
-    make namespace-check
-    make spec-sync-status
-    make codegen
-    make ucode
-    make ucode-bootstrap-check
-    make decode-dispatch-smoke
-    make microseq-smoke
-    make commit-smoke
-    make service-abi-smoke
-    make prefetch-decode-smoke
-    make bootstrap-report
-    make version-status
-
-These checks validate **repository alignment and bootstrap control assumptions**.
-
-They do **not** yet constitute full RTL execution proof.
-
----
-
-## Bring-Up Plan
-
-Implementation is expected to follow the frozen bring-up order in:
-
-    docs/spec/frozen/appendix_d_bringup_ladder.md
-
-The immediate next step is **Rung 0 RTL work**, centered on:
-
-- `cpu_top`
-- `prefetch_queue`
-- decoder stub
-- `microsequencer`
-- `microcode_rom`
-- `commit_engine`
-- `bus_interface`
-
-Do not skip ahead casually.
-
----
-
-## Guardrails
-
-This project depends on keeping architectural ownership clear.
-
-Core guardrails include:
-
-- microcode owns instruction meaning
-- decoder owns classification and entry selection only
-- services are subordinate mechanisms, not instruction engines
-- architectural visibility occurs only through pending commit and `ENDI`
-- hardware may accelerate mechanisms, but must not take over policy
-- do not drift into ao486-style distributed pipeline control
-
-See:
-
-- `docs/spec/frozen/master_design_statement.md`
-- `docs/spec/frozen/appendix_b_ownership_matrix.md`
-
----
-
-## Reviewed Baseline
-
-This repository baseline was independently reviewed and corrected before being adopted as the implementation-start seed.
-
-The review found and corrected bootstrap inconsistencies including:
-
-- dispatch-table mapping errors
-- incomplete package namespace export
-- incomplete microsequencer seed-state declaration
-
-The corrected reviewed baseline is the one that should be used going forward.
-
-If review artifacts are preserved in this repo, see:
-
-    review/
-
----
-
-## Naming and Versioning
-
-Public project name:
-
-- **Keystone86**
-
-Current internal generation:
-
-- **Aegis**
-
-Recommended tagging form:
-
-- `Aegis-v0.1.0-bootstrap-reviewed`
-
-This repository should currently be treated as the **Aegis reviewed bootstrap baseline**.
-
----
-
-## Licensing
-
-This project should be licensed as a mixed package, with licensing finalized at the repository level.
-
-Recommended model:
-
-- hardware/core design: CERN-OHL-W-2.0
-- tools/scripts/utilities: Apache-2.0
-- prose documentation: CC-BY-4.0 or Apache-2.0
-
-Keep provenance and third-party notes clear.
-
----
-
-## Contributing
-
-Before contributing, read:
-
-- `CONTRIBUTING.md`
-- `GOVERNANCE.md`
-- `DCO.md`
-
-Contributions are welcome, but contributors must preserve the architecture and guardrails.
-
-Architecture-changing work should begin as a proposal before touching frozen constitutional files.
-
----
-
-## Practical Warning
-
-Do not mistake scaffold maturity for implementation completeness.
-
-This repository is **well-prepared to begin implementation**.
-
-It is **not yet the implementation itself**.
-
-That distinction matters.
-
----
-
-## Near-Term Goals
-
-Near-term goals for Aegis:
-
-- complete Rung 0 RTL implementation
-- validate the reset/fetch/decode loop in RTL
-- connect bootstrap ROM and dispatch path
-- begin Rung 1 NOP/dispatch sanity in actual simulation
-- preserve alignment between frozen spec, codegen outputs, and implementation
-
----
-
-## Summary
-
-Keystone86 is now at the point where:
-
-- the architecture is defined
-- the guardrails are explicit
-- the repo structure is disciplined
-- the baseline has been reviewed
-- implementation can begin from a clean foundation
-
-The next milestone is not more scaffolding.
-
-The next milestone is **real Rung 0 RTL execution work**.
+This repository may evolve quickly while the architecture, interfaces, and bring-up ladder are still being refined. Expect early-stage iteration, especially in front-end/control-path RTL and the simulation harnesses that prove each rung.
