@@ -1,46 +1,55 @@
 // Keystone86 / Aegis
 // rtl/core/microsequencer.sv
-// Rung 1: Correct ROM timing for dispatch and microinstruction fetch
+// Rung 2: Control-transfer serialization + stale-work squash
 //
 // Ownership (Appendix B):
 //   This module owns: uPC management, entry dispatch, microinstruction
-//   fetch and decode (Rung 0/1 subset), RAISE, ENDI, return to FETCH_DECODE.
+//   fetch and decode, RAISE, ENDI, return to FETCH_DECODE,
+//   accepted-control-packet policy, squash issuance on control-transfer.
 //   This module must NOT: own instruction meaning, bypass dispatch,
-//   let instruction policy leak into non-microcode logic.
+//   make redirect architecturally visible (that is commit_engine's job).
 //
-// ROM timing model:
-//   microcode_rom has registered outputs for BOTH dispatch_upc and uinst.
-//   Both have 1-cycle latency: the ROM samples its address input at the rising
-//   edge and produces the output on the next rising edge.
+// Rung 2 additions:
 //
-// Two timing hazards, both fixed here:
+//   Contract 2 — Real decode/control acceptance boundary:
+//     decode result becomes the active instruction ONLY on dec_ack.
+//     This was already implicit in Rung 1 via the three-phase handshake.
+//     Rung 2 makes it explicit by gating all control-transfer behavior
+//     on the dispatch cycle (when dispatch_pending fires and dec_ack is
+//     issued). Before dec_ack, the decode payload is not yet accepted.
 //
-//   Hazard 1 — dispatch address (fixed in prior pass):
-//     Setting dispatch_entry_latch and dispatch_pending in the same cycle as
-//     decode_done meant the ROM sampled the OLD dispatch_entry (from the
-//     previous instruction). Fix: two-cycle dispatch handshake via
-//     dispatch_rom_pending -> dispatch_pending.
+//   Contract 3 — Stale-work suppression (squash):
+//     Once a control-transfer decode payload is accepted (dec_ack cycle),
+//     microsequencer asserts squash=1 for one cycle. This kills:
+//       - decoder in-formation state
+//       - prefetch queue inflight work
+//     The machine then holds the front end until commit_engine issues
+//     flush (which happens at ENDI with CM_JMP mask). The queue will be
+//     flushed and re-pointed to the JMP target by commit_engine.
 //
-//   Hazard 2 — microinstruction fetch (fixed in this pass):
-//     On the dispatch cycle, upc_next = dispatch_upc_in and state_next = EXECUTE
-//     are set. upc_r gets the new value at end of that cycle. But the ROM clocks
-//     uinst from the OLD upc_r (the one it saw BEFORE the update). So the first
-//     EXECUTE cycle has a stale uinst from the previous upc (typically 0x000 =
-//     ENDI CM_FAULT_END). This stale ENDI processes without CM_EIP, clearing
-//     pc_eip_en_r before the real ENDI CM_NOP|CM_EIP can use it.
-//     Fix: execute_fetch_pending flag. When entering EXECUTE, stall for one
-//     cycle before consuming uinst, allowing the ROM to register the correct word.
+//   Contract 4 — Commit-owned redirect visibility:
+//     Microsequencer knows a redirect is coming (ctrl_transfer_pending)
+//     but does NOT make it architecturally visible. It issues squash and
+//     holds upstream. commit_engine makes redirect real via flush_req.
+//     After ENDI fires, microsequencer returns to FETCH_DECODE and the
+//     machine resumes from the new EIP.
 //
-// Correct dispatch + execute sequence (N = cycle where decode_done arrives):
-//   Cycle N:   decode_done: latch entry_id, dispatch_entry_latch, set dispatch_rom_pending
-//   Cycle N+1: ROM settling: set dispatch_pending
-//   Cycle N+2: dispatch: dec_ack, upc_next=dispatch_upc_in, set execute_fetch_pending
-//   Cycle N+3: EXECUTE stall: uinst is stale from old upc, do not process
-//   Cycle N+4: EXECUTE active: uinst = correct microinstruction, process it
+//   Front-end hold during control transfer:
+//     When ctrl_transfer_pending=1, decode_done is ignored even if the
+//     prefetch queue presents bytes. This prevents old-path decode work
+//     from entering dispatch while the redirect is in flight.
+//     Once commit_engine completes ENDI (endi_done), the hold is cleared.
 //
-// Rung 1 addition:
-//   pc_eip_en/pc_eip_val staged at the dispatch cycle (N+2) so commit_engine
-//   has pc_eip_en_r=1 before ENDI CM_NOP|CM_EIP fires at cycle N+4.
+// ROM timing model (unchanged from Rung 1):
+//   Two-cycle dispatch handshake: dispatch_rom_pending -> dispatch_pending.
+//   One-cycle execute stall: execute_fetch_pending.
+//
+// Dispatch sequence (N = cycle where decode_done arrives):
+//   Cycle N:   latch decode payload, set dispatch_rom_pending
+//   Cycle N+1: ROM settling, set dispatch_pending
+//   Cycle N+2: dispatch — dec_ack, upc=dispatch_upc_in, squash if ctrl
+//   Cycle N+3: EXECUTE stall (execute_fetch_pending)
+//   Cycle N+4: EXECUTE active — process microinstruction
 
 `include "entry_ids.svh"
 `include "fault_defs.svh"
@@ -55,7 +64,12 @@ module microsequencer (
     input  logic        decode_done,
     input  logic [7:0]  entry_id_in,
     input  logic [31:0] next_eip_in,
+    input  logic [31:0] target_eip_in,     // Rung 2: JMP target
+    input  logic        has_target_in,     // Rung 2: target is valid
     output logic        dec_ack,
+
+    // --- Squash output (to decoder + prefetch_queue) ---
+    output logic        squash,            // Rung 2: stale-work kill
 
     // --- Microcode ROM interface ---
     output logic [11:0] upc,
@@ -71,9 +85,13 @@ module microsequencer (
     output logic [31:0] raise_fe,
     input  logic        endi_done,
 
-    // --- EIP staging (Rung 1) ---
+    // --- EIP staging (Rung 1+) ---
     output logic        pc_eip_en,
     output logic [31:0] pc_eip_val,
+
+    // --- Target EIP staging (Rung 2: JMP target) ---
+    output logic        pc_target_en,
+    output logic [31:0] pc_target_val,
 
     // --- Observability ---
     output logic [1:0]  dbg_state,
@@ -94,14 +112,22 @@ module microsequencer (
     logic [11:0] upc_r,      upc_next;
     logic [7:0]  entry_id_r;
     logic [31:0] next_eip_r;
+    logic [31:0] target_eip_r;
+    logic        has_target_r;
 
-    // Dispatch handshake (two-cycle to handle ROM registered output):
-    logic        dispatch_rom_pending;  // cycle N+1: ROM settling
-    logic        dispatch_pending;      // cycle N+2: dispatch_upc_in valid
+    // Dispatch handshake
+    logic        dispatch_rom_pending;
+    logic        dispatch_pending;
     logic [7:0]  dispatch_entry_latch;
+    logic        execute_fetch_pending;
 
-    // Microinstruction fetch stall (one cycle after EXECUTE entry):
-    logic        execute_fetch_pending; // =1: uinst stale, wait one cycle
+    // Rung 2: control-transfer serialization
+    // Set when a control-transfer (JMP) decode payload is accepted.
+    // Cleared when ENDI completes (commit makes redirect real).
+    logic        ctrl_transfer_pending;
+
+    // Rung 2: squash pulse — one cycle on control-transfer acceptance
+    logic        squash_r;
 
     logic        fault_pending;
     logic [3:0]  fault_class;
@@ -111,6 +137,7 @@ module microsequencer (
     assign dbg_state      = state;
     assign dbg_upc        = upc_r;
     assign dbg_entry_id   = entry_id_r;
+    assign squash         = squash_r;
 
     logic [3:0]  uop_class;
     logic [9:0]  uop_imm10;
@@ -129,51 +156,77 @@ module microsequencer (
             upc_r                 <= 12'h000;
             entry_id_r            <= `ENTRY_RESET;
             next_eip_r            <= 32'h0;
+            target_eip_r          <= 32'h0;
+            has_target_r          <= 1'b0;
             dispatch_rom_pending  <= 1'b0;
             dispatch_pending      <= 1'b0;
             dispatch_entry_latch  <= 8'h00;
             execute_fetch_pending <= 1'b0;
             fault_pending         <= 1'b0;
             fault_class           <= 4'h0;
+            ctrl_transfer_pending <= 1'b0;
+            squash_r              <= 1'b0;
         end else begin
             state <= state_next;
             upc_r <= upc_next;
+
+            // Squash is a one-cycle pulse — clear it every cycle
+            squash_r <= 1'b0;
 
             case (state)
                 // ----------------------------------------------------------
                 // FETCH_DECODE: three-phase dispatch handshake
                 // ----------------------------------------------------------
                 MSEQ_FETCH_DECODE: begin
-                    // Phase 1 (cycle N): latch decode, start ROM read
-                    if (decode_done && !dispatch_rom_pending && !dispatch_pending) begin
+                    // Phase 1: latch decode payload, start ROM read
+                    // Gate on ctrl_transfer_pending: do NOT accept new decode
+                    // while a control transfer is in flight (Contract 3).
+                    if (decode_done && !dispatch_rom_pending && !dispatch_pending
+                        && !ctrl_transfer_pending) begin
                         entry_id_r           <= entry_id_in;
                         next_eip_r           <= next_eip_in;
+                        target_eip_r         <= target_eip_in;
+                        has_target_r         <= has_target_in;
                         dispatch_entry_latch <= entry_id_in;
                         dispatch_rom_pending <= 1'b1;
                         fault_pending        <= 1'b0;
                         fault_class          <= 4'h0;
                     end
-                    // Phase 2 (cycle N+1): ROM settling
+
+                    // Phase 2: ROM settling
                     if (dispatch_rom_pending) begin
                         dispatch_rom_pending <= 1'b0;
                         dispatch_pending     <= 1'b1;
                     end
-                    // Phase 3 (cycle N+2): dispatch — comb block handles transition
+
+                    // Phase 3: dispatch (handled in comb block for dec_ack/upc)
                     if (dispatch_pending) begin
                         dispatch_pending      <= 1'b0;
-                        execute_fetch_pending <= 1'b1;  // EXECUTE will stall one cycle
+                        execute_fetch_pending <= 1'b1;
+
+                        // Rung 2: if this is a control-transfer instruction,
+                        // assert squash for one cycle and set ctrl_transfer_pending.
+                        // has_target_r is set by decoder for JMP instructions.
+                        if (has_target_r) begin
+                            squash_r              <= 1'b1;   // kill decoder + queue
+                            ctrl_transfer_pending <= 1'b1;   // hold front end
+                        end
+                    end
+
+                    // Clear ctrl_transfer_pending after ENDI completes
+                    // (endi_done fires from commit_engine on ENDI processing)
+                    if (ctrl_transfer_pending && endi_done) begin
+                        ctrl_transfer_pending <= 1'b0;
                     end
                 end
 
                 // ----------------------------------------------------------
-                // EXECUTE: clear fetch stall, then process microinstructions
+                // EXECUTE
                 // ----------------------------------------------------------
                 MSEQ_EXECUTE: begin
-                    // Clear fetch stall flag on entry
                     if (execute_fetch_pending)
                         execute_fetch_pending <= 1'b0;
 
-                    // Only latch fault state when actually executing (not stalling)
                     if (!execute_fetch_pending) begin
                         case (uop_class)
                             UOP_RAISE: begin
@@ -182,6 +235,11 @@ module microsequencer (
                             end
                             default: ;
                         endcase
+                    end
+
+                    // Clear ctrl_transfer_pending when ENDI completes
+                    if (ctrl_transfer_pending && endi_done) begin
+                        ctrl_transfer_pending <= 1'b0;
                     end
                 end
 
@@ -198,16 +256,18 @@ module microsequencer (
     // Combinational: next-state, uPC, and output logic
     // ----------------------------------------------------------------
     always_comb begin
-        state_next  = state;
-        upc_next    = upc_r;
-        dec_ack     = 1'b0;
-        endi_req    = 1'b0;
-        endi_mask   = 10'h0;
-        raise_req   = 1'b0;
-        raise_fc    = 4'h0;
-        raise_fe    = 32'h0;
-        pc_eip_en   = 1'b0;
-        pc_eip_val  = 32'h0;
+        state_next     = state;
+        upc_next       = upc_r;
+        dec_ack        = 1'b0;
+        endi_req       = 1'b0;
+        endi_mask      = 10'h0;
+        raise_req      = 1'b0;
+        raise_fc       = 4'h0;
+        raise_fe       = 32'h0;
+        pc_eip_en      = 1'b0;
+        pc_eip_val     = 32'h0;
+        pc_target_en   = 1'b0;
+        pc_target_val  = 32'h0;
 
         case (state)
             // ----------------------------------------------------------
@@ -215,13 +275,19 @@ module microsequencer (
             // ----------------------------------------------------------
             MSEQ_FETCH_DECODE: begin
                 if (dispatch_pending) begin
-                    // Dispatch cycle: dispatch_upc_in is valid.
                     dec_ack    = 1'b1;
                     upc_next   = dispatch_upc_in;
                     state_next = MSEQ_EXECUTE;
-                    // Stage EIP for commit_engine so ENDI CM_NOP|CM_EIP can use it.
+
+                    // Stage EIP for commit_engine
                     pc_eip_en  = 1'b1;
                     pc_eip_val = next_eip_r;
+
+                    // Rung 2: if control transfer, also stage target EIP
+                    if (has_target_r) begin
+                        pc_target_en  = 1'b1;
+                        pc_target_val = target_eip_r;
+                    end
                 end
             end
 
@@ -230,11 +296,8 @@ module microsequencer (
             // ----------------------------------------------------------
             MSEQ_EXECUTE: begin
                 if (execute_fetch_pending) begin
-                    // Fetch stall cycle: uinst is stale from previous upc.
-                    // Do nothing — ROM is loading the correct uinst this cycle.
-                    // upc_next = upc_r (hold) — no advancement.
+                    // Fetch stall: uinst is stale; do nothing
                 end else begin
-                    // uinst is valid. Process the microinstruction.
                     case (uop_class)
                         UOP_NOP: begin
                             upc_next = upc_r + 12'h1;
@@ -268,9 +331,6 @@ module microsequencer (
             // FAULT_HOLD
             // ----------------------------------------------------------
             MSEQ_FAULT_HOLD: begin
-                // uinst for the NEXT upc was already valid (RAISE advanced upc by 1
-                // in the prior cycle, and the ROM had that cycle to register it).
-                // No fetch stall needed here.
                 state_next = MSEQ_EXECUTE;
                 upc_next   = upc_r;
             end

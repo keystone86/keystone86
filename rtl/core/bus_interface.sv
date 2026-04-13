@@ -90,7 +90,12 @@ module bus_interface (
 
     // ----------------------------------------------------------------
     // Output logic
+    // data_latch_byte hoisted outside always_comb to avoid iverilog
+    // "constant selects in always_* not supported" limitation.
     // ----------------------------------------------------------------
+    logic [7:0] data_latch_byte;
+    assign data_latch_byte = data_latch[7:0];
+
     always_comb begin
         bus_addr    = 32'h0;
         bus_rd      = 1'b0;
@@ -106,7 +111,7 @@ module bus_interface (
             end
             S_DONE: begin
                 fetch_done = 1'b1;
-                fetch_data = data_latch[7:0];
+                fetch_data = data_latch_byte;
             end
             default: ;
         endcase

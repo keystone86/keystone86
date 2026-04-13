@@ -16,6 +16,9 @@ for i in range(256):
     if i == 0x00:
         val = 0x010
         meaning = "ENTRY_NULL"
+    elif i == 0x07:
+        val = 0x050       # Rung 2: ENTRY_JMP_NEAR
+        meaning = "ENTRY_JMP_NEAR"
     elif i == 0x12:
         val = 0x030
         meaning = "ENTRY_PREFIX_ONLY"
@@ -38,30 +41,34 @@ for i in range(256):
 # --------------------------------------------------------------------
 # Microcode ROM
 # --------------------------------------------------------------------
-# Encoding (Appendix A Section 7.1):
+# Encoding:
 #   bits[31:28] = UOP_CLASS
-#   bits[27:22] = TARGET
-#   bits[9:0]   = IMM10
+#   bits[27:22] = TARGET (for RAISE: fault class)
+#   bits[9:0]   = IMM10  (for ENDI: commit mask)
 #
 # UOP_CLASS:  RAISE=0xC  ENDI=0xE
 # FC_UD = 0x6
 #
-# Commit masks (Appendix A Section 3.8):
+# Commit masks:
 #   CM_EIP       = bit 1  = 0x002
 #   CM_CLR03     = bit 6  = 0x040
 #   CM_CLR47     = bit 7  = 0x080
 #   CM_CLRF      = bit 8  = 0x100
-#   CM_FAULT_END = CM_CLR03                     = 0x040
-#   CM_NOP       = CM_CLR03|CM_CLR47|CM_CLRF    = 0x1C0
-#   CM_NOP_EIP   = CM_NOP|CM_EIP                = 0x1C2  <- Rung 1
+#   CM_FLUSHQ    = bit 9  = 0x200
+#   CM_FAULT_END = CM_CLR03                            = 0x040
+#   CM_NOP       = CM_CLR03|CM_CLR47|CM_CLRF           = 0x1C0
+#   CM_NOP_EIP   = CM_NOP|CM_EIP                       = 0x1C2
+#   CM_JMP       = CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ = 0x3C2
 
 CM_EIP       = 0x002
 CM_CLR03     = 0x040
 CM_CLR47     = 0x080
 CM_CLRF      = 0x100
+CM_FLUSHQ    = 0x200
 CM_FAULT_END = CM_CLR03
 CM_NOP       = CM_CLR03 | CM_CLR47 | CM_CLRF
-CM_NOP_EIP   = CM_NOP | CM_EIP     # Rung 1: NOP + visible EIP advancement
+CM_NOP_EIP   = CM_NOP | CM_EIP
+CM_JMP       = CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ  # Rung 2
 
 def endi(mask):
     return f"{0xE0000000 | mask:08X}"
@@ -75,16 +82,20 @@ rom[0x000] = endi(CM_FAULT_END)  # SUB_FAULT_HANDLER: ENDI CM_FAULT_END
 rom[0x010] = raise_fc(0x6)       # ENTRY_NULL: RAISE FC_UD
 rom[0x011] = endi(CM_FAULT_END)  # ENDI CM_FAULT_END
 
-# Rung 1: NOP and PREFIX_ONLY now use CM_NOP_EIP to commit EIP visibly
 rom[0x020] = endi(CM_NOP_EIP)    # ENTRY_NOP_XCHG_AX: ENDI CM_NOP|CM_EIP
 rom[0x030] = endi(CM_NOP_EIP)    # ENTRY_PREFIX_ONLY: ENDI CM_NOP|CM_EIP
-rom[0x040] = endi(CM_NOP)        # ENTRY_RESET: ENDI CM_NOP (no EIP commit at reset)
+rom[0x040] = endi(CM_NOP)        # ENTRY_RESET: ENDI CM_NOP (no EIP commit)
+
+# Rung 2: ENTRY_JMP_NEAR at 0x050
+# Single microinstruction: ENDI CM_JMP
+# commit_engine: sees CM_EIP | CM_FLUSHQ -> commits target_eip, flushes queue
+rom[0x050] = endi(CM_JMP)        # ENTRY_JMP_NEAR: ENDI CM_JMP
 
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
-listing = f"""; Keystone86 / Aegis bootstrap microcode listing (Rung 1)
-; ENTRY_NOP_XCHG_AX and ENTRY_PREFIX_ONLY now use CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
-; so architectural EIP advances by 1 after every NOP.
+listing = f"""; Keystone86 / Aegis bootstrap microcode listing (Rung 2)
+; Rung 2: ENTRY_JMP_NEAR uses CM_JMP (0x{CM_JMP:03X})
+; CM_JMP = CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ
 address  encoding     source
 0x000    {endi(CM_FAULT_END)}   SUB_FAULT_HANDLER: ENDI CM_FAULT_END
 0x010    {raise_fc(0x6)}   ENTRY_NULL: RAISE FC_UD
@@ -92,10 +103,11 @@ address  encoding     source
 0x020    {endi(CM_NOP_EIP)}   ENTRY_NOP_XCHG_AX: ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
 0x030    {endi(CM_NOP_EIP)}   ENTRY_PREFIX_ONLY: ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
 0x040    {endi(CM_NOP)}   ENTRY_RESET: ENDI CM_NOP
+0x050    {endi(CM_JMP)}   ENTRY_JMP_NEAR: ENDI CM_JMP (0x{CM_JMP:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
-print("Wrote Rung 1 bootstrap ucode.hex, dispatch.hex, ucode.lst, dispatch.lst")
-print(f"  CM_NOP_EIP = 0x{CM_NOP_EIP:03X} (CM_NOP|CM_EIP)")
-print(f"  ENTRY_NOP_XCHG_AX ENDI word = {endi(CM_NOP_EIP)}")
-print(f"  ENTRY_PREFIX_ONLY ENDI word = {endi(CM_NOP_EIP)}")
+print("Wrote Rung 2 bootstrap ucode.hex, dispatch.hex, ucode.lst, dispatch.lst")
+print(f"  CM_JMP = 0x{CM_JMP:03X} (CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ)")
+print(f"  ENTRY_JMP_NEAR at dispatch[0x07] -> uPC 0x050")
+print(f"  ENTRY_JMP_NEAR ENDI word = {endi(CM_JMP)}")

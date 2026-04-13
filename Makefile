@@ -57,7 +57,7 @@ regress:
 formal:
 	@python3 scripts/formal.py
 
-clean: ucode-clean rung0-clean rung1-clean
+clean: ucode-clean rung0-clean rung1-clean rung2-clean
 	@echo "Project clean complete."
 
 bootstrap-info:
@@ -177,3 +177,35 @@ rung1-clean:
 	@echo "Rung 1 build artifacts removed."
 
 .PHONY: rung1-sim rung1-regress rung1-clean
+
+# ----------------------------------------------------------------
+# Rung 2 — JMP SHORT / JMP NEAR control-transfer
+# Added by: bringup/rung2-jmp
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG2 = \
+  rtl/include/keystone86_pkg.sv \
+  rtl/core/bus_interface.sv \
+  rtl/core/prefetch_queue.sv \
+  rtl/core/decoder.sv \
+  rtl/core/microcode_rom.sv \
+  rtl/core/microsequencer.sv \
+  rtl/core/commit_engine.sv \
+  rtl/core/cpu_top.sv \
+  sim/tb/tb_rung2_jmp.sv
+
+rung2-sim: ucode
+	@echo "--- Rung 2: compiling RTL ---"
+	@mkdir -p sim/build/rung2
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o sim/build/rung2/tb_rung2_jmp.vvp \
+		$(IVERILOG_SOURCES_RUNG2)
+	@echo "--- Rung 2: running simulation ---"
+	vvp sim/build/rung2/tb_rung2_jmp.vvp
+
+rung2-clean:
+	@rm -rf sim/build/rung2
+	@echo "Rung 2 build artifacts removed."
+
+.PHONY: rung2-sim rung2-clean

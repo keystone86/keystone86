@@ -1,0 +1,19 @@
+.entry ENTRY_JMP_NEAR, 0x07
+
+; Planned bootstrap ROM address: 0x050
+; Rung 2: JMP SHORT (EB cb) and JMP NEAR (E9 cw/cd)
+;
+; Decode payload provides:
+;   target_eip : computed JMP target (position-proven, instruction-local)
+;   has_target : 1 when target_eip is valid
+;
+; Microsequencer has staged target_eip into commit_engine before ENDI.
+; commit_engine: on ENDI CM_JMP (CM_EIP|CM_FLUSHQ|...):
+;   - eip <- target_eip  (architectural EIP update)
+;   - flush queue to target_eip  (Contract 4: commit-owned redirect)
+;
+; Squash (Contract 3) is issued by microsequencer at dispatch time,
+; not by microcode. This entry needs no special squash microop.
+
+ENTRY_JMP_NEAR:
+    ENDI CM_JMP

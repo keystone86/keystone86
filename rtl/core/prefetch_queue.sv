@@ -1,6 +1,6 @@
 // Keystone86 / Aegis
 // rtl/core/prefetch_queue.sv
-// Rung 0: Minimal instruction byte prefetch queue
+// Rung 2: Separate kill (squash) vs flush (redirect) inputs
 //
 // Ownership (Appendix B):
 //   This module owns: instruction byte buffering, queue flush execution,
@@ -9,16 +9,17 @@
 //   self-initiate flushes (only commit_engine initiates flush),
 //   own or hardcode the reset fetch address.
 //
-// Reset fetch address ownership:
-//   The reset fetch address is owned exclusively by commit_engine.
-//   On the first cycle after reset, commit_engine asserts flush=1 with
-//   flush_addr=32'hFFFFFFF0. This module receives that flush and begins
-//   fetching from that address. There is NO hardcoded reset vector here.
-//   This preserves the Appendix B rule that commit_engine is the single
-//   owner of architectural reset state.
+// Rung 2 additions:
+//   kill input (from microsequencer squash):
+//     - clears queue contents and cancels any inflight bus request
+//     - does NOT change fetch_ptr or queue_ready
+//     - sets queue_ready=0 to pause fetching until flush arrives
+//     - flush from commit_engine will then retarget fetch to JMP target
+//   This two-step protocol (kill -> flush) implements Contract 3+4:
+//     kill = stale-work suppression (immediate)
+//     flush = commit-owned redirect visibility (at ENDI time)
 //
-// Rung 0 scope: 4-byte circular buffer, single byte consume,
-// flush on commit_engine request, bus fetch interface.
+// Reset fetch address ownership: unchanged — commit_engine is sole owner.
 
 module prefetch_queue #(
     parameter int DEPTH = 4    // must be power of 2
@@ -26,76 +27,77 @@ module prefetch_queue #(
     input  logic        clk,
     input  logic        reset_n,
 
-    // --- Flush (from commit_engine only) ---
-    input  logic        flush,              // synchronous flush
+    // --- Flush (from commit_engine only — authoritative redirect) ---
+    input  logic        flush,              // synchronous flush with new address
     input  logic [31:0] flush_addr,         // new fetch address after flush
 
-    // --- Byte output to decoder ---
-    output logic [7:0]  q_data,             // next byte available
-    output logic        q_valid,            // queue has at least one byte
-    input  logic        q_consume,          // decoder consumed one byte
+    // --- Kill (from microsequencer squash — stale-work kill, no address) ---
+    input  logic        kill,               // clear queue, pause until flush
 
-    // --- Current fetch EIP (for decoder M_NEXT_EIP) ---
-    output logic [31:0] q_fetch_eip,        // EIP of byte at q_data head
+    // --- Byte output to decoder ---
+    output logic [7:0]  q_data,
+    output logic        q_valid,
+    input  logic        q_consume,
+
+    // --- Current fetch EIP (for decoder position-proven capture) ---
+    output logic [31:0] q_fetch_eip,
 
     // --- Bus fetch interface ---
-    output logic        fetch_req,          // request one byte from bus
-    output logic [31:0] fetch_addr,         // address to fetch
-    input  logic        fetch_done,         // bus returns data
-    input  logic [7:0]  fetch_data          // fetched byte
+    output logic        fetch_req,
+    output logic [31:0] fetch_addr,
+    input  logic        fetch_done,
+    input  logic [7:0]  fetch_data
 );
 
-    // ----------------------------------------------------------------
-    // Queue storage
-    // ----------------------------------------------------------------
     localparam int PTR_W = $clog2(DEPTH);
 
     logic [7:0]  mem    [0:DEPTH-1];
-    logic [31:0] eip_mem[0:DEPTH-1];   // EIP of each buffered byte
-    logic [PTR_W:0] head, tail;         // one extra bit for full/empty
+    logic [31:0] eip_mem[0:DEPTH-1];
+    logic [PTR_W:0] head, tail;
 
-    // ----------------------------------------------------------------
-    // Fetch pointer (next address to request from bus)
-    // ----------------------------------------------------------------
     logic [31:0] fetch_ptr;
-    logic        fetch_inflight;        // bus fetch in progress
-    logic        queue_ready;           // flush received, ready to fetch
+    logic        fetch_inflight;
+    logic        queue_ready;
 
-    // ----------------------------------------------------------------
-    // Derived signals
-    // ----------------------------------------------------------------
     logic [PTR_W:0] count;
-    assign count      = tail - head;
-    assign q_data     = mem[head[PTR_W-1:0]];
-    assign q_valid    = (count > 0) && queue_ready;
+    assign count       = tail - head;
+    assign q_data      = mem[head[PTR_W-1:0]];
+    assign q_valid     = (count > 0) && queue_ready;
     assign q_fetch_eip = eip_mem[head[PTR_W-1:0]];
 
     logic queue_full;
     assign queue_full = (count == DEPTH[PTR_W:0]);
 
-    // Only issue fetch when ready (flush received), queue not full, no inflight
-    assign fetch_req  = queue_ready && !queue_full && !fetch_inflight && !flush;
+    // Fetch only when ready, not full, no inflight, not flushing/killing
+    assign fetch_req  = queue_ready && !queue_full && !fetch_inflight
+                        && !flush && !kill;
     assign fetch_addr = fetch_ptr;
 
-    // ----------------------------------------------------------------
-    // Sequential logic
-    // ----------------------------------------------------------------
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            head          <= '0;
-            tail          <= '0;
-            fetch_ptr     <= 32'h0;     // NO hardcoded reset address here
-            fetch_inflight <= 1'b0;
-            queue_ready   <= 1'b0;      // wait for flush from commit_engine
-        end else if (flush) begin
-            // Flush with new address from commit_engine
             head           <= '0;
             tail           <= '0;
-            fetch_ptr      <= flush_addr;  // address from commit_engine
+            fetch_ptr      <= 32'h0;
             fetch_inflight <= 1'b0;
-            queue_ready    <= 1'b1;        // now ready to fetch
+            queue_ready    <= 1'b0;
+        end else if (flush) begin
+            // Authoritative redirect from commit_engine.
+            // Clears queue, retargets fetch to JMP target (or reset vector).
+            head           <= '0;
+            tail           <= '0;
+            fetch_ptr      <= flush_addr;
+            fetch_inflight <= 1'b0;
+            queue_ready    <= 1'b1;
+        end else if (kill) begin
+            // Squash from microsequencer on control-transfer acceptance.
+            // Clears queue contents and inflight; pauses until flush arrives.
+            // fetch_ptr is NOT updated — commit_engine owns that via flush.
+            head           <= '0;
+            tail           <= '0;
+            fetch_inflight <= 1'b0;
+            queue_ready    <= 1'b0;   // pause: wait for commit_engine flush
         end else begin
-            // Track in-flight fetch
+            // Normal operation
             if (fetch_req && !fetch_inflight)
                 fetch_inflight <= 1'b1;
 
@@ -107,7 +109,6 @@ module prefetch_queue #(
                 fetch_ptr  <= fetch_ptr + 32'h1;
             end
 
-            // Consume on decoder request
             if (q_consume && q_valid)
                 head <= head + 1'b1;
         end
