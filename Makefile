@@ -6,31 +6,37 @@ help:
 	@echo "Keystone86 task runner"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make tree           - print repo tree"
-	@echo "  make spec-check     - verify frozen spec files exist"
-	@echo "  make lint           - run placeholder lint checks"
-	@echo "  make ucode          - build bootstrap microcode artifacts"
-	@echo "  make ucode-clean    - clean generated microcode artifacts"
-	@echo "  make sim-smoke      - run placeholder smoke simulation"
-	@echo "  make regress        - run placeholder regression suite"
-	@echo "  make formal         - run placeholder formal checks"
-	@echo "  make namespace-check - verify generated/shared namespace alignment"
-	@echo "  make codegen        - regenerate RTL includes and microcode export includes"
-	@echo "  make spec-sync-status - show spec/codegen sync status"
+	@echo "  make tree                  - print repo tree"
+	@echo "  make spec-check            - verify frozen spec files exist"
+	@echo "  make lint                  - run placeholder lint checks"
+	@echo "  make ucode                 - build bootstrap microcode artifacts"
+	@echo "  make ucode-clean           - clean generated microcode artifacts"
+	@echo "  make sim-smoke             - run placeholder smoke simulation"
+	@echo "  make regress               - run placeholder regression suite"
+	@echo "  make formal                - run placeholder formal checks"
+	@echo "  make namespace-check       - verify generated/shared namespace alignment"
+	@echo "  make codegen               - regenerate RTL includes and microcode export includes"
+	@echo "  make spec-sync-status      - show spec/codegen sync status"
 	@echo "  make frozen-manifest-check - verify frozen spec manifest"
-	@echo "  make version-status - show repository/version bootstrap status"
-	@echo "  make release-notes  - generate stub release notes"
+	@echo "  make version-status        - show repository/version bootstrap status"
+	@echo "  make release-notes         - generate stub release notes"
 	@echo "  make ucode-bootstrap-check - verify bootstrap microcode artifacts"
 	@echo "  make decode-dispatch-smoke - run decode/dispatch smoke checks"
-	@echo "  make microseq-smoke - run microsequencer smoke checks"
-	@echo "  make commit-smoke   - run commit/ENDI smoke checks"
-	@echo "  make service-abi-smoke - run service ABI smoke checks"
+	@echo "  make microseq-smoke        - run microsequencer smoke checks"
+	@echo "  make commit-smoke          - run commit/ENDI smoke checks"
+	@echo "  make service-abi-smoke     - run service ABI smoke checks"
 	@echo "  make prefetch-decode-smoke - run prefetch/decode smoke checks"
-	@echo "  make bootstrap-report - print bootstrap coverage report"
-	@echo "  make rung0-sim      - compile and run Rung 0 RTL simulation"
-	@echo "  make rung0-regress  - run Rung 0 regression harness"
-	@echo "  make rung0-clean    - remove Rung 0 simulation artifacts"
-	@echo "  make clean          - remove generated files"
+	@echo "  make bootstrap-report      - print bootstrap coverage report"
+	@echo "  make rung0-sim             - compile and run Rung 0 RTL simulation"
+	@echo "  make rung0-regress         - run Rung 0 regression harness"
+	@echo "  make rung0-clean           - remove Rung 0 simulation artifacts"
+	@echo "  make rung1-sim             - compile and run Rung 1 RTL simulation"
+	@echo "  make rung1-regress         - run Rung 1 regression (includes Rung 0 baseline)"
+	@echo "  make rung1-clean           - remove Rung 1 simulation artifacts"
+	@echo "  make rung2-sim             - compile and run Rung 2 RTL simulation"
+	@echo "  make rung2-regress         - run Rung 2 regression (includes Rung 0 + Rung 1)"
+	@echo "  make rung2-clean           - remove Rung 2 simulation artifacts"
+	@echo "  make clean                 - remove generated files"
 
 tree:
 	@python3 scripts/tree.py .
@@ -204,8 +210,19 @@ rung2-sim: ucode
 	@echo "--- Rung 2: running simulation ---"
 	vvp sim/build/rung2/tb_rung2_jmp.vvp
 
+rung2-regress: ucode
+	@echo "--- Rung 2 regression (includes Rung 0 + Rung 1 baseline checks) ---"
+	@python3 scripts/rung1_regress.py
+	@echo "--- Rung 2: running Rung 2 testbench ---"
+	@mkdir -p sim/build/rung2
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o sim/build/rung2/tb_rung2_jmp.vvp \
+		$(IVERILOG_SOURCES_RUNG2)
+	vvp sim/build/rung2/tb_rung2_jmp.vvp
+
 rung2-clean:
 	@rm -rf sim/build/rung2
 	@echo "Rung 2 build artifacts removed."
 
-.PHONY: rung2-sim rung2-clean
+.PHONY: rung2-sim rung2-regress rung2-clean

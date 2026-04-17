@@ -2,7 +2,7 @@
 
 Keystone86 is an in-progress clean-room x86 RTL core project focused on building a structured, understandable, and maintainable 80486-class-compatible design path.
 
-The project is organized around **spec-first development**, explicit ownership boundaries between blocks, generated/shared definitions, and staged bring-up through simulation “rungs.” The current codebase includes working bootstrap infrastructure plus implemented early front-end/control-path bring-up through **Rung 2**.
+The project is organized around **spec-first development**, explicit ownership boundaries between blocks, generated/shared definitions, and staged bring-up through simulation "rungs." The current codebase includes working bootstrap infrastructure plus implemented early front-end/control-path bring-up through **Rung 2**.
 
 ## Current status
 
@@ -18,9 +18,9 @@ What is present now:
 - microsequencer RTL
 - commit engine RTL
 - bus interface RTL
-- Rung 0 simulation target
-- Rung 1 simulation target
-- Rung 2 simulation target
+- Rung 0 simulation target — **passing**
+- Rung 1 simulation target — **passing**
+- Rung 2 simulation target — **passing**
 - self-checking simulation testbenches for early bring-up
 
 What is **not** present yet:
@@ -35,7 +35,7 @@ What is **not** present yet:
 
 So the correct way to describe the project today is:
 
-> **A real RTL bring-up project with working early-stage front-end/control-path simulation, not yet a complete 80486 core.**
+> **A real RTL bring-up project with working early-stage front-end/control-path simulation through Rung 2, not yet a complete 80486 core.**
 
 ## Bring-up ladder
 
@@ -132,19 +132,22 @@ Instruction-byte buffering and fetch-side queue management.
 Early instruction decode. Current bring-up includes:
 - opcode classification
 - multi-byte handling for early jump bring-up
+- position-proven byte capture (Rung 2)
 - instruction-local target EIP formation for current Rung 2 scope
 
 ### `rtl/core/microsequencer.sv`
 Microcode dispatch and execution control. Current bring-up includes:
 - decode acceptance handshake
 - dispatch timing management
-- control-transfer serialization for current bring-up scope
+- control-transfer serialization (Rung 2)
+- JMP target staging for commit (Rung 2)
 
 ### `rtl/core/commit_engine.sv`
 Architectural commit boundary. Current bring-up includes:
 - reset-visible state ownership
 - staged EIP/target-EIP commit
-- authoritative queue flush / redirect visibility
+- authoritative queue flush / redirect visibility (Rung 2)
+- commit-owned redirect: redirect becomes architecturally real only here
 
 ### `rtl/core/cpu_top.sv`
 Top-level integration of fetch, decode, microsequencer, commit, ROM, and bus interface.
@@ -163,6 +166,21 @@ make rung1-sim
 make rung2-sim
 ```
 
+### Run regression (each rung includes all prior rungs)
+```bash
+make rung0-regress
+make rung1-regress
+```
+
+### Run all bootstrap smoke checks
+```bash
+make decode-dispatch-smoke
+make microseq-smoke
+make commit-smoke
+make service-abi-smoke
+make prefetch-decode-smoke
+```
+
 ### Clean build artifacts
 ```bash
 make clean
@@ -178,15 +196,16 @@ A practical workflow for contributors is:
 4. keep earlier rungs passing
 5. avoid widening scope unless necessary
 
-## What “Rung 2 complete” means here
+## What "Rung 2 complete" means here
 
 Rung 2 should be understood narrowly.
 
 It means the repo has an implemented and testable early control-transfer path for jump bring-up, including:
 - correct multi-byte decode for the covered cases
-- accepted decode/control ownership boundary
-- stale old-path suppression
-- commit-owned redirect visibility
+- position-proven byte capture (decoder only accepts a byte when fetch-side payload proves it is the right byte at the right position)
+- accepted decode/control ownership boundary (decode result becomes active only on explicit transfer to microsequencer)
+- stale-work suppression (abandoned stream is not advanced after accepted control transfer)
+- commit-owned redirect visibility (redirect becomes architecturally real only at ENDI in commit_engine)
 - regression coverage for earlier bring-up behavior
 
 It does **not** mean the project has finished the general front end, full x86 decode, or a complete 80486 execution machine.
@@ -212,8 +231,8 @@ Keystone86 is best viewed as:
 It **is**:
 - a serious structured RTL build-out
 - a spec-driven CPU core project
-- a project with real early simulation bring-up already landed
-- a foundation that is now beyond “empty bootstrap,” but still well before completion
+- a project with real early simulation bring-up through Rung 2 already landed
+- a foundation that is now beyond "empty bootstrap" with working control-transfer simulation, but still well before completion
 
 ## License
 

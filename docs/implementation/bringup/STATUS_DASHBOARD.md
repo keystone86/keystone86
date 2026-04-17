@@ -24,19 +24,28 @@ This dashboard summarizes:
 | Prefetch/decode smoke | `make prefetch-decode-smoke` | Rung 0/1 | Verify byte consumption, `M_NEXT_EIP`, ack/flush model |
 | Version status | `make version-status` | Project hygiene | Verify versioning/release scaffold presence |
 
+## RTL simulation targets
+
+| Target | Command | Status |
+|---|---|---|
+| Rung 0: reset/fetch/decode loop | `make rung0-sim` | **Passing** |
+| Rung 1: NOP/dispatch/EIP advance | `make rung1-sim` | **Passing** |
+| Rung 2: JMP SHORT control transfer | `make rung2-sim` | **Passing** |
+
 ## Bootstrap rung support summary
 
-| Rung | Supported now | Notes |
+| Rung | Status | Notes |
 |---|---|---|
-| Rung 0: reset/fetch/decode loop | Partially | Host-side smoke coverage exists; RTL-connected testbench still pending |
-| Rung 1: NOP/dispatch sanity | Partially | Decode/dispatch and microsequencer smoke coverage exists |
-| Rung 2+: near control flow and beyond | Not yet | Needs deeper RTL, microcode, and sim harness work |
+| Rung 0: reset/fetch/decode loop | **Passing** | RTL testbench proven: `tb_rung0_reset_loop.sv` |
+| Rung 1: NOP/dispatch sanity | **Passing** | RTL testbench proven: `tb_rung1_nop_loop.sv` |
+| Rung 2: JMP SHORT control transfer | **Passing** | RTL testbench proven: `tb_rung2_jmp.sv` |
+| Rung 3+: broader decode/execution | Not yet started | Requires Rung 3 implementation work |
 
 ## What is still future work
 
-- RTL-connected decoder smoke TB
-- RTL-connected microsequencer smoke TB
-- RTL-connected commit_engine smoke TB
-- RTL-connected service-dispatch smoke TB
-- true queue/decode FSM simulation
-- true rung-gate pass/fail persistence
+- CALL / RET / JCC control-transfer family (Rung 3+)
+- Broader decode coverage beyond current bring-up subset
+- RTL-connected service-dispatch testbench
+- True queue/decode FSM regression depth
+- Extended microcode/service-path execution coverage
+- Rung-gate pass/fail persistence infrastructure
