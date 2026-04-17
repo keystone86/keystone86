@@ -117,6 +117,6 @@ Fill in from `git log` after confirming all tests pass on the committed state:
 
     git log --oneline -5
 
-- Date: _(run `git log -1 --format="%ci"` on the passing commit)_
-- Commit: _(run `git log -1 --format="%H"` on the passing commit)_
-- Tag: _(optional — `git tag` if a tag was applied)_
+- Date: 2026-04-13 07:58:20 +0000
+- Commit: da44d63363b683585349abf64395d25ac48e7b32
+- Tag: rung2-first-pass
