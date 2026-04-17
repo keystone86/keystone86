@@ -331,12 +331,4 @@ module decoder (
         endcase
     end
 
-    // synthesis translate_off
-    logic [7:0] dbg_last_opcode_byte;
-    always_ff @(posedge clk) begin
-        if (state == DEC_CONSUME)
-            dbg_last_opcode_byte <= opcode_byte_latch;
-    end
-    // synthesis translate_on
-
 endmodule
