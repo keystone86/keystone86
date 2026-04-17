@@ -8,7 +8,7 @@ Read `docs/process/developer_directive.md` first.
 
 That directive defines the general development rules for this project, including scope control, handoff requirements, validation discipline, anti-drift expectations, and required reading.
 
-This file defines **what Rung 3 is**.
+This file defines **what Rung 3 is**, **what it must prove**, and **what remains out of scope**.
 
 ---
 
@@ -20,11 +20,13 @@ It is the first rung that must prove correct stack-touching control flow beyond 
 
 Rung 3 is functional implementation work, not cleanup.
 
+Rung 3 must be treated as a **complete integrated slice**, not as isolated opcode recognition. The rung is only complete when the required decode, control, stack, microcode, and commit-visible behavior work together to produce correct architectural call/return behavior.
+
 ---
 
 ## In scope
 
-Rung 3 covers the minimum functional slice needed to prove correct near CALL/RET behavior.
+Rung 3 covers the minimum integrated functional slice needed to prove correct near CALL/RET behavior as a working system.
 
 That includes:
 
@@ -32,9 +34,13 @@ That includes:
 - indirect near CALL (`FF /2`)
 - near RET (`C3`)
 - near RET with immediate stack adjustment (`C2`)
-- minimum push/pop support needed for CALL/RET correctness
+- minimum decode support required for those CALL/RET forms
+- minimum push/pop and stack-path behavior required for CALL/RET correctness
 - microcode support needed to complete CALL/RET flows
-- commit-visible control/stack effects needed to prove correct return flow
+- commit-visible control and stack effects needed to prove correct architectural return flow
+- nested CALL/RET behavior proof within the defined acceptance cases
+
+Rung 3 includes whatever narrowly scoped support is genuinely required to make that CALL/RET slice function correctly end to end.
 
 ---
 
@@ -50,10 +56,13 @@ Unless explicitly requested, Rung 3 does **not** include:
 - Python-generation cleanup unrelated to CALL/RET bring-up
 - README modernization unrelated to the requested handoff
 - JCC bring-up
-- broader control-transfer family work beyond the CALL/RET slice
+- broader branch/control-transfer family work beyond the CALL/RET slice
 - general stack-engine redesign beyond what CALL/RET requires
 - speculative future-rung preparation
 - pre-implementation of Rung 4+ behavior
+- generic framework work intended mainly for later rungs
+
+Rung 3 should be expanded only enough to make the CALL/RET system slice work and be provable.
 
 ---
 
@@ -79,7 +88,7 @@ If an apparent fix requires architectural boundary smearing, stop and surface th
 
 Rung 3 is not complete because decode exists.
 
-Rung 3 is complete only when the requested CALL/RET slice works behaviorally.
+Rung 3 is complete only when the requested CALL/RET slice works behaviorally as an integrated system.
 
 The required proof points are:
 
@@ -90,6 +99,9 @@ The required proof points are:
 - ESP increments by the correct amount on RET
 - `RET imm16` applies the required post-pop stack adjustment
 - nested CALL/RET behavior returns correctly through multiple frames
+- decode, control, stack, microcode, and commit-visible behavior agree on the same architectural result
+
+Partial structural progress is not sufficient. Rung 3 must prove working architectural behavior.
 
 ---
 
@@ -105,6 +117,8 @@ That may include:
 - commit-visible state updates required for architectural correctness
 - targeted microcode/service support required to complete the sequence
 
+These surfaces are in scope only to the extent required to make Rung 3 function correctly as a system.
+
 Do not broaden implementation beyond what these behaviors require.
 
 ---
@@ -114,11 +128,16 @@ Do not broaden implementation beyond what these behaviors require.
 Rung 3 is ready for review only when all of the following are true:
 
 - the in-scope CALL/RET forms are implemented
+- the required decode support for those forms is correct
 - the required stack effects are correct
 - return flow is restored correctly
-- the requested proof cases have been run
+- the required microcode/control path completes correctly
+- the commit-visible architectural result is correct
+- the required proof cases have been run
 - the actual verification results are reported
 - preserved baseline behavior from earlier rungs remains intact
+
+Rung 3 is not complete until the integrated CALL/RET slice works together and is proven.
 
 ---
 
@@ -152,4 +171,4 @@ Report only what actually ran.
 
 Rung 3 is the CALL/RET bring-up rung.
 
-Its job is to prove correct near CALL/RET behavior, including correct stack effects and correct return restoration, while preserving the established architecture and avoiding unrelated expansion.
+Its job is to prove correct near CALL/RET behavior, including the minimum integrated decode, control, stack, microcode, and commit-visible support required to make the slice work as a system, while preserving the established architecture and avoiding unrelated expansion.
