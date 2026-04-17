@@ -154,9 +154,27 @@ Top-level integration of fetch, decode, microsequencer, commit, ROM, and bus int
 
 ## Build and simulation
 
-### Build bootstrap microcode artifacts
+### Fresh clone setup
+
+Generated artifacts are not checked in. After cloning, run these two commands
+before anything else:
+
 ```bash
-make ucode
+make codegen   # regenerate rtl/include/keystone86_pkg.sv and microcode export includes
+make ucode     # build bootstrap microcode artifacts (ucode.hex, dispatch.hex)
+```
+
+These are prerequisites for all simulation and check targets. The rung simulation
+targets (`make rung*-sim`) run `make ucode` automatically, but `make codegen` must
+be run manually once after a fresh clone or after any change to
+`tools/spec_codegen/appendix_a_codegen.json`.
+
+### Verify the baseline
+
+```bash
+make namespace-check       # confirms generated namespace files are present
+make ucode-bootstrap-check # confirms microcode ROM seed is consistent
+make rung2-regress         # runs Rung 0 + Rung 1 + Rung 2 — full passing baseline
 ```
 
 ### Run the early bring-up simulations
@@ -170,6 +188,7 @@ make rung2-sim
 ```bash
 make rung0-regress
 make rung1-regress
+make rung2-regress
 ```
 
 ### Run all bootstrap smoke checks
