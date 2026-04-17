@@ -113,8 +113,10 @@ before Rung 2 results are considered valid.
 
 ## Passing Baseline
 
-Record here when available:
+Fill in from `git log` after confirming all tests pass on the committed state:
 
-- Date:
-- Commit:
-- Tag:
+    git log --oneline -5
+
+- Date: _(run `git log -1 --format="%ci"` on the passing commit)_
+- Commit: _(run `git log -1 --format="%H"` on the passing commit)_
+- Tag: _(optional — `git tag` if a tag was applied)_
