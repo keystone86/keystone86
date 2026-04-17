@@ -25,7 +25,7 @@ These files define:
 - what counts as review-ready
 - how rung work must be scoped and validated
 - Makefile / aggregate command / debug expectations
-- what cleanup is intentionally deferred until after Rung 2
+- current source-of-truth and implementation ownership expectations for the repo
 
 ---
 
@@ -142,14 +142,6 @@ If debugging is needed:
 - prove the fix with actual rerun results
 
 Keep useful debug instrumentation until the failing path is visibly corrected.
-
----
-
-## Post-Rung-2 rule
-
-Once Rung 2 is passing, consult `docs/process/post_rung2_cleanup_plan.md` for cleanup/clarification work that has been intentionally deferred.
-
-Do not start that cleanup early unless explicitly requested.
 
 ---
 
