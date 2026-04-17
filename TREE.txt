@@ -1,284 +1,310 @@
-keystone86_bootstrap_v15/
-CHANGELOG.md
-CODE_OF_CONDUCT.md
-CONTRIBUTING.md
-DCO.md
-GOVERNANCE.md
-Makefile
-README.md
-RELEASES.md
-TREE.txt
-VERSION
-LICENSES/
-  README.md
-docs/
-  spec/
-    frozen/
-      IMPORT_MANIFEST.md
-      README.md
-      STATUS.md
-      appendix_a_field_dictionary.md
-      appendix_b_ownership_matrix.md
-      appendix_c_assembler_spec.md
-      appendix_d_bringup_ladder.md
-      master_design_statement.md
-      verification_plan.md
-    working/
-      proposals/
-        README.md
-    changelogs/
-      architecture_decisions.md
-      spec_changelog.md
-  implementation/
-    coding_rules/
-      codegen_workflow.md
-      namespace_sync.md
-      review_checklist.md
-    bringup/
-      STATUS_DASHBOARD.md
-      milestone_template.md
-      rung0.md
-      rung0_commit_smoke.md
-      rung0_microseq_smoke.md
-      rung0_prefetch_decode_smoke.md
-      rung0_service_abi_smoke.md
-      rung1.md
-  legal/
-    naming_and_trademarks.md
-    provenance.md
-    third_party_sources.md
-  overview/
-    bootstrap_status.md
-    roadmap.md
-    versioning.md
-rtl/
-  core/
-    cpu_top.sv
-    frontend/
-      decoder.sv
-      prefetch_queue.sv
-    microcode/
-      dispatch_table.sv
-      microcode_rom.sv
-      microsequencer.sv
-      reg_file.sv
-    services/
-      commit_engine.sv
-      ea_calc.sv
-      fetch_engine.sv
-      flow_control.sv
-      interrupt_engine.sv
-      load_store.sv
-      service_dispatch.sv
-      stack_engine.sv
-    bus/
-      bus_aligner.sv
-      bus_arbiter.sv
-      bus_interface.sv
-  include/
-    commit_defs.svh
-    entry_ids.svh
-    fault_defs.svh
-    field_defs.svh
-    keystone86_pkg.sv
-    service_ids.svh
-  experimental/
-    README.md
-  vendor/
-    README.md
-microcode/
-  src/
-    ucode_main.uasm
-    shared/
-      sub_fault_handler.uasm
-    entries/
-      entry_nop_xchg_ax.uasm
-      entry_null.uasm
-      entry_prefix_only.uasm
-      entry_reset.uasm
-  build/
-    .gitkeep
-    BOOTSTRAP_ROM_LAYOUT.md
-    dispatch.hex
-    ucode.hex
-    ucode.lst
-  tools/
-    uasm/
-      assembler.py
-      encoder.py
-      linker.py
-      listing.py
-      parser.py
-    validators/
-      abi_checker.py
-      service_wait_checker.py
-      stack_depth_checker.py
-      symbol_consistency.py
-    generators/
-      dispatch_gen.py
-      enum_export.py
-      exports/
-        commit_masks.inc
-        conditions.inc
-        entry_ids.inc
-        service_ids.inc
-  tests/
-    README.md
-sim/
-  README.md
-  tb/
-    unit/
-      .gitkeep
-    services/
-      .gitkeep
-    entries/
-      .gitkeep
-    integration/
-      .gitkeep
-      README.md
-      tb_commit_smoke.sv
-      tb_decode_dispatch_smoke.sv
-      tb_microseq_smoke.sv
-      tb_prefetch_decode_smoke.sv
-      tb_service_abi_smoke.sv
-    system/
-      .gitkeep
-  common/
-    checker.sv
-    coverage.sv
-    mem_model.sv
-    reference_if.sv
-    trace_logger.sv
-  vectors/
-    README.md
-    handcrafted/
-      commit_smoke_cases.json
-      decode_dispatch_cases.json
-      microseq_smoke_cases.json
-      prefetch_decode_cases.json
-      service_abi_cases.json
-  scripts/
-    regress.py
-    run_entries.py
-    run_integration.py
-    run_services.py
-    run_system.py
-    run_unit.py
-  traces/
-    golden/
-      .gitkeep
-    failures/
-      .gitkeep
-formal/
-  README.md
-  properties/
-    .gitkeep
-  scripts/
-    .gitkeep
-sw/
-  boot/
-    .gitkeep
-  smoke/
-    .gitkeep
-  diagnostics/
-    .gitkeep
-  realmode_tests/
-    .gitkeep
-platform/
-  generic/
-    .gitkeep
-  gowin/
-    .gitkeep
-  xilinx/
-    .gitkeep
-  intel_fpga/
-    .gitkeep
-synthesis/
-  generic/
-    .gitkeep
-  gowin/
-    .gitkeep
-  xilinx/
-    .gitkeep
-  reports/
-    .gitkeep
-ci/
-  README.md
-  github/
-    .gitkeep
-  lint/
-    .gitkeep
-  smoke/
-    .gitkeep
-  release/
-    .gitkeep
-proposals/
-  phase2/
-    .gitkeep
-  performance/
-    .gitkeep
-  service_acceleration/
-    .gitkeep
-  experiments/
-    .gitkeep
-experiments/
-  alt_microseq/
-    .gitkeep
-  service_fastpaths/
-    .gitkeep
-  cache_prototypes/
-    .gitkeep
-  abandoned/
-    .gitkeep
-third_party/
-  ao486_notes/
-    .gitkeep
-  z8086_notes/
-    .gitkeep
-  licenses/
-    .gitkeep
-  provenance/
-    .gitkeep
-spec_exports/
-  pdf/
-    .gitkeep
-  snapshots/
-    .gitkeep
-scripts/
-  bootstrap_report.py
-  bootstrap_status.py
-  codegen.py
-  commit_smoke.py
-  decode_dispatch_smoke.py
-  formal.py
-  frozen_manifest_check.py
-  lint.py
-  microseq_smoke.py
-  namespace_check.py
-  prefetch_decode_smoke.py
-  regress.py
-  release_notes_stub.py
-  service_abi_smoke.py
-  sim_smoke.py
-  spec_check.py
-  spec_sync_status.py
-  tree.py
-  ucode_bootstrap_check.py
-  ucode_build.py
-  version_status.py
-tools/
-  spec_codegen/
-    README.md
-    appendix_a_codegen.json
-    appendix_a_codegen.schema.json
-    bootstrap_dashboard_seed.json
-    commit_bootstrap_seed.json
-    decode_dispatch_seed.json
-    gen_from_appendix_a.py
-    microseq_bootstrap_seed.json
-    prefetch_decode_seed.json
-    service_abi_seed.json
-.github/
-  workflows/
-    ci.yml
-    release.yml
+
+├── ci
+│   ├── github
+│   │   └── .gitkeep
+│   ├── lint
+│   │   └── .gitkeep
+│   ├── release
+│   │   └── .gitkeep
+│   ├── smoke
+│   │   └── .gitkeep
+│   └── README.md
+├── docs
+│   ├── implementation
+│   │   ├── bringup
+│   │   │   ├── milestone_template.md
+│   │   │   ├── rung0.md
+│   │   │   ├── rung0_commit_smoke.md
+│   │   │   ├── rung0_microseq_smoke.md
+│   │   │   ├── rung0_prefetch_decode_smoke.md
+│   │   │   ├── rung0_service_abi_smoke.md
+│   │   │   ├── rung1.md
+│   │   │   ├── rung2.md
+│   │   │   └── STATUS_DASHBOARD.md
+│   │   ├── coding_rules
+│   │   │   ├── codegen_workflow.md
+│   │   │   ├── namespace_sync.md
+│   │   │   ├── review_checklist.md
+│   │   │   └── source_of_truth.md
+│   │   ├── rung0_implementation_note.md
+│   │   ├── rung0_verification.md
+│   │   ├── rung1_implementation_note.md
+│   │   ├── rung1_verification.md
+│   │   ├── rung2_front_end_rework_plan.md
+│   │   ├── rung2_implementation_note.md
+│   │   └── rung2_verification.md
+│   ├── legal
+│   │   ├── naming_and_trademarks.md
+│   │   ├── provenance.md
+│   │   └── third_party_sources.md
+│   ├── overview
+│   │   ├── bootstrap_status.md
+│   │   ├── roadmap.md
+│   │   └── versioning.md
+│   ├── process
+│   │   └── post_rung2_cleanup_plan.md
+│   └── spec
+│       ├── changelogs
+│       │   ├── architecture_decisions.md
+│       │   └── spec_changelog.md
+│       ├── design
+│       │   ├── commit_stage_design.md
+│       │   ├── decoder_stage_design.md
+│       │   ├── fetch_stage_design.md
+│       │   ├── front_end_payloads.md
+│       │   ├── front_end_stage_contracts.md
+│       │   └── microsequencer_stage_design.md
+│       ├── frozen
+│       │   ├── appendix_a_field_dictionary.md
+│       │   ├── appendix_b_ownership_matrix.md
+│       │   ├── appendix_c_assembler_spec.md
+│       │   ├── appendix_d_bringup_ladder.md
+│       │   ├── IMPORT_MANIFEST.md
+│       │   ├── master_design_statement.md
+│       │   ├── README.md
+│       │   ├── STATUS.md
+│       │   └── verification_plan.md
+│       └── working
+│           └── proposals
+│               └── README.md
+├── experiments
+│   ├── abandoned
+│   │   └── .gitkeep
+│   ├── alt_microseq
+│   │   └── .gitkeep
+│   ├── cache_prototypes
+│   │   └── .gitkeep
+│   └── service_fastpaths
+│       └── .gitkeep
+├── formal
+│   ├── properties
+│   │   └── .gitkeep
+│   ├── scripts
+│   │   └── .gitkeep
+│   └── README.md
+├── LICENSES
+│   └── README.md
+├── microcode
+│   ├── src
+│   │   ├── entries
+│   │   │   ├── entry_nop_xchg_ax.uasm
+│   │   │   ├── entry_null.uasm
+│   │   │   ├── entry_prefix_only.uasm
+│   │   │   └── entry_reset.uasm
+│   │   ├── shared
+│   │   │   └── sub_fault_handler.uasm
+│   │   └── ucode_main.uasm
+│   ├── tests
+│   │   └── README.md
+│   └── tools
+│       ├── generators
+│       │   ├── dispatch_gen.py
+│       │   └── enum_export.py
+│       ├── uasm
+│       │   ├── assembler.py
+│       │   ├── encoder.py
+│       │   ├── linker.py
+│       │   ├── listing.py
+│       │   └── parser.py
+│       └── validators
+│           ├── abi_checker.py
+│           ├── service_wait_checker.py
+│           ├── stack_depth_checker.py
+│           └── symbol_consistency.py
+├── platform
+│   ├── generic
+│   │   └── .gitkeep
+│   ├── gowin
+│   │   └── .gitkeep
+│   ├── intel_fpga
+│   │   └── .gitkeep
+│   └── xilinx
+│       └── .gitkeep
+├── proposals
+│   ├── experiments
+│   │   └── .gitkeep
+│   ├── performance
+│   │   └── .gitkeep
+│   ├── phase2
+│   │   └── .gitkeep
+│   └── service_acceleration
+│       └── .gitkeep
+├── review
+│   ├── drift_audit.md
+│   ├── issue_matrix.csv
+│   ├── proceed_recommendation.md
+│   ├── review_report.md
+│   └── reviewer_changes.md
+├── rtl
+│   ├── core
+│   │   ├── bus
+│   │   │   ├── bus_aligner.sv
+│   │   │   ├── bus_arbiter.sv
+│   │   │   └── bus_interface.sv
+│   │   ├── frontend
+│   │   │   ├── decoder.sv
+│   │   │   └── prefetch_queue.sv
+│   │   ├── microcode
+│   │   │   ├── src
+│   │   │   │   └── entries
+│   │   │   │       └── entry_jmp_near.uasm
+│   │   │   ├── dispatch_table.sv
+│   │   │   ├── microcode_rom.sv
+│   │   │   ├── microsequencer.sv
+│   │   │   └── reg_file.sv
+│   │   ├── services
+│   │   │   ├── commit_engine.sv
+│   │   │   ├── ea_calc.sv
+│   │   │   ├── fetch_engine.sv
+│   │   │   ├── flow_control.sv
+│   │   │   ├── interrupt_engine.sv
+│   │   │   ├── load_store.sv
+│   │   │   ├── service_dispatch.sv
+│   │   │   └── stack_engine.sv
+│   │   ├── bus_interface.sv
+│   │   ├── commit_engine.sv
+│   │   ├── cpu_top.sv
+│   │   ├── decoder.sv
+│   │   ├── microcode_rom.sv
+│   │   ├── microsequencer.sv
+│   │   └── prefetch_queue.sv
+│   ├── experimental
+│   │   └── README.md
+│   ├── include
+│   │   ├── commit_defs.svh
+│   │   ├── entry_ids.svh
+│   │   ├── fault_defs.svh
+│   │   ├── field_defs.svh
+│   │   ├── keystone86_pkg.sv
+│   │   └── service_ids.svh
+│   └── vendor
+│       └── README.md
+├── scripts
+│   ├── bootstrap_report.py
+│   ├── bootstrap_status.py
+│   ├── codegen.py
+│   ├── commit_smoke.py
+│   ├── decode_dispatch_smoke.py
+│   ├── formal.py
+│   ├── frozen_manifest_check.py
+│   ├── lint.py
+│   ├── microseq_smoke.py
+│   ├── namespace_check.py
+│   ├── prefetch_decode_smoke.py
+│   ├── regress.py
+│   ├── release_notes_stub.py
+│   ├── rung0_regress.py
+│   ├── rung1_regress.py
+│   ├── service_abi_smoke.py
+│   ├── sim_smoke.py
+│   ├── spec_check.py
+│   ├── spec_sync_status.py
+│   ├── tree.py
+│   ├── ucode_bootstrap_check.py
+│   ├── ucode_build.py
+│   └── version_status.py
+├── sim
+│   ├── common
+│   │   ├── checker.sv
+│   │   ├── coverage.sv
+│   │   ├── mem_model.sv
+│   │   ├── reference_if.sv
+│   │   └── trace_logger.sv
+│   ├── models
+│   │   └── bootstrap_mem.sv
+│   ├── scripts
+│   │   ├── regress.py
+│   │   ├── run_entries.py
+│   │   ├── run_integration.py
+│   │   ├── run_services.py
+│   │   ├── run_system.py
+│   │   └── run_unit.py
+│   ├── tb
+│   │   ├── entries
+│   │   │   └── .gitkeep
+│   │   ├── integration
+│   │   │   ├── .gitkeep
+│   │   │   ├── README.md
+│   │   │   ├── tb_commit_smoke.sv
+│   │   │   ├── tb_decode_dispatch_smoke.sv
+│   │   │   ├── tb_microseq_smoke.sv
+│   │   │   ├── tb_prefetch_decode_smoke.sv
+│   │   │   └── tb_service_abi_smoke.sv
+│   │   ├── services
+│   │   │   └── .gitkeep
+│   │   ├── system
+│   │   │   └── .gitkeep
+│   │   ├── unit
+│   │   │   └── .gitkeep
+│   │   ├── tb_rung0_reset_loop.sv
+│   │   ├── tb_rung1_nop_loop.sv
+│   │   └── tb_rung2_jmp.sv
+│   ├── traces
+│   │   ├── failures
+│   │   │   └── .gitkeep
+│   │   └── golden
+│   │       └── .gitkeep
+│   ├── vectors
+│   │   ├── handcrafted
+│   │   │   ├── commit_smoke_cases.json
+│   │   │   ├── decode_dispatch_cases.json
+│   │   │   ├── microseq_smoke_cases.json
+│   │   │   ├── prefetch_decode_cases.json
+│   │   │   └── service_abi_cases.json
+│   │   └── README.md
+│   └── README.md
+├── spec_exports
+│   ├── pdf
+│   │   └── .gitkeep
+│   └── snapshots
+│       └── .gitkeep
+├── sw
+│   ├── boot
+│   │   └── .gitkeep
+│   ├── diagnostics
+│   │   └── .gitkeep
+│   ├── realmode_tests
+│   │   └── .gitkeep
+│   └── smoke
+│       └── .gitkeep
+├── synthesis
+│   ├── generic
+│   │   └── .gitkeep
+│   ├── gowin
+│   │   └── .gitkeep
+│   ├── reports
+│   │   └── .gitkeep
+│   └── xilinx
+│       └── .gitkeep
+├── third_party
+│   ├── ao486_notes
+│   │   └── .gitkeep
+│   ├── licenses
+│   │   └── .gitkeep
+│   ├── provenance
+│   │   └── .gitkeep
+│   └── z8086_notes
+│       └── .gitkeep
+├── tools
+│   └── spec_codegen
+│       ├── appendix_a_codegen.json
+│       ├── appendix_a_codegen.schema.json
+│       ├── bootstrap_dashboard_seed.json
+│       ├── commit_bootstrap_seed.json
+│       ├── decode_dispatch_seed.json
+│       ├── gen_from_appendix_a.py
+│       ├── microseq_bootstrap_seed.json
+│       ├── prefetch_decode_seed.json
+│       ├── README.md
+│       └── service_abi_seed.json
+├── .gitignore
+├── CHANGELOG.md
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+├── DCO.md
+├── GOVERNANCE.md
+├── Makefile
+├── README.md
+├── RELEASES.md
+├── TREE.txt
+└── VERSION

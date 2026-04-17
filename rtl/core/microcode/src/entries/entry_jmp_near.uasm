@@ -1,3 +1,24 @@
+; Keystone86 / Aegis
+; rtl/core/microcode/src/entries/entry_jmp_near.uasm
+;
+; STATUS: Reference artifact — NOT a build input.
+;
+; This file documents the intended microcode for ENTRY_JMP_NEAR in uasm
+; source form. It is placed here under rtl/core/microcode/src/ as a
+; reference alongside the RTL scaffold for the future microcode subsystem.
+;
+; The actual bootstrap ROM content for ENTRY_JMP_NEAR is currently
+; generated directly by scripts/ucode_build.py (hardcoded bootstrap phase).
+; The canonical microcode source tree for active entries is microcode/src/.
+;
+; When the microcode assembler (microcode/tools/uasm/) is wired into the
+; build and ucode_build.py is replaced by a real assemble-and-link flow,
+; this file (or a copy moved to microcode/src/entries/) becomes the live
+; source for this entry.
+;
+; See docs/implementation/coding_rules/source_of_truth.md for the
+; authoritative-source map.
+
 .entry ENTRY_JMP_NEAR, 0x07
 
 ; Planned bootstrap ROM address: 0x050
