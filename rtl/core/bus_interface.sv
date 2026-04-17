@@ -10,12 +10,10 @@
 //
 // Rung 0 scope: instruction fetch read path only.
 // Write path is stubbed for interface completeness.
-
-`include "entry_ids.svh"
-`include "fault_defs.svh"
-`include "commit_defs.svh"
-`include "field_defs.svh"
-`include "service_ids.svh"
+//
+// Shared constants: none used in this module.
+// This module operates on plain logic signals only and requires no
+// shared namespace imports.
 
 module bus_interface (
     input  logic        clk,

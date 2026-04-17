@@ -32,9 +32,10 @@
 //   - pc_eip_en / pc_eip_val for fall-through EIP (NOP, etc.)
 //   - RAISE/fault staging
 //   - endi_done pulse
-
-`include "commit_defs.svh"
-`include "fault_defs.svh"
+//
+// Shared constants: commit mask bits and fault codes are used as numeric
+// field selectors on endi_mask[N] directly (the mask is passed in by the
+// microsequencer, which owns the encoding). No shared include needed here.
 
 module commit_engine (
     input  logic        clk,

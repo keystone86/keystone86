@@ -36,8 +36,10 @@
 //   DEC_DISP8   : consume opcode, then position-proven capture of disp8
 //   DEC_DISP32  : consume opcode, then position-proven capture of disp16
 //   DEC_DONE    : hold stable payload until dec_ack
+//
+// Shared constants: ENTRY_* from keystone86_pkg (authoritative source).
 
-`include "entry_ids.svh"
+import keystone86_pkg::*;
 
 module decoder (
     input  logic        clk,
@@ -226,16 +228,17 @@ module decoder (
 
     // ----------------------------------------------------------------
     // Opcode classification
+    // Uses ENTRY_* constants from keystone86_pkg (authoritative source).
     // ----------------------------------------------------------------
     function automatic logic [7:0] classify_opcode(input logic [7:0] op);
         case (op)
-            8'h90:                          return `ENTRY_NOP_XCHG_AX;
-            8'hEB, 8'hE9:                   return `ENTRY_JMP_NEAR;
+            8'h90:                          return ENTRY_NOP_XCHG_AX;
+            8'hEB, 8'hE9:                   return ENTRY_JMP_NEAR;
             8'hF0, 8'hF2, 8'hF3,
             8'h2E, 8'h36, 8'h3E, 8'h26,
             8'h64, 8'h65,
-            8'h66, 8'h67:                   return `ENTRY_PREFIX_ONLY;
-            default:                        return `ENTRY_NULL;
+            8'h66, 8'h67:                   return ENTRY_PREFIX_ONLY;
+            default:                        return ENTRY_NULL;
         endcase
     endfunction
 
@@ -273,7 +276,7 @@ module decoder (
     always_comb begin
         q_consume   = 1'b0;
         decode_done = 1'b0;
-        entry_id    = `ENTRY_NULL;
+        entry_id    = ENTRY_NULL;
         next_eip    = opcode_eip_latch + 32'h1;
         target_eip  = computed_target_eip;
         has_target  = 1'b0;

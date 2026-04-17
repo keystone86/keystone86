@@ -50,11 +50,11 @@
 //   Cycle N+2: dispatch — dec_ack, upc=dispatch_upc_in, squash if ctrl
 //   Cycle N+3: EXECUTE stall (execute_fetch_pending)
 //   Cycle N+4: EXECUTE active — process microinstruction
+//
+// Shared constants: MSEQ_* state codes and ENTRY_RESET from keystone86_pkg.
+// UOP_* opcode classes are private implementation detail of this module.
 
-`include "entry_ids.svh"
-`include "fault_defs.svh"
-`include "commit_defs.svh"
-`include "field_defs.svh"
+import keystone86_pkg::*;
 
 module microsequencer (
     input  logic        clk,
@@ -99,11 +99,9 @@ module microsequencer (
     output logic [7:0]  dbg_entry_id
 );
 
-    localparam logic [1:0] MSEQ_FETCH_DECODE = 2'h0;
-    localparam logic [1:0] MSEQ_EXECUTE      = 2'h1;
-    localparam logic [1:0] MSEQ_WAIT_SERVICE = 2'h2;
-    localparam logic [1:0] MSEQ_FAULT_HOLD   = 2'h3;
-
+    // MSEQ_* state codes come from keystone86_pkg (authoritative source).
+    // UOP_* opcode classes are private to this module — they decode the
+    // microinstruction format and are not shared architectural constants.
     localparam logic [3:0] UOP_NOP   = 4'h0;
     localparam logic [3:0] UOP_RAISE = 4'hC;
     localparam logic [3:0] UOP_ENDI  = 4'hE;
@@ -154,7 +152,7 @@ module microsequencer (
         if (!reset_n) begin
             state                 <= MSEQ_FETCH_DECODE;
             upc_r                 <= 12'h000;
-            entry_id_r            <= `ENTRY_RESET;
+            entry_id_r            <= ENTRY_RESET;
             next_eip_r            <= 32'h0;
             target_eip_r          <= 32'h0;
             has_target_r          <= 1'b0;

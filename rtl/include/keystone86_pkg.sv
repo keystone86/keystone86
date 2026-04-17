@@ -2,8 +2,18 @@
 // keystone86_pkg.sv — Complete shared parameter package
 // Auto-generated from Appendix A Field Dictionary (frozen spec)
 // DO NOT EDIT MANUALLY — regenerate via: make codegen
-// This file is the authoritative RTL source for all shared constants.
-// All other RTL files must import this package: import keystone86_pkg::*;
+//
+// This file is the AUTHORITATIVE RTL source for all shared constants.
+// All RTL modules must use: import keystone86_pkg::*;
+//
+// The legacy *.svh files in this directory (entry_ids.svh, fault_defs.svh,
+// commit_defs.svh, field_defs.svh, service_ids.svh) contain the same
+// constants as backtick macros. They are retained for compatibility with
+// external tooling only. RTL source files must NOT use `include for these —
+// use this package import instead.
+//
+// See docs/implementation/coding_rules/source_of_truth.md for the full
+// authoritative-source map.
 
 package keystone86_pkg;
 
