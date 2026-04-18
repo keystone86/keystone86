@@ -4,11 +4,16 @@
 - Microcode retains policy ownership.
 - Services remain leaf mechanisms.
 - No architectural visibility outside commit_engine + ENDI.
+- This remains a microcoded design, not a hard RTL coded instruction implementation.
 - Instruction behavior remains microcode / microsequencer driven.
+- Instruction semantics remain patchable through dispatch/microcode-controlled execution.
 - Decoder changes are limited to classification, byte consumption, and required metadata generation.
 - Commit logic does not become a hidden per-instruction execution engine.
-- Helper RTL does not embed opcode-specific semantics that should belong to dispatch/microcode control.
-- Any temporary bootstrap behavior is explicitly identified, narrowly scoped, and justified.
+- Helper RTL does not embed opcode-specific semantics that belong in dispatch or microcode-controlled execution.
+- Instruction-support changes are reflected in dispatch selection and/or microcode source/content.
+- No instruction-support growth was implemented as RTL-only semantic expansion.
+- No instruction behavior was moved into RTL in a way that would prevent microcode-only bug correction.
+- Any handoff that changes instruction behavior without corresponding dispatch/microcode-content change is rejected.
 - New fields/enums update Appendix A first.
 - New ownership changes update Appendix B first.
 - New assembler syntax updates Appendix C first.

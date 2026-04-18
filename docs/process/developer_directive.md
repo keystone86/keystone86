@@ -72,18 +72,33 @@ In particular:
 - commit path remains architectural visibility boundary
 - helper logic must not silently become policy owner
 - important architectural distinctions must not be collapsed into overloaded signals
-- instruction behavior must remain microcode / microsequencer driven
+
+This is a microcoded design.
+
+Instruction behavior must remain microcode / microsequencer driven.
+
+That means:
+
 - decoder must not become a hidden per-opcode execution engine
 - commit logic must not become a hidden per-instruction semantic owner
-- helper RTL may support execution, but must not replace sequencer/microcode control with ad hoc opcode-specific behavior
+- helper RTL must not embed instruction semantics that belong in dispatch or microcode-controlled execution
+- instruction-support growth must not be implemented as hard-coded RTL behavior
 
-For bring-up work, preserve the microcode-sequencer-centered architecture.
+The reason is architectural and practical: instruction semantics must remain patchable through dispatch and microcode-controlled execution.
 
-That means instruction-family behavior must be expressed through decode classification, sequencer dispatch, and microcode-directed control flow, with commit limited to making architectural effects visible.
+If instruction behavior is implemented in RTL instead of dispatch/microcode-controlled execution, many CPU bugs can no longer be corrected by microcode update alone.
 
-Do not solve rung work by hard-coding per-opcode behavior in random RTL blocks, by moving instruction semantics into commit/helper logic, or by bypassing the sequencer just to make tests pass.
+That is not acceptable for this project.
 
-Bootstrap support logic is acceptable only when it remains narrowly scoped, explicit, and clearly subordinate to sequencer/microcode control.
+A design that moves instruction semantics into RTL is drifting away from a repairable microcoded CPU and toward fixed hard-coded silicon behavior.
+
+Such drift must be rejected.
+
+If a change adds, expands, or materially alters instruction behavior, the corresponding dispatch selection and/or microcode source/content must be updated to carry that behavior.
+
+For normal rung work, it is not acceptable to add or change instruction behavior while leaving dispatch selection and microcode source/content unchanged.
+
+A handoff that changes instruction behavior without corresponding dispatch/microcode-content change is not review-ready and must be rejected.
 
 Do not bypass architecture just to make a test pass.
 
@@ -164,6 +179,8 @@ Default behavior for this project:
 - read the current repo first
 - stay within the requested scope
 - preserve architecture
+- keep instruction semantics microcode-driven and patchable
+- reject RTL-only instruction-semantic growth
 - iterate until genuinely review-ready
 - hand back only validated changed/new files
 - report exact commands and actual results

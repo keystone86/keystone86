@@ -2,130 +2,196 @@
 
 ## Purpose
 
-This document defines what a valid handoff looks like for this project.
+This file defines the minimum required structure for a developer handoff.
 
-Every handoff — whether from a human developer, an AI assistant, or any other contributor — must meet this standard before being presented as ready for review.
-
----
-
-## Required reading before any handoff
-
-Read these files before starting work:
-
-- `docs/process/developer_handoff_contract.md` (this file)
-- `docs/process/rung_execution_and_acceptance.md`
-- `docs/process/tooling_and_observability_policy.md`
-- `docs/implementation/coding_rules/source_of_truth.md`
-- `docs/implementation/coding_rules/review_checklist.md`
-
-For cleanup passes, also read:
-
-- `docs/process/post_rung2_cleanup_plan.md`
+A handoff is not review-ready unless it contains the required information in a form that allows direct inspection, reproduction, and validation.
 
 ---
 
-## Handoff status line
+## Core rule
+
+Do not claim completion from intent, partial progress, or inferred behavior.
+
+A handoff is review-ready only when it reflects:
+
+- the exact changed state
+- the exact files changed
+- the exact commands run
+- the actual observed results
+
+---
+
+## Required status line
 
 Every handoff must begin with one of:
 
-```
-Status: READY FOR REVIEW
-```
+- `Status: READY FOR REVIEW`
+- `Status: NOT READY FOR REVIEW`
 
-or
+Do not use softer substitutes.
 
-```
-Status: NOT READY FOR REVIEW
-```
-
-Do not send intermediate work. Do not label work as ready unless the verification commands were actually run against the exact state being handed off.
+Do not imply readiness indirectly.
 
 ---
 
 ## Required handoff contents
 
-Every handoff must include:
+Every handoff must include all of the following.
 
-- **Status line** — READY FOR REVIEW or NOT READY FOR REVIEW
-- **Base commit** — the exact commit the work was based on
-- **Changed/new file manifest** — repo-relative paths for every modified or new file
-- **Verification commands run** — the exact commands executed, not inferred
-- **Actual results** — what the commands actually printed, not what they were expected to print
-- **Deferred items** — anything intentionally left out, and why
+### 1. Base state
 
-Do not report inferred success. Do not report expected success. Do not report "should pass." Report only what actually ran.
+State the exact base used for the work:
+
+- base commit hash, if working from the repo
+- or explicit package/bundle name, if working from a provided package
+
+### 2. Scope summary
+
+State what was requested and what was attempted.
+
+Keep this short and concrete.
+
+### 3. Changed file manifest
+
+List every modified or newly created file using repo-relative paths.
+
+Do not omit generated artifacts if they are part of the delivered change set.
+
+Do not include untouched files.
+
+### 4. Full file delivery
+
+Provide full replacement content for all changed/new source and document files unless a different delivery format was explicitly requested.
+
+Do not provide partial patch fragments unless explicitly requested.
+
+### 5. Verification commands
+
+List the exact commands run against the exact handoff state.
+
+Examples:
+
+- `make codegen`
+- `make ucode`
+- `make test`
+- targeted simulation/test commands used for rung proof
+
+### 6. Actual verification results
+
+State what actually happened when those commands ran.
+
+Acceptable examples:
+
+- pass
+- fail
+- pass with warnings
+- specific failing test names
+- specific observed mismatch
+
+Do not report:
+
+- expected pass
+- should pass
+- likely pass
+- not rerun but unchanged
+- inferred pass from prior state
+
+### 7. Deferred items
+
+List anything intentionally not completed.
+
+If nothing is deferred, say so explicitly.
 
 ---
 
-## File delivery format
+## Architectural accounting requirement
+
+This project is a microcoded design.
+
+Instruction behavior must remain dispatch/microcode controlled and patchable through microcode-driven execution.
+
+Therefore, any handoff that adds, expands, or materially changes instruction behavior must explicitly show the corresponding control-source change.
+
+That means the handoff must identify the relevant updates in one or both of:
+
+- dispatch selection
+- microcode source/content
+
+It is not acceptable to grow instruction behavior only in RTL while leaving dispatch selection and microcode source/content unchanged.
+
+A handoff that changes instruction behavior without corresponding dispatch/microcode-content change is not review-ready and must be rejected.
+
+Do not hide instruction semantics in decoder-side logic, commit-side logic, or helper RTL.
+
+---
+
+## Validation integrity rule
+
+The handoff must describe only work that was actually validated from the delivered state.
+
+If the code changed after the last validation run, the prior run does not count for the final handoff.
+
+Rerun the relevant validation and report the new result.
+
+---
+
+## Packaging rule
+
+Do not send a full repository snapshot unless explicitly requested.
 
 For normal work, send only:
 
-- modified files
+- changed files
 - newly created files
 
-Do not send a full repo snapshot unless explicitly requested.
-
-Optionally, include a zip containing only the changed/new files with repo-relative paths preserved inside the archive root.
+If a zip is included, it must preserve repo-relative paths and contain only the changed/new files unless a full snapshot was explicitly requested.
 
 ---
 
-## What "not ready" means
+## Not-ready rule
 
-If a handoff is NOT READY FOR REVIEW, it must still include:
+Use `Status: NOT READY FOR REVIEW` when:
 
-- what was attempted
-- what is blocking completion
-- what the next step is
+- required validation was not run
+- validation failed
+- architectural drift remains unresolved
+- file delivery is incomplete
+- instruction behavior changed without corresponding dispatch/microcode-content change
+- the requested scope was not actually completed
 
-A NOT READY handoff is not a failure — it is an honest status report. An inaccurate READY claim is a failure.
+Do not present a not-ready package as if it is nearly complete.
 
----
-
-## Scope discipline
-
-Every handoff must stay within the scope it was given.
-
-Do not use a cleanup handoff to introduce new functionality. Do not use a bug-fix handoff to widen scope. Do not mix implementation with cleanup. If scope creep is discovered during work, flag it as a deferred item rather than absorbing it silently.
+Be explicit.
 
 ---
 
-## Rung discipline
+## Minimal handoff template
 
-Do not claim a rung is passing unless all of the following are true:
+Use this structure:
 
-1. The rung's acceptance criteria (defined in `docs/spec/frozen/appendix_d_bringup_ladder.md`) are met.
-2. The rung's simulation testbench passes with zero failures.
-3. All prior rungs still pass.
-4. The verification commands were run against the exact committed state.
+Status: READY FOR REVIEW
 
-See `docs/process/rung_execution_and_acceptance.md` for the full rung gate process.
+Base:
+- `<commit hash or package name>`
 
----
+Scope:
+- `<one short paragraph>`
 
-## Validation rule
+Changed files:
+- `path/to/file_a`
+- `path/to/file_b`
 
-Before claiming any work is complete:
+Control-source accounting:
+- dispatch change: `<path and short note>` or `none`
+- microcode source/content change: `<path and short note>` or `none`
 
-1. Run the relevant verification commands from repo root.
-2. Record the exact commands and their exact output.
-3. Include both in the handoff.
+Verification run:
+- `<exact command>`
+- `<exact command>`
 
-The following are not acceptable substitutes for actual verification results:
+Verification results:
+- `<actual result>`
+- `<actual result>`
 
-- "should pass"
-- "expected to pass"
-- "passes based on the changes made"
-- any inference without execution
-
----
-
-## Summary
-
-A valid handoff is:
-
-- clearly labeled READY or NOT READY
-- based on a known commit
-- accompanied by exact changed files
-- verified by commands that were actually run
-- honest about what was deferred
+Deferred:
+- `none`
