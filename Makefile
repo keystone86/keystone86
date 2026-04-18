@@ -54,7 +54,7 @@ ucode:
 	@python3 scripts/ucode_build.py
 
 ucode-clean:
-	@rm -f microcode/build/ucode.hex microcode/build/dispatch.hex microcode/build/ucode.lst
+	@rm -f microcode/build/ucode.hex microcode/build/dispatch.hex microcode/build/ucode.lst microcode/build/dispatch.lst
 	@echo "Removed generated microcode outputs."
 
 sim-smoke:
@@ -115,10 +115,12 @@ bootstrap-report:
 	@python3 scripts/bootstrap_report.py
 
 # ----------------------------------------------------------------
-# Rung 0 RTL simulation targets
+# Shared RTL source lists
 # ----------------------------------------------------------------
 
-IVERILOG_SOURCES = \
+IVERILOG_INCDIRS = -I rtl/include -I microcode/build
+
+RTL_SOURCES_COMMON = \
   rtl/include/keystone86_pkg.sv \
   rtl/core/bus_interface.sv \
   rtl/core/prefetch_queue.sv \
@@ -126,11 +128,19 @@ IVERILOG_SOURCES = \
   rtl/core/microcode_rom.sv \
   rtl/core/microsequencer.sv \
   rtl/core/commit_engine.sv \
-  rtl/core/cpu_top.sv \
+  rtl/core/services/fetch_engine.sv \
+  rtl/core/services/flow_control.sv \
+  rtl/core/services/service_dispatch.sv \
+  rtl/core/cpu_top.sv
+
+# ----------------------------------------------------------------
+# Rung 0 RTL simulation targets
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES = \
+  $(RTL_SOURCES_COMMON) \
   sim/models/bootstrap_mem.sv \
   sim/tb/tb_rung0_reset_loop.sv
-
-IVERILOG_INCDIRS = -I rtl/include -I microcode/build
 
 rung0-sim: ucode
 	@echo "--- Rung 0: compiling RTL ---"
@@ -151,20 +161,14 @@ rung0-clean:
 	@echo "Rung 0 build artifacts removed."
 
 .PHONY: rung0-sim rung0-regress rung0-clean
+
 # ----------------------------------------------------------------
 # Rung 1 RTL simulation targets
-# Added by: bringup/rung1-nop-dispatch
 # ----------------------------------------------------------------
 
 IVERILOG_SOURCES_RUNG1 = \
-  rtl/include/keystone86_pkg.sv \
-  rtl/core/bus_interface.sv \
-  rtl/core/prefetch_queue.sv \
-  rtl/core/decoder.sv \
-  rtl/core/microcode_rom.sv \
-  rtl/core/microsequencer.sv \
-  rtl/core/commit_engine.sv \
-  rtl/core/cpu_top.sv \
+  $(RTL_SOURCES_COMMON) \
+  sim/models/bootstrap_mem.sv \
   sim/tb/tb_rung1_nop_loop.sv
 
 rung1-sim: ucode
@@ -188,19 +192,12 @@ rung1-clean:
 .PHONY: rung1-sim rung1-regress rung1-clean
 
 # ----------------------------------------------------------------
-# Rung 2 — JMP SHORT / JMP NEAR control-transfer
-# Added by: bringup/rung2-jmp
+# Rung 2 — JMP control-transfer
 # ----------------------------------------------------------------
 
 IVERILOG_SOURCES_RUNG2 = \
-  rtl/include/keystone86_pkg.sv \
-  rtl/core/bus_interface.sv \
-  rtl/core/prefetch_queue.sv \
-  rtl/core/decoder.sv \
-  rtl/core/microcode_rom.sv \
-  rtl/core/microsequencer.sv \
-  rtl/core/commit_engine.sv \
-  rtl/core/cpu_top.sv \
+  $(RTL_SOURCES_COMMON) \
+  sim/models/bootstrap_mem.sv \
   sim/tb/tb_rung2_jmp.sv
 
 rung2-sim: ucode
@@ -232,18 +229,11 @@ rung2-clean:
 
 # ----------------------------------------------------------------
 # Rung 3 — Near CALL and near RET
-# Added by: bringup/rung3-call-ret
 # ----------------------------------------------------------------
 
 IVERILOG_SOURCES_RUNG3 = \
-  rtl/include/keystone86_pkg.sv \
-  rtl/core/bus_interface.sv \
-  rtl/core/prefetch_queue.sv \
-  rtl/core/decoder.sv \
-  rtl/core/microcode_rom.sv \
-  rtl/core/microsequencer.sv \
-  rtl/core/commit_engine.sv \
-  rtl/core/cpu_top.sv \
+  $(RTL_SOURCES_COMMON) \
+  sim/models/bootstrap_mem.sv \
   sim/tb/tb_rung3_call_ret.sv
 
 rung3-sim: ucode
@@ -259,14 +249,12 @@ rung3-sim: ucode
 rung3-regress: ucode
 	@echo "--- Rung 3 regression (includes Rung 0 + Rung 1 + Rung 2 baseline checks) ---"
 	@python3 scripts/rung1_regress.py
-	@echo "--- Rung 3: running Rung 2 testbench (regression) ---"
 	@mkdir -p sim/build/rung2
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
 		-o sim/build/rung2/tb_rung2_jmp.vvp \
 		$(IVERILOG_SOURCES_RUNG2)
 	vvp sim/build/rung2/tb_rung2_jmp.vvp
-	@echo "--- Rung 3: running Rung 3 testbench ---"
 	@mkdir -p sim/build/rung3
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \

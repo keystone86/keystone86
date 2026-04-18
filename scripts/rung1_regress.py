@@ -29,6 +29,9 @@ RTL_SOURCES_COMMON = [
     "rtl/core/microcode_rom.sv",
     "rtl/core/microsequencer.sv",
     "rtl/core/commit_engine.sv",
+    "rtl/core/services/fetch_engine.sv",
+    "rtl/core/services/flow_control.sv",
+    "rtl/core/services/service_dispatch.sv",
     "rtl/core/cpu_top.sv",
 ]
 
@@ -60,6 +63,7 @@ INCLUDE_DIRS = ["rtl/include", "microcode/build"]
 def run_test(test: dict, sim_dir: Path, verbose: bool) -> bool:
     tb_name = test["tb"]
     out_bin = sim_dir / f"{tb_name}.vvp"
+
     inc_flags = []
     for d in INCLUDE_DIRS:
         inc_flags += ["-I", str(ROOT / d)]
@@ -70,23 +74,35 @@ def run_test(test: dict, sim_dir: Path, verbose: bool) -> bool:
         + ["-o", str(out_bin)]
         + [str(ROOT / s) for s in test["sources"]]
     )
-    result = subprocess.run(compile_cmd, capture_output=not verbose,
-                            text=True, cwd=str(ROOT))
+
+    result = subprocess.run(
+        compile_cmd,
+        capture_output=not verbose,
+        text=True,
+        cwd=str(ROOT),
+    )
+
     if result.returncode != 0:
         print(f"  COMPILE FAIL: {tb_name}")
         if result.stderr:
-            print(result.stderr[:2000])
+            print(result.stderr[:4000])
         return False
 
-    result = subprocess.run(["vvp", str(out_bin)],
-                            capture_output=not verbose, text=True, cwd=str(ROOT))
+    result = subprocess.run(
+        ["vvp", str(out_bin)],
+        capture_output=not verbose,
+        text=True,
+        cwd=str(ROOT),
+    )
+
     output = result.stdout + result.stderr
     if verbose:
         print(output)
+
     return test["pass_marker"] in output and result.returncode == 0
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Keystone86 Rung 1 regression runner")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
@@ -111,24 +127,26 @@ def main():
     sim_dir.mkdir(parents=True, exist_ok=True)
 
     passed = failed = 0
+
     for test in TESTS:
         print(f"Running: {test['name']}")
         print(f"  {test['description']}")
         ok = run_test(test, sim_dir, args.verbose)
         if ok:
-            print(f"  RESULT: PASS")
+            print("  RESULT: PASS")
             passed += 1
         else:
-            print(f"  RESULT: FAIL")
+            print("  RESULT: FAIL")
             failed += 1
         print()
 
     print("=" * 48)
-    print(f"Rung 1 Regression Summary")
+    print("Rung 1 Regression Summary")
     print(f"  Passed: {passed}")
     print(f"  Failed: {failed}")
     print(f"  Total:  {passed + failed}")
     print()
+
     if failed == 0:
         print("RESULT: ALL RUNG 1 TESTS PASSED")
         print()
