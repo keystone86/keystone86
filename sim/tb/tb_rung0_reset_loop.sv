@@ -59,6 +59,10 @@ module tb_rung0_reset_loop;
     // ----------------------------------------------------------------
     // DUT instantiation
     // ----------------------------------------------------------------
+    // Rung 3 stack/indirect-call stubs (not exercised here)
+    logic stk_wr_en_nc, stk_rd_req_nc;
+    logic [31:0] stk_wr_addr_nc, stk_wr_data_nc, stk_rd_addr_nc, dbg_esp_nc;
+
     cpu_top dut (
         .clk               (clk),
         .reset_n           (reset_n),
@@ -69,7 +73,17 @@ module tb_rung0_reset_loop;
         .bus_dout          (bus_dout),
         .bus_din           (bus_din),
         .bus_ready         (bus_ready),
+        .stk_wr_en         (stk_wr_en_nc),
+        .stk_wr_addr       (stk_wr_addr_nc),
+        .stk_wr_data       (stk_wr_data_nc),
+        .stk_rd_req        (stk_rd_req_nc),
+        .stk_rd_addr       (stk_rd_addr_nc),
+        .stk_rd_data       (32'h0),
+        .stk_rd_ready      (1'b0),
+        .indirect_call_target       (32'h0),
+        .indirect_call_target_valid (1'b0),
         .dbg_eip           (dbg_eip),
+        .dbg_esp           (dbg_esp_nc),
         .dbg_mseq_state    (dbg_mseq_state),
         .dbg_upc           (dbg_upc),
         .dbg_entry_id      (dbg_entry_id),

@@ -1,21 +1,14 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
-// Rung 2: Wire squash, target_eip, has_target, pc_target_en/val
+// Rung 3: Wire CALL/RET signals through all modules
+// (includes all Rung 2 wiring)
 //
-// Rung 2 changes from Rung 1:
-//   - squash: microsequencer -> decoder + prefetch_queue
-//   - target_eip / has_target: decoder -> microsequencer
-//   - pc_target_en / pc_target_val: microsequencer -> commit_engine
-//   - prefetch_queue now receives squash for inflight kill
-//
-// Control path (Rung 2):
-//   reset -> commit_engine drives flush -> prefetch_queue fetches 0xFFFFFFF0
-//         -> decoder forms JMP instruction (opcode + displacement)
-//         -> microsequencer accepts payload, asserts squash, stages target_eip
-//         -> ENDI CM_JMP commits target_eip to EIP and drives flush
-//         -> prefetch_queue flushes and refills from JMP target
-//         -> microsequencer returns to FETCH_DECODE
-//         -> loop from JMP target
+// Rung 3 additions:
+//   - is_call, is_ret, has_ret_imm, ret_imm, modrm_byte: decoder -> microsequencer
+//   - pc_ret_addr_en/val, pc_ret_imm_en/val: microsequencer -> commit_engine
+//   - indirect_call_target/valid: cpu_top ports (testbench drives register)
+//   - stk_wr_*/stk_rd_*: commit_engine -> top-level stack bus ports
+//   - esp: commit_engine -> dbg_esp output
 
 import keystone86_pkg::*;
 
@@ -23,6 +16,7 @@ module cpu_top (
     input  logic        clk,
     input  logic        reset_n,
 
+    // --- Main bus ---
     output logic [31:0] bus_addr,
     output logic        bus_rd,
     output logic        bus_wr,
@@ -31,7 +25,22 @@ module cpu_top (
     input  logic [31:0] bus_din,
     input  logic        bus_ready,
 
+    // --- Stack bus (Rung 3) ---
+    output logic        stk_wr_en,
+    output logic [31:0] stk_wr_addr,
+    output logic [31:0] stk_wr_data,
+    output logic        stk_rd_req,
+    output logic [31:0] stk_rd_addr,
+    input  logic [31:0] stk_rd_data,
+    input  logic        stk_rd_ready,
+
+    // --- Indirect CALL target (Rung 3: from register file / testbench) ---
+    input  logic [31:0] indirect_call_target,
+    input  logic        indirect_call_target_valid,
+
+    // --- Debug ports ---
     output logic [31:0] dbg_eip,
+    output logic [31:0] dbg_esp,
     output logic [1:0]  dbg_mseq_state,
     output logic [11:0] dbg_upc,
     output logic [7:0]  dbg_entry_id,
@@ -56,14 +65,18 @@ module cpu_top (
     logic        flush_req;
     logic [31:0] flush_addr;
 
-    // Rung 2: squash signal (microsequencer -> decoder + prefetch_queue)
     logic        squash;
 
     logic        decode_done;
     logic [7:0]  entry_id;
     logic [31:0] next_eip;
-    logic [31:0] target_eip;    // Rung 2
-    logic        has_target;    // Rung 2
+    logic [31:0] target_eip;
+    logic        has_target;
+    logic        is_call;        // Rung 3
+    logic        is_ret;         // Rung 3
+    logic        has_ret_imm;    // Rung 3
+    logic [15:0] ret_imm;        // Rung 3
+    logic [7:0]  modrm_byte;     // Rung 3
     logic        dec_ack;
 
     logic [11:0] upc;
@@ -80,13 +93,18 @@ module cpu_top (
 
     logic        pc_eip_en;
     logic [31:0] pc_eip_val;
-    logic        pc_target_en;   // Rung 2
-    logic [31:0] pc_target_val;  // Rung 2
+    logic        pc_target_en;
+    logic [31:0] pc_target_val;
+    logic        pc_ret_addr_en;   // Rung 3
+    logic [31:0] pc_ret_addr_val;  // Rung 3
+    logic        pc_ret_imm_en;    // Rung 3
+    logic [15:0] pc_ret_imm_val;   // Rung 3
 
     logic        mode_prot;
     logic        cs_d_bit;
 
     logic [31:0] eip;
+    logic [31:0] esp;
     logic        fault_pending;
     logic [3:0]  fault_class;
     logic [31:0] fault_error;
@@ -96,11 +114,12 @@ module cpu_top (
     logic [7:0]  dbg_entry_id_w;
 
     assign dbg_eip           = eip;
+    assign dbg_esp           = esp;
     assign dbg_mseq_state    = dbg_mseq_state_w;
     assign dbg_upc           = dbg_upc_w;
     assign dbg_entry_id      = dbg_entry_id_w;
     assign dbg_dec_entry_id  = entry_id;
-    assign dbg_endi_pulse    = endi_req && endi_done;
+    assign dbg_endi_pulse    = endi_done;
     assign dbg_fault_pending = fault_pending;
     assign dbg_fault_class   = fault_class;
     assign dbg_decode_done   = decode_done;
@@ -125,9 +144,9 @@ module cpu_top (
     prefetch_queue #(.DEPTH(4)) u_pq (
         .clk         (clk),
         .reset_n     (reset_n),
-        .flush       (flush_req),            // authoritative redirect from commit_engine
+        .flush       (flush_req),
         .flush_addr  (flush_addr),
-        .kill        (squash),               // Rung 2: stale-work kill from microsequencer
+        .kill        (squash),
         .q_data      (q_data),
         .q_valid     (q_valid),
         .q_consume   (q_consume),
@@ -139,21 +158,26 @@ module cpu_top (
     );
 
     decoder u_dec (
-        .clk         (clk),
-        .reset_n     (reset_n),
-        .squash      (squash),               // Rung 2: stale-work kill
-        .mode_prot   (mode_prot),
-        .cs_d_bit    (cs_d_bit),
-        .q_data      (q_data),
-        .q_valid     (q_valid),
-        .q_consume   (q_consume),
-        .decode_done (decode_done),
-        .entry_id    (entry_id),
-        .next_eip    (next_eip),
-        .target_eip  (target_eip),           // Rung 2
-        .has_target  (has_target),           // Rung 2
-        .dec_ack     (dec_ack),
-        .q_fetch_eip (q_fetch_eip)
+        .clk          (clk),
+        .reset_n      (reset_n),
+        .squash       (squash),
+        .mode_prot    (mode_prot),
+        .cs_d_bit     (cs_d_bit),
+        .q_data       (q_data),
+        .q_valid      (q_valid),
+        .q_consume    (q_consume),
+        .decode_done  (decode_done),
+        .entry_id     (entry_id),
+        .next_eip     (next_eip),
+        .target_eip   (target_eip),
+        .has_target   (has_target),
+        .is_call      (is_call),        // Rung 3
+        .is_ret       (is_ret),         // Rung 3
+        .has_ret_imm  (has_ret_imm),    // Rung 3
+        .ret_imm      (ret_imm),        // Rung 3
+        .modrm_byte   (modrm_byte),     // Rung 3
+        .dec_ack      (dec_ack),
+        .q_fetch_eip  (q_fetch_eip)
     );
 
     microsequencer u_mseq (
@@ -162,10 +186,15 @@ module cpu_top (
         .decode_done      (decode_done),
         .entry_id_in      (entry_id),
         .next_eip_in      (next_eip),
-        .target_eip_in    (target_eip),      // Rung 2
-        .has_target_in    (has_target),      // Rung 2
+        .target_eip_in    (target_eip),
+        .has_target_in    (has_target),
+        .is_call_in       (is_call),         // Rung 3
+        .is_ret_in        (is_ret),          // Rung 3
+        .has_ret_imm_in   (has_ret_imm),     // Rung 3
+        .ret_imm_in       (ret_imm),         // Rung 3
+        .modrm_in         (modrm_byte),      // Rung 3
         .dec_ack          (dec_ack),
-        .squash           (squash),          // Rung 2: output to decoder+queue
+        .squash           (squash),
         .upc              (upc),
         .uinst            (uinst),
         .dispatch_entry   (dispatch_entry),
@@ -178,8 +207,12 @@ module cpu_top (
         .endi_done        (endi_done),
         .pc_eip_en        (pc_eip_en),
         .pc_eip_val       (pc_eip_val),
-        .pc_target_en     (pc_target_en),    // Rung 2
-        .pc_target_val    (pc_target_val),   // Rung 2
+        .pc_target_en     (pc_target_en),
+        .pc_target_val    (pc_target_val),
+        .pc_ret_addr_en   (pc_ret_addr_en),  // Rung 3
+        .pc_ret_addr_val  (pc_ret_addr_val), // Rung 3
+        .pc_ret_imm_en    (pc_ret_imm_en),   // Rung 3
+        .pc_ret_imm_val   (pc_ret_imm_val),  // Rung 3
         .dbg_state        (dbg_mseq_state_w),
         .dbg_upc          (dbg_upc_w),
         .dbg_entry_id     (dbg_entry_id_w)
@@ -194,29 +227,43 @@ module cpu_top (
     );
 
     commit_engine u_commit (
-        .clk            (clk),
-        .reset_n        (reset_n),
-        .endi_req       (endi_req),
-        .endi_mask      (endi_mask),
-        .endi_done      (endi_done),
-        .raise_req      (raise_req),
-        .raise_fc       (raise_fc),
-        .raise_fe       (raise_fe),
-        .pc_gpr_en      (1'b0),
-        .pc_gpr_idx     (3'h0),
-        .pc_gpr_val     (32'h0),
-        .pc_eip_en      (pc_eip_en),
-        .pc_eip_val     (pc_eip_val),
-        .pc_target_en   (pc_target_en),      // Rung 2
-        .pc_target_val  (pc_target_val),     // Rung 2
-        .eip            (eip),
-        .mode_prot      (mode_prot),
-        .cs_d_bit       (cs_d_bit),
-        .flush_req      (flush_req),
-        .flush_addr     (flush_addr),
-        .fault_pending  (fault_pending),
-        .fault_class    (fault_class),
-        .fault_error    (fault_error)
+        .clk                       (clk),
+        .reset_n                   (reset_n),
+        .endi_req                  (endi_req),
+        .endi_mask                 (endi_mask),
+        .endi_done                 (endi_done),
+        .raise_req                 (raise_req),
+        .raise_fc                  (raise_fc),
+        .raise_fe                  (raise_fe),
+        .pc_gpr_en                 (1'b0),
+        .pc_gpr_idx                (3'h0),
+        .pc_gpr_val                (32'h0),
+        .pc_eip_en                 (pc_eip_en),
+        .pc_eip_val                (pc_eip_val),
+        .pc_target_en              (pc_target_en),
+        .pc_target_val             (pc_target_val),
+        .pc_ret_addr_en            (pc_ret_addr_en),           // Rung 3
+        .pc_ret_addr_val           (pc_ret_addr_val),          // Rung 3
+        .pc_ret_imm_en             (pc_ret_imm_en),            // Rung 3
+        .pc_ret_imm_val            (pc_ret_imm_val),           // Rung 3
+        .indirect_call_target      (indirect_call_target),     // Rung 3
+        .indirect_call_target_valid(indirect_call_target_valid),// Rung 3
+        .eip                       (eip),
+        .esp                       (esp),
+        .mode_prot                 (mode_prot),
+        .cs_d_bit                  (cs_d_bit),
+        .flush_req                 (flush_req),
+        .flush_addr                (flush_addr),
+        .stk_wr_en                 (stk_wr_en),                // Rung 3
+        .stk_wr_addr               (stk_wr_addr),              // Rung 3
+        .stk_wr_data               (stk_wr_data),              // Rung 3
+        .stk_rd_req                (stk_rd_req),               // Rung 3
+        .stk_rd_addr               (stk_rd_addr),              // Rung 3
+        .stk_rd_data               (stk_rd_data),              // Rung 3
+        .stk_rd_ready              (stk_rd_ready),             // Rung 3
+        .fault_pending             (fault_pending),
+        .fault_class               (fault_class),
+        .fault_error               (fault_error)
     );
 
 endmodule

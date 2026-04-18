@@ -1,6 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/microsequencer.sv
-// Rung 2: Control-transfer serialization + stale-work squash
+// Rung 3: CALL/RET control-transfer serialization
+// (includes all Rung 2 JMP behavior)
 //
 // Ownership (Appendix B):
 //   This module owns: uPC management, entry dispatch, microinstruction
@@ -9,50 +10,35 @@
 //   This module must NOT: own instruction meaning, bypass dispatch,
 //   make redirect architecturally visible (that is commit_engine's job).
 //
-// Rung 2 additions:
+// Rung 3 additions:
 //
-//   Contract 2 — Real decode/control acceptance boundary:
-//     decode result becomes the active instruction ONLY on dec_ack.
-//     This was already implicit in Rung 1 via the three-phase handshake.
-//     Rung 2 makes it explicit by gating all control-transfer behavior
-//     on the dispatch cycle (when dispatch_pending fires and dec_ack is
-//     issued). Before dec_ack, the decode payload is not yet accepted.
+//   CALL direct (E8): has_target_r=1, is_call_r=1
+//     - squash issued (same as JMP)
+//     - ctrl_transfer_pending set
+//     - pc_target_en/val staged (call target)
+//     - pc_ret_addr_en/val staged (next_eip_r = return address to push)
 //
-//   Contract 3 — Stale-work suppression (squash):
-//     Once a control-transfer decode payload is accepted (dec_ack cycle),
-//     microsequencer asserts squash=1 for one cycle. This kills:
-//       - decoder in-formation state
-//       - prefetch queue inflight work
-//     The machine then holds the front end until commit_engine issues
-//     flush (which happens at ENDI with CM_JMP mask). The queue will be
-//     flushed and re-pointed to the JMP target by commit_engine.
+//   CALL indirect (FF /2): has_target_r=0, is_call_r=1
+//     - squash issued
+//     - ctrl_transfer_pending set
+//     - pc_ret_addr_en/val staged (next_eip_r = return address to push)
+//     - pc_target_en NOT staged — commit_engine reads register via modrm_r
+//     - modrm_r forwarded so commit can resolve register source
 //
-//   Contract 4 — Commit-owned redirect visibility:
-//     Microsequencer knows a redirect is coming (ctrl_transfer_pending)
-//     but does NOT make it architecturally visible. It issues squash and
-//     holds upstream. commit_engine makes redirect real via flush_req.
-//     After ENDI fires, microsequencer returns to FETCH_DECODE and the
-//     machine resumes from the new EIP.
+//   RET (C3/C2): is_ret_r=1
+//     - squash issued
+//     - ctrl_transfer_pending set
+//     - pc_ret_imm_en / pc_ret_imm_val staged (for C2 stack adjustment)
+//     - target EIP comes from stack pop in commit_engine; committed at ENDI
 //
-//   Front-end hold during control transfer:
-//     When ctrl_transfer_pending=1, decode_done is ignored even if the
-//     prefetch queue presents bytes. This prevents old-path decode work
-//     from entering dispatch while the redirect is in flight.
-//     Once commit_engine completes ENDI (endi_done), the hold is cleared.
+// All Rung 2 contracts preserved:
+//   Contract 2 — decode result accepted only on dec_ack
+//   Contract 3 — squash on control-transfer acceptance
+//   Contract 4 — commit_engine is sole redirect visibility authority
 //
-// ROM timing model (unchanged from Rung 1):
-//   Two-cycle dispatch handshake: dispatch_rom_pending -> dispatch_pending.
-//   One-cycle execute stall: execute_fetch_pending.
-//
-// Dispatch sequence (N = cycle where decode_done arrives):
-//   Cycle N:   latch decode payload, set dispatch_rom_pending
-//   Cycle N+1: ROM settling, set dispatch_pending
-//   Cycle N+2: dispatch — dec_ack, upc=dispatch_upc_in, squash if ctrl
-//   Cycle N+3: EXECUTE stall (execute_fetch_pending)
-//   Cycle N+4: EXECUTE active — process microinstruction
+// Dispatch sequence (unchanged timing from Rung 2).
 //
 // Shared constants: MSEQ_* state codes and ENTRY_RESET from keystone86_pkg.
-// UOP_* opcode classes are private implementation detail of this module.
 
 import keystone86_pkg::*;
 
@@ -64,12 +50,17 @@ module microsequencer (
     input  logic        decode_done,
     input  logic [7:0]  entry_id_in,
     input  logic [31:0] next_eip_in,
-    input  logic [31:0] target_eip_in,     // Rung 2: JMP target
-    input  logic        has_target_in,     // Rung 2: target is valid
+    input  logic [31:0] target_eip_in,
+    input  logic        has_target_in,
+    input  logic        is_call_in,        // Rung 3
+    input  logic        is_ret_in,         // Rung 3
+    input  logic        has_ret_imm_in,    // Rung 3
+    input  logic [15:0] ret_imm_in,        // Rung 3
+    input  logic [7:0]  modrm_in,          // Rung 3
     output logic        dec_ack,
 
     // --- Squash output (to decoder + prefetch_queue) ---
-    output logic        squash,            // Rung 2: stale-work kill
+    output logic        squash,
 
     // --- Microcode ROM interface ---
     output logic [11:0] upc,
@@ -85,13 +76,21 @@ module microsequencer (
     output logic [31:0] raise_fe,
     input  logic        endi_done,
 
-    // --- EIP staging (Rung 1+) ---
+    // --- EIP staging (fall-through) ---
     output logic        pc_eip_en,
     output logic [31:0] pc_eip_val,
 
-    // --- Target EIP staging (Rung 2: JMP target) ---
+    // --- Target EIP staging (JMP/CALL-direct target) ---
     output logic        pc_target_en,
     output logic [31:0] pc_target_val,
+
+    // --- Return address staging (Rung 3: pushed by CALL) ---
+    output logic        pc_ret_addr_en,
+    output logic [31:0] pc_ret_addr_val,
+
+    // --- RET imm16 staging (Rung 3: C2 stack adjustment) ---
+    output logic        pc_ret_imm_en,
+    output logic [15:0] pc_ret_imm_val,
 
     // --- Observability ---
     output logic [1:0]  dbg_state,
@@ -99,9 +98,6 @@ module microsequencer (
     output logic [7:0]  dbg_entry_id
 );
 
-    // MSEQ_* state codes come from keystone86_pkg (authoritative source).
-    // UOP_* opcode classes are private to this module — they decode the
-    // microinstruction format and are not shared architectural constants.
     localparam logic [3:0] UOP_NOP   = 4'h0;
     localparam logic [3:0] UOP_RAISE = 4'hC;
     localparam logic [3:0] UOP_ENDI  = 4'hE;
@@ -112,6 +108,11 @@ module microsequencer (
     logic [31:0] next_eip_r;
     logic [31:0] target_eip_r;
     logic        has_target_r;
+    logic        is_call_r;
+    logic        is_ret_r;
+    logic        has_ret_imm_r;
+    logic [15:0] ret_imm_r;
+    logic [7:0]  modrm_r;
 
     // Dispatch handshake
     logic        dispatch_rom_pending;
@@ -119,12 +120,8 @@ module microsequencer (
     logic [7:0]  dispatch_entry_latch;
     logic        execute_fetch_pending;
 
-    // Rung 2: control-transfer serialization
-    // Set when a control-transfer (JMP) decode payload is accepted.
-    // Cleared when ENDI completes (commit makes redirect real).
+    // Control-transfer serialization
     logic        ctrl_transfer_pending;
-
-    // Rung 2: squash pulse — one cycle on control-transfer acceptance
     logic        squash_r;
 
     logic        fault_pending;
@@ -156,6 +153,11 @@ module microsequencer (
             next_eip_r            <= 32'h0;
             target_eip_r          <= 32'h0;
             has_target_r          <= 1'b0;
+            is_call_r             <= 1'b0;
+            is_ret_r              <= 1'b0;
+            has_ret_imm_r         <= 1'b0;
+            ret_imm_r             <= 16'h0;
+            modrm_r               <= 8'h0;
             dispatch_rom_pending  <= 1'b0;
             dispatch_pending      <= 1'b0;
             dispatch_entry_latch  <= 8'h00;
@@ -168,8 +170,7 @@ module microsequencer (
             state <= state_next;
             upc_r <= upc_next;
 
-            // Squash is a one-cycle pulse — clear it every cycle
-            squash_r <= 1'b0;
+            squash_r <= 1'b0;   // one-cycle pulse: clear every cycle
 
             case (state)
                 // ----------------------------------------------------------
@@ -177,14 +178,17 @@ module microsequencer (
                 // ----------------------------------------------------------
                 MSEQ_FETCH_DECODE: begin
                     // Phase 1: latch decode payload, start ROM read
-                    // Gate on ctrl_transfer_pending: do NOT accept new decode
-                    // while a control transfer is in flight (Contract 3).
                     if (decode_done && !dispatch_rom_pending && !dispatch_pending
                         && !ctrl_transfer_pending) begin
                         entry_id_r           <= entry_id_in;
                         next_eip_r           <= next_eip_in;
                         target_eip_r         <= target_eip_in;
                         has_target_r         <= has_target_in;
+                        is_call_r            <= is_call_in;
+                        is_ret_r             <= is_ret_in;
+                        has_ret_imm_r        <= has_ret_imm_in;
+                        ret_imm_r            <= ret_imm_in;
+                        modrm_r              <= modrm_in;
                         dispatch_entry_latch <= entry_id_in;
                         dispatch_rom_pending <= 1'b1;
                         fault_pending        <= 1'b0;
@@ -197,22 +201,19 @@ module microsequencer (
                         dispatch_pending     <= 1'b1;
                     end
 
-                    // Phase 3: dispatch (handled in comb block for dec_ack/upc)
+                    // Phase 3: dispatch
                     if (dispatch_pending) begin
                         dispatch_pending      <= 1'b0;
                         execute_fetch_pending <= 1'b1;
 
-                        // Rung 2: if this is a control-transfer instruction,
-                        // assert squash for one cycle and set ctrl_transfer_pending.
-                        // has_target_r is set by decoder for JMP instructions.
-                        if (has_target_r) begin
-                            squash_r              <= 1'b1;   // kill decoder + queue
-                            ctrl_transfer_pending <= 1'b1;   // hold front end
+                        // CALL or RET: squash + hold front end
+                        // has_target_r for direct CALL/JMP; is_call_r/is_ret_r for all
+                        if (has_target_r || is_call_r || is_ret_r) begin
+                            squash_r              <= 1'b1;
+                            ctrl_transfer_pending <= 1'b1;
                         end
                     end
 
-                    // Clear ctrl_transfer_pending after ENDI completes
-                    // (endi_done fires from commit_engine on ENDI processing)
                     if (ctrl_transfer_pending && endi_done) begin
                         ctrl_transfer_pending <= 1'b0;
                     end
@@ -235,7 +236,6 @@ module microsequencer (
                         endcase
                     end
 
-                    // Clear ctrl_transfer_pending when ENDI completes
                     if (ctrl_transfer_pending && endi_done) begin
                         ctrl_transfer_pending <= 1'b0;
                     end
@@ -254,18 +254,22 @@ module microsequencer (
     // Combinational: next-state, uPC, and output logic
     // ----------------------------------------------------------------
     always_comb begin
-        state_next     = state;
-        upc_next       = upc_r;
-        dec_ack        = 1'b0;
-        endi_req       = 1'b0;
-        endi_mask      = 10'h0;
-        raise_req      = 1'b0;
-        raise_fc       = 4'h0;
-        raise_fe       = 32'h0;
-        pc_eip_en      = 1'b0;
-        pc_eip_val     = 32'h0;
-        pc_target_en   = 1'b0;
-        pc_target_val  = 32'h0;
+        state_next       = state;
+        upc_next         = upc_r;
+        dec_ack          = 1'b0;
+        endi_req         = 1'b0;
+        endi_mask        = 10'h0;
+        raise_req        = 1'b0;
+        raise_fc         = 4'h0;
+        raise_fe         = 32'h0;
+        pc_eip_en        = 1'b0;
+        pc_eip_val       = 32'h0;
+        pc_target_en     = 1'b0;
+        pc_target_val    = 32'h0;
+        pc_ret_addr_en   = 1'b0;
+        pc_ret_addr_val  = 32'h0;
+        pc_ret_imm_en    = 1'b0;
+        pc_ret_imm_val   = 16'h0;
 
         case (state)
             // ----------------------------------------------------------
@@ -277,14 +281,26 @@ module microsequencer (
                     upc_next   = dispatch_upc_in;
                     state_next = MSEQ_EXECUTE;
 
-                    // Stage EIP for commit_engine
+                    // Stage fall-through EIP (always valid)
                     pc_eip_en  = 1'b1;
                     pc_eip_val = next_eip_r;
 
-                    // Rung 2: if control transfer, also stage target EIP
+                    // Stage call/jmp target (direct only)
                     if (has_target_r) begin
                         pc_target_en  = 1'b1;
                         pc_target_val = target_eip_r;
+                    end
+
+                    // Rung 3: CALL — stage return address (= next_eip_r)
+                    if (is_call_r) begin
+                        pc_ret_addr_en  = 1'b1;
+                        pc_ret_addr_val = next_eip_r;
+                    end
+
+                    // Rung 3: RET imm16 — stage stack adjustment
+                    if (is_ret_r && has_ret_imm_r) begin
+                        pc_ret_imm_en  = 1'b1;
+                        pc_ret_imm_val = ret_imm_r;
                     end
                 end
             end
@@ -294,7 +310,7 @@ module microsequencer (
             // ----------------------------------------------------------
             MSEQ_EXECUTE: begin
                 if (execute_fetch_pending) begin
-                    // Fetch stall: uinst is stale; do nothing
+                    // fetch stall
                 end else begin
                     case (uop_class)
                         UOP_NOP: begin

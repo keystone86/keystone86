@@ -36,6 +36,9 @@ help:
 	@echo "  make rung2-sim             - compile and run Rung 2 RTL simulation"
 	@echo "  make rung2-regress         - run Rung 2 regression (includes Rung 0 + Rung 1)"
 	@echo "  make rung2-clean           - remove Rung 2 simulation artifacts"
+	@echo "  make rung3-sim             - compile and run Rung 3 RTL simulation"
+	@echo "  make rung3-regress         - run Rung 3 regression (includes Rung 0 + Rung 1 + Rung 2)"
+	@echo "  make rung3-clean           - remove Rung 3 simulation artifacts"
 	@echo "  make clean                 - remove generated files"
 
 tree:
@@ -63,7 +66,7 @@ regress:
 formal:
 	@python3 scripts/formal.py
 
-clean: ucode-clean rung0-clean rung1-clean rung2-clean
+clean: ucode-clean rung0-clean rung1-clean rung2-clean rung3-clean
 	@echo "Project clean complete."
 
 bootstrap-info:
@@ -226,3 +229,53 @@ rung2-clean:
 	@echo "Rung 2 build artifacts removed."
 
 .PHONY: rung2-sim rung2-regress rung2-clean
+
+# ----------------------------------------------------------------
+# Rung 3 — Near CALL and near RET
+# Added by: bringup/rung3-call-ret
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG3 = \
+  rtl/include/keystone86_pkg.sv \
+  rtl/core/bus_interface.sv \
+  rtl/core/prefetch_queue.sv \
+  rtl/core/decoder.sv \
+  rtl/core/microcode_rom.sv \
+  rtl/core/microsequencer.sv \
+  rtl/core/commit_engine.sv \
+  rtl/core/cpu_top.sv \
+  sim/tb/tb_rung3_call_ret.sv
+
+rung3-sim: ucode
+	@echo "--- Rung 3: compiling RTL ---"
+	@mkdir -p sim/build/rung3
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o sim/build/rung3/tb_rung3_call_ret.vvp \
+		$(IVERILOG_SOURCES_RUNG3)
+	@echo "--- Rung 3: running simulation ---"
+	vvp sim/build/rung3/tb_rung3_call_ret.vvp
+
+rung3-regress: ucode
+	@echo "--- Rung 3 regression (includes Rung 0 + Rung 1 + Rung 2 baseline checks) ---"
+	@python3 scripts/rung1_regress.py
+	@echo "--- Rung 3: running Rung 2 testbench (regression) ---"
+	@mkdir -p sim/build/rung2
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o sim/build/rung2/tb_rung2_jmp.vvp \
+		$(IVERILOG_SOURCES_RUNG2)
+	vvp sim/build/rung2/tb_rung2_jmp.vvp
+	@echo "--- Rung 3: running Rung 3 testbench ---"
+	@mkdir -p sim/build/rung3
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o sim/build/rung3/tb_rung3_call_ret.vvp \
+		$(IVERILOG_SOURCES_RUNG3)
+	vvp sim/build/rung3/tb_rung3_call_ret.vvp
+
+rung3-clean:
+	@rm -rf sim/build/rung3
+	@echo "Rung 3 build artifacts removed."
+
+.PHONY: rung3-sim rung3-regress rung3-clean

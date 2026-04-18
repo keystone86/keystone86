@@ -19,6 +19,12 @@ for i in range(256):
     elif i == 0x07:
         val = 0x050       # Rung 2: ENTRY_JMP_NEAR
         meaning = "ENTRY_JMP_NEAR"
+    elif i == 0x09:
+        val = 0x060       # Rung 3: ENTRY_CALL_NEAR
+        meaning = "ENTRY_CALL_NEAR"
+    elif i == 0x0B:
+        val = 0x070       # Rung 3: ENTRY_RET_NEAR
+        meaning = "ENTRY_RET_NEAR"
     elif i == 0x12:
         val = 0x030
         meaning = "ENTRY_PREFIX_ONLY"
@@ -69,6 +75,9 @@ CM_FAULT_END = CM_CLR03
 CM_NOP       = CM_CLR03 | CM_CLR47 | CM_CLRF
 CM_NOP_EIP   = CM_NOP | CM_EIP
 CM_JMP       = CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ  # Rung 2
+CM_STACK     = 0x010
+CM_CALL      = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ  # Rung 3
+CM_RET       = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ  # Rung 3
 
 def endi(mask):
     return f"{0xE0000000 | mask:08X}"
@@ -88,14 +97,26 @@ rom[0x040] = endi(CM_NOP)        # ENTRY_RESET: ENDI CM_NOP (no EIP commit)
 
 # Rung 2: ENTRY_JMP_NEAR at 0x050
 # Single microinstruction: ENDI CM_JMP
-# commit_engine: sees CM_EIP | CM_FLUSHQ -> commits target_eip, flushes queue
 rom[0x050] = endi(CM_JMP)        # ENTRY_JMP_NEAR: ENDI CM_JMP
+
+# Rung 3: ENTRY_CALL_NEAR at 0x060
+# Single microinstruction: ENDI CM_CALL
+# commit_engine: CM_STACK -> push return addr, update ESP, commit target, flush
+rom[0x060] = endi(CM_CALL)       # ENTRY_CALL_NEAR: ENDI CM_CALL
+
+# Rung 3: ENTRY_RET_NEAR at 0x070
+# Single microinstruction: ENDI CM_RET
+# commit_engine: CM_STACK -> pop return addr, update ESP (+imm if C2), flush
+rom[0x070] = endi(CM_RET)        # ENTRY_RET_NEAR: ENDI CM_RET
 
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
-listing = f"""; Keystone86 / Aegis bootstrap microcode listing (Rung 2)
-; Rung 2: ENTRY_JMP_NEAR uses CM_JMP (0x{CM_JMP:03X})
-; CM_JMP = CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ
+listing = f"""; Keystone86 / Aegis bootstrap microcode listing (Rung 3)
+; Rung 2: ENTRY_JMP_NEAR  CM_JMP  (0x{CM_JMP:03X})
+; Rung 3: ENTRY_CALL_NEAR CM_CALL (0x{CM_CALL:03X})
+; Rung 3: ENTRY_RET_NEAR  CM_RET  (0x{CM_RET:03X})
+; CM_CALL = CM_STACK|CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ
+; CM_RET  = CM_STACK|CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ
 address  encoding     source
 0x000    {endi(CM_FAULT_END)}   SUB_FAULT_HANDLER: ENDI CM_FAULT_END
 0x010    {raise_fc(0x6)}   ENTRY_NULL: RAISE FC_UD
@@ -104,10 +125,14 @@ address  encoding     source
 0x030    {endi(CM_NOP_EIP)}   ENTRY_PREFIX_ONLY: ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
 0x040    {endi(CM_NOP)}   ENTRY_RESET: ENDI CM_NOP
 0x050    {endi(CM_JMP)}   ENTRY_JMP_NEAR: ENDI CM_JMP (0x{CM_JMP:03X})
+0x060    {endi(CM_CALL)}   ENTRY_CALL_NEAR: ENDI CM_CALL (0x{CM_CALL:03X})
+0x070    {endi(CM_RET)}   ENTRY_RET_NEAR: ENDI CM_RET (0x{CM_RET:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
-print("Wrote Rung 2 bootstrap ucode.hex, dispatch.hex, ucode.lst, dispatch.lst")
-print(f"  CM_JMP = 0x{CM_JMP:03X} (CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ)")
-print(f"  ENTRY_JMP_NEAR at dispatch[0x07] -> uPC 0x050")
-print(f"  ENTRY_JMP_NEAR ENDI word = {endi(CM_JMP)}")
+print("Wrote Rung 3 bootstrap ucode.hex, dispatch.hex, ucode.lst, dispatch.lst")
+print(f"  CM_JMP  = 0x{CM_JMP:03X}")
+print(f"  CM_CALL = 0x{CM_CALL:03X} (CM_STACK|CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ)")
+print(f"  CM_RET  = 0x{CM_RET:03X}  (CM_STACK|CM_EIP|CM_CLR03|CM_CLR47|CM_CLRF|CM_FLUSHQ)")
+print(f"  ENTRY_CALL_NEAR at dispatch[0x09] -> uPC 0x060")
+print(f"  ENTRY_RET_NEAR  at dispatch[0x0B] -> uPC 0x070")
