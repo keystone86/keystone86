@@ -72,6 +72,18 @@ In particular:
 - commit path remains architectural visibility boundary
 - helper logic must not silently become policy owner
 - important architectural distinctions must not be collapsed into overloaded signals
+- instruction behavior must remain microcode / microsequencer driven
+- decoder must not become a hidden per-opcode execution engine
+- commit logic must not become a hidden per-instruction semantic owner
+- helper RTL may support execution, but must not replace sequencer/microcode control with ad hoc opcode-specific behavior
+
+For bring-up work, preserve the microcode-sequencer-centered architecture.
+
+That means instruction-family behavior must be expressed through decode classification, sequencer dispatch, and microcode-directed control flow, with commit limited to making architectural effects visible.
+
+Do not solve rung work by hard-coding per-opcode behavior in random RTL blocks, by moving instruction semantics into commit/helper logic, or by bypassing the sequencer just to make tests pass.
+
+Bootstrap support logic is acceptable only when it remains narrowly scoped, explicit, and clearly subordinate to sequencer/microcode control.
 
 Do not bypass architecture just to make a test pass.
 
