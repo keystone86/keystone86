@@ -1,122 +1,103 @@
 # Keystone86 / Aegis — Rung 2 Verification
 
-## How to Run
+## Scope
 
-    make rung2-sim      # compile and run Rung 2 testbench
+This artifact records verification for the bounded Rung 2 direct-JMP bring-up path.
 
-Prerequisites: `iverilog` installed, repo root as working directory.
-Run `make ucode` first if `microcode/build/` is empty.
+Rung 2 acceptance requires:
 
-Also confirm earlier rungs remain passing:
+- earlier required baselines still pass
+- the bounded direct-JMP service path works end to end
+- redirect becomes architecturally visible only at ENDI
+- committed redirect flush occurs
+- actual commands were run against the delivered state
+- actual results are recorded here
 
-    make rung0-sim
-    make rung1-regress
+This file is a verification artifact. It is not a scope document and it is not the source of implementation intent.
 
-## Tests
+## Required reading
 
-### Test A — JMP SHORT self-loop (EB FE)
-**Proves:** JMP SHORT with displacement -2 produces a stable self-loop at the reset vector.
-**Memory:** `EB FE` repeating from `0xFFFFFFF0`.
-**Pass conditions:**
-- No fault in 1000 cycles.
-- At least 10 JMP ENDIs fire.
-- `dbg_eip` stays at `0xFFFFFFF0` throughout.
-- No spurious fault class.
+Before interpreting this verification record, read:
 
-### Test B — JMP SHORT forward (EB 05)
-**Proves:** JMP SHORT with positive displacement computes and commits the correct target EIP.
-**Memory:** `EB 05` at `0xFFFFFFF0`; `EB FE` self-loop at `0xFFFFFFF7`.
-**Pass conditions:**
-- First ENDI fires without timeout.
-- `dbg_eip == 0xFFFFFFF7` after first ENDI (`0xFFFFFFF0 + 2 + 5`).
-- No fault after JMP.
-- Second ENDI fires (CPU is now stable at new location).
-- `dbg_eip` stays at `0xFFFFFFF7`.
+1. `docs/process/developer_directive.md`
+2. `docs/process/developer_handoff_contract.md`
+3. `docs/implementation/coding_rules/source_of_truth.md`
+4. `docs/spec/frozen/appendix_d_bringup_ladder.md`
+5. `docs/implementation/bringup/rung2.md`
 
-### Test C — JMP SHORT backward (EB F0)
-**Proves:** JMP SHORT with negative displacement computes and commits the correct target EIP,
-and the prefetch queue correctly retargets to an address below the starting address.
-**Memory:** `EB F0` at `0xFFFFFFF0`; `EB FE` self-loop at `0xFFFFFFE2`.
-**Pass conditions:**
-- ENDI fires without timeout.
-- `dbg_eip == 0xFFFFFFE2` (`0xFFFFFFF0 + 2 - 16`).
-- No fault after backward JMP.
-- Second ENDI fires at new location.
-- `dbg_eip` stays at `0xFFFFFFE2`.
+## Commands run
 
-### Test D — Rung 1 regression (10 consecutive NOPs)
-**Proves:** Rung 1 NOP path is unaffected by Rung 2 changes.
-**Memory:** all `0x90` (NOP).
-**Pass conditions:**
-- 10 ENDIs fire without timeout.
-- `dbg_eip == 0xFFFFFFF0 + 10` after 10 NOPs.
-- No fault during NOP regression.
+Run from repo root.
 
-### Test E — Byte ordering (NOP then JMP)
-**Proves:** position-proven byte capture correctly distinguishes the NOP byte from the
-JMP opcode byte on the very next fetch, with no confusion between adjacent bytes.
-**Memory:** `0x90` at `0xFFFFFFF0`; `EB FE` self-loop at `0xFFFFFFF1`.
-**Pass conditions:**
-- First ENDI fires (NOP).
-- `dbg_eip == 0xFFFFFFF1` after NOP.
-- Second ENDI fires (JMP self-loop).
-- `dbg_eip == 0xFFFFFFF1` after JMP (self-loop at new location).
-- No fault throughout.
+    make rung2-regress
 
-## Expected Output
+This command is the active Rung 2 regression entry point and includes the required earlier-rung baseline checks for the delivered Rung 2 state.
 
-    ============================================================
-     Keystone86 / Aegis — Rung 2 Testbench
-    ============================================================
-    --- Test A: JMP SHORT self-loop (EB FE) ---
-      [PASS] A.1: no fault in 1000 cycles
-      [PASS] A.2: at least 10 JMP ENDIs fired
-      [PASS] A.3: EIP stays at reset vector
-      [PASS] A.4: no spurious fault_class
-    --- Test B: JMP SHORT +5 (EB 05) ---
-      [PASS] B.1: first ENDI fires without timeout
-      [PASS] B.2: EIP = 0xFFFFFFF7 after JMP +5
-      [PASS] B.3: no fault after JMP
-      [PASS] B.4: second ENDI fires (self-loop stable)
-      [PASS] B.5: EIP stays at 0xFFFFFFF7
-    --- Test C: JMP SHORT backward (EB F0, target 0xFFFFFFE2) ---
-      [PASS] C.1: ENDI fires without timeout
-      [PASS] C.2: EIP = 0xFFFFFFE2 (backward target)
-      [PASS] C.3: no fault after backward JMP
-      [PASS] C.4: second ENDI fires at new location
-      [PASS] C.5: EIP stays at backward target
-    --- Test D: Rung 1 regression (10 consecutive NOPs) ---
-      [PASS] D.1: EIP advances by 10 after 10 NOPs
-      [PASS] D.2: no fault during NOP regression
-    --- Test E: NOP then JMP, verify correct byte ordering ---
-      [PASS] E.1: first ENDI fires (NOP)
-      [PASS] E.2: EIP = 0xFFFFFFF1 after NOP
-      [PASS] E.3: second ENDI fires (JMP self-loop)
-      [PASS] E.4: EIP = 0xFFFFFFF1 after JMP self
-      [PASS] E.5: no fault throughout
-    ============================================================
-     RESULTS: 19 passed, 0 failed
-    ============================================================
-     ALL TESTS PASSED — Rung 2 acceptance criteria met.
+## Active verification target
 
-## Rung 0 and Rung 1 Baselines Still Pass
+The active bounded Rung 2 RTL verification target is:
 
-`make rung0-sim` and `make rung1-regress` must still output `ALL TESTS PASSED`
-before Rung 2 results are considered valid.
+- `sim/tb/tb_rung2_jmp.sv`
 
-## What Rung 2 Does Not Cover
+That bench proves the bounded direct-JMP self-loop service path used for current Rung 2 bring-up.
 
-- JMP NEAR (32-bit displacement): not yet in scope.
-- CALL / RET / JCC: deferred to Rung 3+.
-- Prefix bytes before JMP: deferred to later rungs.
-- Fetch-local stream following: deferred optimization, not part of this baseline.
+## What the active Rung 2 bench checks
 
-## Passing Baseline
+The active bench verifies:
 
-Fill in from `git log` after confirming all tests pass on the committed state:
+- no fault during the bounded direct-JMP loop
+- committed JMP retires are observed
+- committed redirect flushes are observed
+- the active decoded entry remains `ENTRY_JMP_NEAR`
 
-    git log --oneline -5
+Default output is summary-oriented. Verbose trace is available only when explicitly enabled in the bench.
 
-- Date: 2026-04-13 07:58:20 +0000
-- Commit: da44d63363b683585349abf64395d25ac48e7b32
-- Tag: rung2-first-pass
+## Current recorded result
+
+Recorded from the delivered passing state:
+
+    Keystone86 / Aegis — Rung 2 Regression
+      Rung 2: direct JMP service path, committed redirect, bounded self-loop
+
+    Rung 2 Regression Summary
+      [x] Rung 0 baseline still passes
+      [x] Rung 1 baseline still passes
+      [x] No fault during bounded direct JMP loop
+      [x] Committed JMP retires observed: 2
+      [x] Committed redirect flushes observed: 3
+      [x] Active decoded entry remains ENTRY_JMP_NEAR
+
+    RESULT: ALL RUNG 2 TESTS PASSED
+
+## Acceptance status
+
+Rung 2 is currently considered passing for the bounded direct-JMP path because:
+
+- the required earlier-rung baselines still pass
+- the active Rung 2 regression passes
+- the bounded direct-JMP path is proven through the active bench
+- committed redirect and flush behavior are observed
+
+## What Rung 2 does not claim
+
+This passing result does **not** claim:
+
+- generic broader control-transfer coverage
+- CALL / RET / Jcc coverage
+- generalized later-rung framework completion
+- more instruction coverage than the active delivered regression demonstrates
+
+## Notes
+
+- Verbose trace output is gated behind a debug flag in `sim/tb/tb_rung2_jmp.sv` and is off by default.
+- If the active bench, active command, or bounded scope changes, this file must be updated from a fresh actual run.
+
+## Delivered state record
+
+Fill this in from the actual committed state after commit/push:
+
+    git log --oneline -1
+
+- Commit: _fill in after commit_
+- Date: _fill in after commit_
+- Branch: _fill in if needed_
