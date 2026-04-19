@@ -6,6 +6,11 @@
 //   FETCH_DISP16
 //   FETCH_DISP32
 //
+// Root-cause fix:
+//   Consume the first displacement byte immediately on the service-start cycle
+//   when q_valid is already present. The previous version waited until a later
+//   cycle and ended up consuming the next opcode byte instead.
+//
 // Result is written to T4 as a sign-extended displacement for DISP8/DISP16,
 // or raw 32-bit value for DISP32.
 
@@ -36,6 +41,9 @@ module fetch_engine (
     logic [31:0] accum_r;
     logic [2:0]  idx_r;
     logic [2:0]  total_bytes_r;
+
+    logic        complete_pending_r;
+    logic [31:0] complete_data_r;
 
     function automatic logic [2:0] bytes_for_service(input logic [7:0] sid);
         case (sid)
@@ -76,43 +84,86 @@ module fetch_engine (
         endcase
     endfunction
 
-    logic [31:0] accum_next_byte;
-    logic        last_byte;
+    logic [2:0]  start_bytes;
+    logic        start_valid;
+    logic        start_with_byte;
+    logic [31:0] start_accum;
+    logic        start_last_byte;
 
-    assign accum_next_byte = pack_next_accum(accum_r, idx_r, q_data);
-    assign last_byte       = (idx_r + 3'd1 == total_bytes_r);
+    logic [31:0] active_accum_next;
+    logic        active_last_byte;
+
+    assign start_bytes     = bytes_for_service(svc_id);
+    assign start_valid     = (!active_r) && svc_req && (start_bytes != 3'd0);
+    assign start_with_byte = start_valid && q_valid;
+    assign start_accum     = pack_next_accum(32'h0, 3'd0, q_data);
+    assign start_last_byte = start_with_byte && (start_bytes == 3'd1);
+
+    assign active_accum_next = pack_next_accum(accum_r, idx_r, q_data);
+    assign active_last_byte  = active_r && q_valid && ((idx_r + 3'd1) == total_bytes_r);
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            active_r      <= 1'b0;
-            svc_id_r      <= 8'h00;
-            accum_r       <= 32'h0;
-            idx_r         <= 3'd0;
-            total_bytes_r <= 3'd0;
+            active_r           <= 1'b0;
+            svc_id_r           <= 8'h00;
+            accum_r            <= 32'h0;
+            idx_r              <= 3'd0;
+            total_bytes_r      <= 3'd0;
+            complete_pending_r <= 1'b0;
+            complete_data_r    <= 32'h0;
         end else if (squash) begin
-            active_r      <= 1'b0;
-            svc_id_r      <= 8'h00;
-            accum_r       <= 32'h0;
-            idx_r         <= 3'd0;
-            total_bytes_r <= 3'd0;
+            active_r           <= 1'b0;
+            svc_id_r           <= 8'h00;
+            accum_r            <= 32'h0;
+            idx_r              <= 3'd0;
+            total_bytes_r      <= 3'd0;
+            complete_pending_r <= 1'b0;
+            complete_data_r    <= 32'h0;
         end else begin
-            if (!active_r && svc_req) begin
-                if (bytes_for_service(svc_id) != 3'd0) begin
+            // completion pulse lasts one cycle unless re-armed below
+            complete_pending_r <= 1'b0;
+
+            // Start a new service
+            if (start_valid) begin
+                if (start_with_byte) begin
+                    if (start_last_byte) begin
+                        // 1-byte displacement completed immediately on start cycle
+                        active_r           <= 1'b0;
+                        svc_id_r           <= 8'h00;
+                        accum_r            <= 32'h0;
+                        idx_r              <= 3'd0;
+                        total_bytes_r      <= 3'd0;
+                        complete_pending_r <= 1'b1;
+                        complete_data_r    <= finalize_disp(svc_id, start_accum);
+                    end else begin
+                        // consumed first byte immediately; keep running
+                        active_r      <= 1'b1;
+                        svc_id_r      <= svc_id;
+                        accum_r       <= start_accum;
+                        idx_r         <= 3'd1;
+                        total_bytes_r <= start_bytes;
+                    end
+                end else begin
+                    // service started, waiting for first byte
                     active_r      <= 1'b1;
                     svc_id_r      <= svc_id;
                     accum_r       <= 32'h0;
                     idx_r         <= 3'd0;
-                    total_bytes_r <= bytes_for_service(svc_id);
+                    total_bytes_r <= start_bytes;
                 end
-            end else if (active_r && q_valid) begin
-                if (last_byte) begin
-                    active_r      <= 1'b0;
-                    svc_id_r      <= 8'h00;
-                    accum_r       <= 32'h0;
-                    idx_r         <= 3'd0;
-                    total_bytes_r <= 3'd0;
+            end
+            // Continue an active service
+            else if (active_r && q_valid) begin
+                if (active_last_byte) begin
+                    active_r           <= 1'b0;
+                    svc_id_r           <= 8'h00;
+                    accum_r            <= 32'h0;
+                    idx_r              <= 3'd0;
+                    total_bytes_r      <= 3'd0;
+                    complete_pending_r <= 1'b1;
+                    complete_data_r    <= finalize_disp(svc_id_r, active_accum_next);
                 end else begin
-                    accum_r <= accum_next_byte;
+                    accum_r <= active_accum_next;
                     idx_r   <= idx_r + 3'd1;
                 end
             end
@@ -120,25 +171,19 @@ module fetch_engine (
     end
 
     always_comb begin
-        svc_done  = 1'b0;
-        svc_sr    = SR_WAIT;
-        q_consume = 1'b0;
-        t4_wr_en  = 1'b0;
-        t4_wr_data = 32'h0;
+        svc_done   = complete_pending_r;
+        svc_sr     = complete_pending_r ? SR_OK : SR_WAIT;
+        q_consume  = 1'b0;
+        t4_wr_en   = complete_pending_r;
+        t4_wr_data = complete_data_r;
 
-        if (active_r) begin
-            if (q_valid) begin
-                q_consume = 1'b1;
-                if (last_byte) begin
-                    svc_done   = 1'b1;
-                    svc_sr     = SR_OK;
-                    t4_wr_en   = 1'b1;
-                    t4_wr_data = finalize_disp(svc_id_r, accum_next_byte);
-                end
-            end else begin
-                svc_done = 1'b1;
-                svc_sr   = SR_WAIT;
-            end
+        // Consume first byte immediately on start if available
+        if (start_with_byte) begin
+            q_consume = 1'b1;
+        end
+        // Otherwise consume bytes while active
+        else if (active_r && q_valid) begin
+            q_consume = 1'b1;
         end
     end
 
