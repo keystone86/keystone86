@@ -3,17 +3,22 @@
 //
 // Rung 2 service-capable microsequencer.
 //
-// Current focus:
-//   Restore correct service/branch behavior for direct JMP path.
-//   This version keeps service ID stable through WAIT_SERVICE, stalls on
-//   SR_WAIT, and inserts a ROM-settle bubble after every internal uPC advance.
+// Rung 2 intent:
+//   - Decoder hands off only decode-owned metadata.
+//   - Services fetch displacement and compute/validate the target.
+//   - ENDI in commit_engine is the architectural redirect boundary.
 //
-// Important:
+// Control-transfer cleanup rule for this rung:
 //   - Do NOT squash on JMP dispatch. fetch_engine still needs fall-through
-//     displacement byte(s).
-//   - Do NOT use the retire-aligned squash experiment here yet.
-//     The current failure happens earlier: service result handling and branch
-//     progression are broken before ENDI is even reached.
+//     displacement bytes.
+//   - Do assert squash when the committed redirect retires so stale decoder
+//     state and abandoned-stream work do not survive past ENDI.
+//
+// Service handoff rule:
+//   - svc_req_out is a one-cycle start pulse.
+//   - svc_id_r remains stable while WAIT_SERVICE is active.
+//   - SR_WAIT is a true hold condition. The sequencer does not advance until
+//     the selected service reports a terminal result.
 
 import keystone86_pkg::*;
 
@@ -53,7 +58,7 @@ module microsequencer (
     // --- Service dispatch interface ---
     output logic [7:0]  svc_id_out,
     output logic        svc_req_out,
-    input  logic        svc_done_in,
+    input  logic [1:0]  svc_done_in,
     input  logic [1:0]  svc_sr_in,
 
     // --- T2 read (computed target from flow_control) ---
@@ -87,7 +92,6 @@ module microsequencer (
     logic        execute_fetch_pending;
 
     logic        ctrl_transfer_pending;
-    logic        squash_r;
 
     logic        ext_pending_r;
     logic [7:0]  svc_id_r;
@@ -98,7 +102,6 @@ module microsequencer (
     assign dbg_state      = state;
     assign dbg_upc        = upc_r;
     assign dbg_entry_id   = entry_id_r;
-    assign squash         = squash_r;
     assign meta_next_eip  = next_eip_r;
 
     logic [3:0] uop_class;
@@ -112,6 +115,8 @@ module microsequencer (
     assign uop_imm10  = uinst[9:0];
 
     logic br_taken;
+
+    logic retire_ctrl_xfer_pulse;
     always_comb begin
         case (uop_cond)
             C_ALWAYS: br_taken = 1'b1;
@@ -121,6 +126,18 @@ module microsequencer (
             default:  br_taken = 1'b0;
         endcase
     end
+
+
+    // Committed redirect cleanup pulse.
+    // This is asserted only when ENDI for an in-flight control transfer
+    // retires. It is intentionally not asserted at dispatch time.
+    assign retire_ctrl_xfer_pulse = ctrl_transfer_pending &&
+                                    (state == MSEQ_EXECUTE) &&
+                                    !execute_fetch_pending &&
+                                    (uop_class == UOP_ENDI) &&
+                                    endi_done;
+
+    assign squash = retire_ctrl_xfer_pulse;
 
     // ----------------------------------------------------------------
     // State register
@@ -137,14 +154,17 @@ module microsequencer (
             dispatch_entry_latch  <= 8'h00;
             execute_fetch_pending <= 1'b0;
             ctrl_transfer_pending <= 1'b0;
-            squash_r              <= 1'b0;
             ext_pending_r         <= 1'b0;
             svc_id_r              <= 8'h00;
             sr_r                  <= SR_OK;
         end else begin
-            state    <= state_next;
-            upc_r    <= upc_next;
-            squash_r <= 1'b0;
+            state <= state_next;
+            upc_r <= upc_next;
+
+            // Clear the control-transfer pending flag exactly when the
+            // committed redirect retires.
+            if (retire_ctrl_xfer_pulse)
+                ctrl_transfer_pending <= 1'b0;
 
             case (state)
                 MSEQ_FETCH_DECODE: begin
@@ -171,8 +191,6 @@ module microsequencer (
                             ctrl_transfer_pending <= 1'b1;
                     end
 
-                    if (ctrl_transfer_pending && endi_done)
-                        ctrl_transfer_pending <= 1'b0;
                 end
 
                 MSEQ_EXECUTE: begin
@@ -211,8 +229,6 @@ module microsequencer (
                         endcase
                     end
 
-                    if (ctrl_transfer_pending && endi_done)
-                        ctrl_transfer_pending <= 1'b0;
                 end
 
                 MSEQ_WAIT_SERVICE: begin
@@ -221,8 +237,6 @@ module microsequencer (
                         execute_fetch_pending <= 1'b1;
                     end
 
-                    if (ctrl_transfer_pending && endi_done)
-                        ctrl_transfer_pending <= 1'b0;
                 end
 
                 MSEQ_FAULT_HOLD: begin
