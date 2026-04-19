@@ -12,12 +12,15 @@
 // Rung 2 additions:
 //   kill input (from microsequencer squash):
 //     - clears queue contents and cancels any inflight bus request
-//     - does NOT change fetch_ptr or queue_ready
-//     - sets queue_ready=0 to pause fetching until flush arrives
-//     - flush from commit_engine will then retarget fetch to JMP target
-//   This two-step protocol (kill -> flush) implements Contract 3+4:
-//     kill = stale-work suppression (immediate)
-//     flush = commit-owned redirect visibility (at ENDI time)
+//     - does NOT change fetch_ptr
+//     - may pause fetching until a later flush arrives if kill is used on its own
+//   flush input (from commit_engine):
+//     - is the authoritative redirect boundary
+//     - clears queue contents and retargets fetch_ptr to the committed address
+//
+// In the active direct-JMP path, squash is intended to coincide with the
+// committed redirect boundary so stale front-end work is cleared without
+// introducing speculative dispatch-time cleanup.
 //
 // Reset fetch address ownership: unchanged — commit_engine is sole owner.
 

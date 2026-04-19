@@ -1,10 +1,11 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Rung 2 reset-aligned decoder:
-//   - Decoder classifies JMP and produces M_NEXT_EIP.
-//   - Decoder consumes only the opcode byte for JMP forms.
-//   - Displacement bytes for JMP are consumed by fetch_engine services.
+// Rung 2 decoder role:
+//   - Classify in-scope JMP forms and produce decode-owned metadata.
+//   - Consume only the opcode byte for the active direct-JMP path.
+//   - Leave displacement fetch to fetch_engine services.
+//   - Hold decode results stable until dec_ack or committed-boundary squash.
 //   - Retained later-rung outputs stay present for compatibility, but the
 //     active Rung 2 JMP path must not eat displacement bytes in decode.
 
@@ -14,7 +15,7 @@ module decoder (
     input  logic        clk,
     input  logic        reset_n,
 
-    // --- Squash (from microsequencer on control-transfer acceptance) ---
+    // --- Squash (from microsequencer at committed redirect cleanup) ---
     input  logic        squash,
 
     // --- Mode context (from commit_engine) ---
