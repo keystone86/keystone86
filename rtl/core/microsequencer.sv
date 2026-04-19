@@ -58,7 +58,7 @@ module microsequencer (
     // --- Service dispatch interface ---
     output logic [7:0]  svc_id_out,
     output logic        svc_req_out,
-    input  logic [1:0]  svc_done_in,
+    input  logic        svc_done_in,
     input  logic [1:0]  svc_sr_in,
 
     // --- T2 read (computed target from flow_control) ---
@@ -127,7 +127,6 @@ module microsequencer (
         endcase
     end
 
-
     // Committed redirect cleanup pulse.
     // This is asserted only when ENDI for an in-flight control transfer
     // retires. It is intentionally not asserted at dispatch time.
@@ -190,7 +189,6 @@ module microsequencer (
                         if (entry_id_r == ENTRY_JMP_NEAR)
                             ctrl_transfer_pending <= 1'b1;
                     end
-
                 end
 
                 MSEQ_EXECUTE: begin
@@ -228,7 +226,6 @@ module microsequencer (
                             default: ;
                         endcase
                     end
-
                 end
 
                 MSEQ_WAIT_SERVICE: begin
@@ -236,7 +233,6 @@ module microsequencer (
                         sr_r                  <= svc_sr_in;
                         execute_fetch_pending <= 1'b1;
                     end
-
                 end
 
                 MSEQ_FAULT_HOLD: begin
@@ -276,7 +272,7 @@ module microsequencer (
                     upc_next   = dispatch_upc_in;
                     state_next = MSEQ_EXECUTE;
 
-                    // Stage architectural fall-through EIP
+                    // Stage architectural fall-through EIP.
                     pc_eip_en  = 1'b1;
                     pc_eip_val = next_eip_r;
                 end
@@ -318,12 +314,18 @@ module microsequencer (
                         end
 
                         UOP_ENDI: begin
-                            if (is_jmp_r) begin
+                            // Present the JMP target only while ENDI is still
+                            // in flight. Once commit reports endi_done, do not
+                            // re-present the same target on the retire-complete
+                            // cycle or commit_engine will stage it again.
+                            if (is_jmp_r && !endi_done) begin
                                 pc_target_en  = 1'b1;
                                 pc_target_val = t2_data;
                             end
+
                             endi_req  = 1'b1;
                             endi_mask = uop_imm10;
+
                             if (endi_done) begin
                                 upc_next   = 12'h000;
                                 state_next = MSEQ_FETCH_DECODE;
