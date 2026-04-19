@@ -152,6 +152,8 @@ Do not absorb target computation or transfer validation into commit.
 ### `service_dispatch`
 If service routing is required for the active Rung 2 path, it must remain pure routing and must not absorb service policy.
 
+`service_dispatch` is a thin routing layer, not a pipeline stage in its own right unless a controlling document explicitly says otherwise. Registered or latched handoff boundaries belong in the producing service and consuming control owner, not in `service_dispatch` itself.
+
 ## Behavioral contract
 
 Rung 2 must preserve these rules:
