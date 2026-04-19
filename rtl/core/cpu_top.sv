@@ -1,14 +1,8 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
-// Rung 2: Wire fetch_engine, flow_control, service_dispatch
 //
-// Rung 2 additions:
-//   - fetch_engine instantiation: FETCH_DISP8, FETCH_DISP32
-//   - flow_control instantiation: COMPUTE_REL_TARGET, VALIDATE_NEAR_TRANSFER
-//   - service_dispatch instantiation: routes svc_id to correct module
-//   - microsequencer service interface: svc_id_out, svc_req_out, svc_done_in, svc_sr_in
-//   - T2/T4 registers: shared between microsequencer and services
-//   - meta_next_eip: microsequencer -> flow_control
+// Rung 2 top-level with service-based JMP path, while preserving the
+// pre-existing top-level compatibility ports expected by earlier testbenches.
 
 import keystone86_pkg::*;
 
@@ -25,8 +19,20 @@ module cpu_top (
     input  logic [31:0] bus_din,
     input  logic        bus_ready,
 
+    // --- Compatibility ports expected by earlier rung testbenches ---
+    output logic        stk_wr_en,
+    output logic [31:0] stk_wr_addr,
+    output logic [31:0] stk_wr_data,
+    output logic        stk_rd_req,
+    output logic [31:0] stk_rd_addr,
+    input  logic [31:0] stk_rd_data,
+    input  logic        stk_rd_ready,
+    input  logic [31:0] indirect_call_target,
+    input  logic        indirect_call_target_valid,
+
     // --- Debug ports ---
     output logic [31:0] dbg_eip,
+    output logic [31:0] dbg_esp,
     output logic [1:0]  dbg_mseq_state,
     output logic [11:0] dbg_upc,
     output logic [7:0]  dbg_entry_id,
@@ -38,6 +44,9 @@ module cpu_top (
     output logic [31:0] dbg_fetch_addr
 );
 
+    // ------------------------------------------------------------
+    // Bus/prefetch
+    // ------------------------------------------------------------
     logic        fetch_req;
     logic [31:0] fetch_addr_internal;
     logic        fetch_done;
@@ -45,53 +54,66 @@ module cpu_top (
 
     logic [7:0]  q_data;
     logic        q_valid;
-    logic        q_consume_dec;   // decoder consume
-    logic        fe_q_consume;    // fetch_engine consume
+    logic        q_consume_dec;
+    logic        fe_q_consume;
     logic        q_consume;
-    assign q_consume = q_consume_dec | fe_q_consume;
     logic [31:0] q_fetch_eip;
 
     logic        flush_req;
     logic [31:0] flush_addr;
     logic        squash;
 
+    assign q_consume = q_consume_dec | fe_q_consume;
+
+    // ------------------------------------------------------------
     // Decoder -> microsequencer
+    // ------------------------------------------------------------
     logic        decode_done;
     logic [7:0]  entry_id;
     logic [31:0] next_eip;
     logic        dec_ack;
 
+    // ------------------------------------------------------------
     // Microcode ROM
+    // ------------------------------------------------------------
     logic [11:0] upc;
     logic [31:0] uinst;
     logic [7:0]  dispatch_entry;
     logic [11:0] dispatch_upc;
 
-    // Commit engine
+    // ------------------------------------------------------------
+    // Commit engine / architectural state
+    // ------------------------------------------------------------
     logic        endi_req;
     logic [9:0]  endi_mask;
     logic        endi_done;
     logic        raise_req;
     logic [3:0]  raise_fc;
     logic [31:0] raise_fe;
+
     logic        pc_eip_en;
     logic [31:0] pc_eip_val;
     logic        pc_target_en;
     logic [31:0] pc_target_val;
+
     logic        mode_prot;
     logic        cs_d_bit;
     logic [31:0] eip;
+    logic [31:0] esp;
+
     logic        fault_pending;
     logic [3:0]  fault_class;
     logic [31:0] fault_error;
 
+    // ------------------------------------------------------------
     // Service dispatch
+    // ------------------------------------------------------------
     logic [7:0]  svc_id_out;
     logic        svc_req_out;
     logic        svc_done_in;
     logic [1:0]  svc_sr_in;
 
-    // fetch_engine port
+    // fetch_engine side
     logic [7:0]  fe_svc_id;
     logic        fe_svc_req;
     logic        fe_svc_done;
@@ -99,7 +121,7 @@ module cpu_top (
     logic        fe_t4_wr_en;
     logic [31:0] fe_t4_wr_data;
 
-    // flow_control port
+    // flow_control side
     logic [7:0]  fc_svc_id;
     logic        fc_svc_req;
     logic        fc_svc_done;
@@ -107,18 +129,18 @@ module cpu_top (
     logic        fc_t2_wr_en;
     logic [31:0] fc_t2_wr_data;
 
-    // T2, T4 registers
+    // scratch/state registers used by current rung2 path
     logic [31:0] t2_r;
     logic [31:0] t4_r;
-
-    // Metadata from microsequencer
     logic [31:0] meta_next_eip;
 
+    // debug wires from microsequencer
     logic [1:0]  dbg_mseq_state_w;
     logic [11:0] dbg_upc_w;
     logic [7:0]  dbg_entry_id_w;
 
     assign dbg_eip           = eip;
+    assign dbg_esp           = esp;
     assign dbg_mseq_state    = dbg_mseq_state_w;
     assign dbg_upc           = dbg_upc_w;
     assign dbg_entry_id      = dbg_entry_id_w;
@@ -129,6 +151,9 @@ module cpu_top (
     assign dbg_decode_done   = decode_done;
     assign dbg_fetch_addr    = fetch_addr_internal;
 
+    // ------------------------------------------------------------
+    // Simple T2/T4 storage for current service path
+    // ------------------------------------------------------------
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             t2_r <= 32'h0;
@@ -139,6 +164,9 @@ module cpu_top (
         end
     end
 
+    // ------------------------------------------------------------
+    // Bus + prefetch
+    // ------------------------------------------------------------
     bus_interface u_bus (
         .clk        (clk),
         .reset_n    (reset_n),
@@ -171,6 +199,9 @@ module cpu_top (
         .fetch_data  (fetch_data)
     );
 
+    // ------------------------------------------------------------
+    // Front-end decode
+    // ------------------------------------------------------------
     decoder u_dec (
         .clk          (clk),
         .reset_n      (reset_n),
@@ -187,37 +218,45 @@ module cpu_top (
         .q_fetch_eip  (q_fetch_eip)
     );
 
+    // ------------------------------------------------------------
+    // Microsequencer + ROM
+    // ------------------------------------------------------------
     microsequencer u_mseq (
-        .clk              (clk),
-        .reset_n          (reset_n),
-        .decode_done      (decode_done),
-        .entry_id_in      (entry_id),
-        .next_eip_in      (next_eip),
-        .dec_ack          (dec_ack),
-        .squash           (squash),
-        .upc              (upc),
-        .uinst            (uinst),
-        .dispatch_entry   (dispatch_entry),
-        .dispatch_upc_in  (dispatch_upc),
-        .endi_req         (endi_req),
-        .endi_mask        (endi_mask),
-        .raise_req        (raise_req),
-        .raise_fc         (raise_fc),
-        .raise_fe         (raise_fe),
-        .endi_done        (endi_done),
-        .pc_eip_en        (pc_eip_en),
-        .pc_eip_val       (pc_eip_val),
-        .pc_target_en     (pc_target_en),
-        .pc_target_val    (pc_target_val),
-        .svc_id_out       (svc_id_out),
-        .svc_req_out      (svc_req_out),
-        .svc_done_in      (svc_done_in),
-        .svc_sr_in        (svc_sr_in),
-        .t2_data          (t2_r),
-        .meta_next_eip    (meta_next_eip),
-        .dbg_state        (dbg_mseq_state_w),
-        .dbg_upc          (dbg_upc_w),
-        .dbg_entry_id     (dbg_entry_id_w)
+        .clk             (clk),
+        .reset_n         (reset_n),
+        .decode_done     (decode_done),
+        .entry_id_in     (entry_id),
+        .next_eip_in     (next_eip),
+        .dec_ack         (dec_ack),
+        .squash          (squash),
+        .upc             (upc),
+        .uinst           (uinst),
+        .dispatch_entry  (dispatch_entry),
+        .dispatch_upc_in (dispatch_upc),
+
+        .endi_req        (endi_req),
+        .endi_mask       (endi_mask),
+        .raise_req       (raise_req),
+        .raise_fc        (raise_fc),
+        .raise_fe        (raise_fe),
+        .endi_done       (endi_done),
+
+        .pc_eip_en       (pc_eip_en),
+        .pc_eip_val      (pc_eip_val),
+        .pc_target_en    (pc_target_en),
+        .pc_target_val   (pc_target_val),
+
+        .svc_id_out      (svc_id_out),
+        .svc_req_out     (svc_req_out),
+        .svc_done_in     (svc_done_in),
+        .svc_sr_in       (svc_sr_in),
+
+        .t2_data         (t2_r),
+        .meta_next_eip   (meta_next_eip),
+
+        .dbg_state       (dbg_mseq_state_w),
+        .dbg_upc         (dbg_upc_w),
+        .dbg_entry_id    (dbg_entry_id_w)
     );
 
     microcode_rom u_rom (
@@ -228,15 +267,20 @@ module cpu_top (
         .dispatch_upc (dispatch_upc)
     );
 
+    // ------------------------------------------------------------
+    // Services
+    // ------------------------------------------------------------
     service_dispatch u_sdispatch (
         .svc_id      (svc_id_out),
         .svc_req     (svc_req_out),
         .svc_done    (svc_done_in),
         .svc_sr      (svc_sr_in),
+
         .fe_svc_id   (fe_svc_id),
         .fe_svc_req  (fe_svc_req),
         .fe_svc_done (fe_svc_done),
         .fe_svc_sr   (fe_svc_sr),
+
         .fc_svc_id   (fc_svc_id),
         .fc_svc_req  (fc_svc_req),
         .fc_svc_done (fc_svc_done),
@@ -276,6 +320,9 @@ module cpu_top (
         .fault_fc      ()
     );
 
+    // ------------------------------------------------------------
+    // Commit / architectural visibility
+    // ------------------------------------------------------------
     commit_engine u_commit (
         .clk                        (clk),
         .reset_n                    (reset_n),
@@ -285,32 +332,40 @@ module cpu_top (
         .raise_req                  (raise_req),
         .raise_fc                   (raise_fc),
         .raise_fe                   (raise_fe),
+
         .pc_gpr_en                  (1'b0),
         .pc_gpr_idx                 (3'h0),
         .pc_gpr_val                 (32'h0),
+
         .pc_eip_en                  (pc_eip_en),
         .pc_eip_val                 (pc_eip_val),
         .pc_target_en               (pc_target_en),
         .pc_target_val              (pc_target_val),
+
         .pc_ret_addr_en             (1'b0),
         .pc_ret_addr_val            (32'h0),
         .pc_ret_imm_en              (1'b0),
         .pc_ret_imm_val             (16'h0),
-        .indirect_call_target       (32'h0),
-        .indirect_call_target_valid (1'b0),
+
+        .indirect_call_target       (indirect_call_target),
+        .indirect_call_target_valid (indirect_call_target_valid),
+
         .eip                        (eip),
-        .esp                        (),
+        .esp                        (esp),
         .mode_prot                  (mode_prot),
         .cs_d_bit                   (cs_d_bit),
+
         .flush_req                  (flush_req),
         .flush_addr                 (flush_addr),
-        .stk_wr_en                  (),
-        .stk_wr_addr                (),
-        .stk_wr_data                (),
-        .stk_rd_req                 (),
-        .stk_rd_addr                (),
-        .stk_rd_data                (32'h0),
-        .stk_rd_ready               (1'b0),
+
+        .stk_wr_en                  (stk_wr_en),
+        .stk_wr_addr                (stk_wr_addr),
+        .stk_wr_data                (stk_wr_data),
+        .stk_rd_req                 (stk_rd_req),
+        .stk_rd_addr                (stk_rd_addr),
+        .stk_rd_data                (stk_rd_data),
+        .stk_rd_ready               (stk_rd_ready),
+
         .fault_pending              (fault_pending),
         .fault_class                (fault_class),
         .fault_error                (fault_error)
