@@ -1,21 +1,20 @@
 // Keystone86 / Aegis
 // rtl/core/commit_engine.sv
 //
-// Rung 3: CALL/RET stack commit + ESP architectural register
-// (includes all Rung 2 JMP behavior)
+// Current active role:
+//   Commit behavior required by the delivered Rung 2 direct-JMP path.
 //
-// Control-transfer contract:
+// Rung 2 contract:
+//   - Redirect becomes architecturally visible only at ENDI.
+//   - CM_FLUSHQ must generate a committed flush pulse.
+//   - For the active JMP path, flush_addr must be the committed redirect target.
 //   - ENDI launch must be able to consume LIVE pending EIP/target inputs
 //     in the same cycle, not only staged *_r copies.
-//   - CM_FLUSHQ must always generate a flush pulse.
-//   - For JMP, flush_addr must be the committed redirect target.
 //
-// Why this file changed:
-//   The failing trace shows ENDI CM_JMP launching with:
-//       pc_target_en=1 pc_target_val=fffffff0
-//   but staged target state is still empty on that cycle, and the queue is not
-//   flushed on retire. This file fixes that by using effective live-or-staged
-//   pending values at ENDI launch.
+// Scope note:
+//   This file may contain structural surfaces that later rungs can build on,
+//   but current Rung 2 verification claims only the bounded direct-JMP commit
+//   and flush behavior proven by the active regression.
 
 module commit_engine (
     input  logic        clk,
@@ -44,15 +43,11 @@ module commit_engine (
     input  logic        pc_target_en,
     input  logic [31:0] pc_target_val,
 
-    // --- Rung 3: CALL return address to push ---
+    // --- Reserved structural surfaces for later rungs ---
     input  logic        pc_ret_addr_en,
     input  logic [31:0] pc_ret_addr_val,
-
-    // --- Rung 3: RET imm16 stack adjustment ---
     input  logic        pc_ret_imm_en,
     input  logic [15:0] pc_ret_imm_val,
-
-    // --- Rung 3: indirect CALL target (from register file / testbench) ---
     input  logic [31:0] indirect_call_target,
     input  logic        indirect_call_target_valid,
 
@@ -66,12 +61,12 @@ module commit_engine (
     output logic        flush_req,
     output logic [31:0] flush_addr,
 
-    // --- Stack write bus (CALL: push return address) ---
+    // --- Stack write bus ---
     output logic        stk_wr_en,
     output logic [31:0] stk_wr_addr,
     output logic [31:0] stk_wr_data,
 
-    // --- Stack read bus (RET: pop return address) ---
+    // --- Stack read bus ---
     output logic        stk_rd_req,
     output logic [31:0] stk_rd_addr,
     input  logic [31:0] stk_rd_data,
@@ -93,7 +88,9 @@ module commit_engine (
     logic [3:0]  fault_class_r;
     logic [31:0] fault_error_r;
 
-    // Pending commit staging
+    // Pending commit staging. Rung 2 actively uses the EIP/target path.
+    // The remaining fields are retained as structural surfaces but are not
+    // part of current Rung 2 acceptance claims.
     logic        pc_eip_en_r;
     logic [31:0] pc_eip_val_r;
     logic        pc_target_en_r;
@@ -103,7 +100,7 @@ module commit_engine (
     logic        pc_ret_imm_en_r;
     logic [15:0] pc_ret_imm_val_r;
 
-    // RET read-wait state
+    // Reserved wait state for later-rung stack-based returns.
     logic        ret_wait_r;
     logic        ret_imm_en_saved;
     logic [15:0] ret_imm_val_saved;
@@ -112,7 +109,9 @@ module commit_engine (
     logic        endi_req_d;
     logic        reset_flush_done;
 
-    // Effective live-or-staged values for ENDI launch
+    // Effective live-or-staged values for ENDI launch. This lets the
+    // commit boundary consume the active redirect handoff even if the
+    // value is still live on the launch cycle.
     logic        eff_pc_eip_en;
     logic [31:0] eff_pc_eip_val;
     logic        eff_pc_target_en;
@@ -194,7 +193,7 @@ module commit_engine (
                 fault_error_r   <= raise_fe;
             end
 
-            // Stage pending values for later visibility / fallback use
+            // Stage pending values for later visibility / fallback use.
             if (pc_eip_en) begin
                 pc_eip_en_r  <= 1'b1;
                 pc_eip_val_r <= pc_eip_val;
@@ -215,7 +214,7 @@ module commit_engine (
                 pc_ret_imm_val_r <= pc_ret_imm_val;
             end
 
-            // RET completion path
+            // Reserved RET completion path for later rungs.
             if (ret_wait_r) begin
                 if (stk_rd_ready) begin
                     ret_wait_r        <= 1'b0;
@@ -248,10 +247,9 @@ module commit_engine (
             end
             // ENDI launch edge only
             else if (endi_req && !endi_req_d) begin
-                // CALL / RET
+                // Reserved CALL / RET commit path
                 if (endi_mask[4] && !fault_pending_r) begin
                     if (eff_pc_ret_addr_en) begin
-                        // CALL
                         stk_wr_en   <= 1'b1;
                         stk_wr_addr <= esp_r - 32'h4;
                         stk_wr_data <= eff_pc_ret_addr_val;
@@ -288,7 +286,6 @@ module commit_engine (
 
                         endi_done <= 1'b1;
                     end else begin
-                        // RET
                         stk_rd_req        <= 1'b1;
                         stk_rd_addr       <= esp_r;
                         ret_wait_r        <= 1'b1;
@@ -296,7 +293,7 @@ module commit_engine (
                         ret_imm_val_saved <= eff_pc_ret_imm_val;
                     end
                 end
-                // JMP / redirect commit
+                // Active Rung 2 JMP / redirect commit path
                 else if (endi_mask[9] && !endi_mask[4] && !fault_pending_r) begin
                     if (eff_pc_target_en) begin
                         eip_r      <= eff_pc_target_val;
@@ -307,7 +304,7 @@ module commit_engine (
                         flush_req  <= 1'b1;
                         flush_addr <= eff_pc_eip_val;
                     end else begin
-                        // CM_FLUSHQ still means the queue must restart
+                        // CM_FLUSHQ still means the queue must restart.
                         flush_req  <= 1'b1;
                         flush_addr <= eip_r;
                     end
