@@ -194,22 +194,25 @@ module commit_engine (
             end
 
             // Stage pending values for later visibility / fallback use.
-            if (pc_eip_en) begin
+            // While a RET stack-pop completion is in flight, do not restage
+            // fresh decoder fall-through state on top of the architectural
+            // return result that is about to be restored from the stack.
+            if (!ret_wait_r && pc_eip_en) begin
                 pc_eip_en_r  <= 1'b1;
                 pc_eip_val_r <= pc_eip_val;
             end
 
-            if (pc_target_en) begin
+            if (!ret_wait_r && pc_target_en) begin
                 pc_target_en_r  <= 1'b1;
                 pc_target_val_r <= pc_target_val;
             end
 
-            if (pc_ret_addr_en) begin
+            if (!ret_wait_r && pc_ret_addr_en) begin
                 pc_ret_addr_en_r  <= 1'b1;
                 pc_ret_addr_val_r <= pc_ret_addr_val;
             end
 
-            if (pc_ret_imm_en) begin
+            if (!ret_wait_r && pc_ret_imm_en) begin
                 pc_ret_imm_en_r  <= 1'b1;
                 pc_ret_imm_val_r <= pc_ret_imm_val;
             end
