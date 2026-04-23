@@ -115,7 +115,7 @@ The passing baseline section must be filled in with the actual commit hash from 
 The following actions require re-running verification before the rung can still be claimed as passing:
 
 - any RTL change to a module in the rung's simulation source list
-- any change to `microcode/build/` artifacts (re-run `make ucode` then re-verify)
+- any change to `build/microcode/` artifacts (re-run `make ucode` then re-verify)
 - any change to the testbench itself
 - any change to the shared package or include files
 

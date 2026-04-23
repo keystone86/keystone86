@@ -3,7 +3,7 @@ from pathlib import Path
 checks = {
     'frozen_manifest': Path('docs/spec/frozen/IMPORT_MANIFEST.md').exists(),
     'ucode_main': Path('microcode/src/ucode_main.uasm').exists(),
-    'bootstrap_dispatch': Path('microcode/build/dispatch.hex').exists(),
+    'bootstrap_dispatch': Path('build/microcode/dispatch.hex').exists(),
     'cpu_top': Path('rtl/core/cpu_top.sv').exists(),
 }
 

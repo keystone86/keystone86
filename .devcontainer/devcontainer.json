@@ -1,0 +1,43 @@
+{
+  "name": "Keystone86 Dev Environment",
+  "dockerFile": "../docker/Dockerfile",
+  "workspaceFolder": "/work",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
+
+  "remoteEnv": {
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"
+  },
+
+  "mounts": [
+    "source=keystone86-claude-auth,target=/root/.claude,type=volume"
+  ],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "mshr-h.veriloghdl",
+        "leafvmaple.vscode-systemverilog",
+        "ms-python.python"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "files.eol": "\n"
+      }
+    }
+  },
+
+  "postCreateCommand": "make codegen && make ucode && make namespace-check && make ucode-bootstrap-check",
+
+  "features": {}
+
+  // ------------------------------------------------------------
+  // NOTE ON CODESPACES PREBUILDS
+  // For faster Codespace startup, enable prebuilds in your repo:
+  //   GitHub repo → Settings → Codespaces → Prebuild configuration
+  // Point it at this devcontainer.json on the main branch.
+  // Without prebuilds, first Codespace creation builds the full
+  // image which may take 15-20 minutes due to the tool stack size.
+  // ------------------------------------------------------------
+}

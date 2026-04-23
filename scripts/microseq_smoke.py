@@ -13,7 +13,7 @@ for line in entry_defs.splitlines():
     if m:
         entry_map[m.group(1)] = int(m.group(2), 16)
 
-dispatch_hex = (root / 'microcode/build/dispatch.hex').read_text(encoding='utf-8').splitlines()
+dispatch_hex = (root / 'build/microcode/dispatch.hex').read_text(encoding='utf-8').splitlines()
 dispatch_vals = [x.strip() for x in dispatch_hex if x.strip() and not x.startswith(';')]
 
 failures = []

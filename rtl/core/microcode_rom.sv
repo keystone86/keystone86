@@ -23,8 +23,8 @@
 //   directory. Therefore the defaults are repo-root-relative.
 
 module microcode_rom #(
-    parameter string UCODE_FILE    = "microcode/build/ucode.hex",
-    parameter string DISPATCH_FILE = "microcode/build/dispatch.hex"
+    parameter string UCODE_FILE    = "build/microcode/ucode.hex",
+    parameter string DISPATCH_FILE = "build/microcode/dispatch.hex"
 ) (
     input  logic        clk,
 

@@ -39,9 +39,9 @@ SYM = {
 
 failures = []
 
-dispatch_path = root / 'microcode/build/dispatch.hex'
+dispatch_path = root / 'build/microcode/dispatch.hex'
 if not dispatch_path.exists():
-    print('FAIL: microcode/build/dispatch.hex not found')
+    print('FAIL: build/microcode/dispatch.hex not found')
     sys.exit(1)
 
 dispatch_lines = [l.strip() for l in dispatch_path.read_text().splitlines()
@@ -57,9 +57,9 @@ else:
                 f'dispatch.hex[0x{idx:02X}] ({SYM.get(idx,"?")}): '
                 f'expected 0x{expected_upc:03X}, got 0x{actual_upc:03X}')
 
-ucode_path = root / 'microcode/build/ucode.hex'
+ucode_path = root / 'build/microcode/ucode.hex'
 if not ucode_path.exists():
-    print('FAIL: microcode/build/ucode.hex not found')
+    print('FAIL: build/microcode/ucode.hex not found')
     sys.exit(1)
 
 ucode_lines = [l.strip() for l in ucode_path.read_text().splitlines()

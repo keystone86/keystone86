@@ -58,7 +58,7 @@ TESTS = [
     },
 ]
 
-INCLUDE_DIRS = ["rtl/include", "microcode/build"]
+INCLUDE_DIRS = ["rtl/include", "build/microcode"]
 
 
 def run_test(test: dict, sim_dir: Path, verbose: bool) -> bool:
@@ -118,7 +118,7 @@ def main() -> int:
     print()
 
     prereq_errors: list[str] = []
-    for required in ["microcode/build/ucode.hex", "microcode/build/dispatch.hex"]:
+    for required in ["build/microcode/ucode.hex", "build/microcode/dispatch.hex"]:
         if not (ROOT / required).exists():
             prereq_errors.append(f"Missing: {required} — run 'make ucode' first")
     if not shutil.which("iverilog"):
@@ -130,7 +130,7 @@ def main() -> int:
             print(f"  {msg}")
         return 1
 
-    sim_dir = ROOT / "sim" / "build" / "rung2"
+    sim_dir = ROOT / "build" / "sim" / "rung2"
     sim_dir.mkdir(parents=True, exist_ok=True)
 
     passed = 0

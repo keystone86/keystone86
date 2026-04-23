@@ -1,6 +1,6 @@
 from pathlib import Path
 
-build = Path("microcode/build")
+build = Path("build/microcode")
 build.mkdir(parents=True, exist_ok=True)
 
 # --------------------------------------------------------------------

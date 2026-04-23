@@ -10,9 +10,9 @@ The initial ROM seed fixes:
 - `ENTRY_RESET`
 
 Generated bootstrap artifacts:
-- `microcode/build/dispatch.hex`
-- `microcode/build/ucode.hex`
-- `microcode/build/ucode.lst`
+- `build/microcode/dispatch.hex`
+- `build/microcode/ucode.hex`
+- `build/microcode/ucode.lst`
 
 Validation:
 ```bash

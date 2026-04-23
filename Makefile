@@ -1,9 +1,15 @@
 SHELL := /bin/bash
 
-.PHONY: help tree spec-check lint ucode ucode-clean sim-smoke regress formal clean bootstrap-info
+.PHONY: help tree spec-check lint ucode ucode-clean sim-smoke regress formal clean bootstrap-info \
+        dev dev-build dev-fpga
 
 help:
 	@echo "Keystone86 task runner"
+	@echo ""
+	@echo "Docker targets:"
+	@echo "  make dev-build             - build the dev container image (first time + after Dockerfile changes)"
+	@echo "  make dev                   - enter dev container (sim, formal, claude)"
+	@echo "  make dev-fpga              - enter dev container with USB passthrough (ECP5 flashing)"
 	@echo ""
 	@echo "Targets:"
 	@echo "  make tree                  - print repo tree"
@@ -39,7 +45,48 @@ help:
 	@echo "  make rung3-sim             - compile and run Rung 3 RTL simulation"
 	@echo "  make rung3-regress         - run Rung 3 regression (includes Rung 0 + Rung 1 + Rung 2)"
 	@echo "  make rung3-clean           - remove Rung 3 simulation artifacts"
-	@echo "  make clean                 - remove generated files"
+	@echo "  make clean                 - remove all generated files"
+
+# ----------------------------------------------------------------
+# Docker dev environment
+# ----------------------------------------------------------------
+
+dev-build:
+	docker build -t keystone86-dev -f docker/Dockerfile .
+
+# Normal dev session — sim, formal, claude, git
+# Auth: named volume persists Claude Code credentials (login once per machine)
+# SSH: mounts host ~/.ssh read-only for git push to GitHub
+# Gitconfig: mounts host ~/.gitconfig read-only for git identity
+# ANTHROPIC_API_KEY passed through as fallback for Codespaces
+dev:
+	docker run --rm -it \
+	  -v keystone86-claude-auth:/root/.claude \
+	  -v $(HOME)/.ssh:/root/.ssh:ro \
+	  -v $(HOME)/.gitconfig:/root/.gitconfig:ro \
+	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+	  -v $(PWD):/work \
+	  -w /work \
+	  keystone86-dev
+
+# Hardware session — adds USB passthrough for ECP5 flashing
+# Not available in Codespaces (no USB access)
+dev-fpga:
+	docker run --rm -it \
+	  -v keystone86-claude-auth:/root/.claude \
+	  -v $(HOME)/.ssh:/root/.ssh:ro \
+	  -v $(HOME)/.gitconfig:/root/.gitconfig:ro \
+	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+	  -v $(PWD):/work \
+	  -w /work \
+	  --device /dev/bus/usb \
+	  -v /dev/bus/usb:/dev/bus/usb \
+	  --privileged \
+	  keystone86-dev
+
+# ----------------------------------------------------------------
+# Project checks
+# ----------------------------------------------------------------
 
 tree:
 	@python3 scripts/tree.py .
@@ -49,25 +96,6 @@ spec-check:
 
 lint:
 	@python3 scripts/lint.py
-
-ucode:
-	@python3 scripts/ucode_build.py
-
-ucode-clean:
-	@rm -f microcode/build/ucode.hex microcode/build/dispatch.hex microcode/build/ucode.lst microcode/build/dispatch.lst
-	@echo "Removed generated microcode outputs."
-
-sim-smoke:
-	@python3 scripts/sim_smoke.py
-
-regress:
-	@python3 scripts/regress.py
-
-formal:
-	@python3 scripts/formal.py
-
-clean: ucode-clean rung0-clean rung1-clean rung2-clean rung3-clean
-	@echo "Project clean complete."
 
 bootstrap-info:
 	@echo "Keystone86 / Aegis bootstrap repository"
@@ -93,8 +121,33 @@ version-status:
 release-notes:
 	@python3 scripts/release_notes_stub.py
 
+# ----------------------------------------------------------------
+# Build — all generated artifacts go under build/
+# ----------------------------------------------------------------
+
+ucode:
+	@python3 scripts/ucode_build.py
+
 ucode-bootstrap-check:
 	@python3 scripts/ucode_bootstrap_check.py
+
+ucode-clean:
+	@rm -f build/microcode/ucode.hex build/microcode/dispatch.hex \
+	       build/microcode/ucode.lst build/microcode/dispatch.lst
+	@echo "Removed generated microcode outputs."
+
+# ----------------------------------------------------------------
+# Smoke checks (host-side, no RTL simulation)
+# ----------------------------------------------------------------
+
+sim-smoke:
+	@python3 scripts/sim_smoke.py
+
+regress:
+	@python3 scripts/regress.py
+
+formal:
+	@python3 scripts/formal.py
 
 decode-dispatch-smoke:
 	@python3 scripts/decode_dispatch_smoke.py
@@ -115,10 +168,11 @@ bootstrap-report:
 	@python3 scripts/bootstrap_report.py
 
 # ----------------------------------------------------------------
-# Shared RTL source lists
+# Shared RTL source lists and include paths
+# All build artifacts go under build/ — never into source directories
 # ----------------------------------------------------------------
 
-IVERILOG_INCDIRS = -I rtl/include -I microcode/build
+IVERILOG_INCDIRS = -I rtl/include -I build/microcode
 
 RTL_SOURCES_COMMON = \
   rtl/include/keystone86_pkg.sv \
@@ -144,20 +198,20 @@ IVERILOG_SOURCES = \
 
 rung0-sim: ucode
 	@echo "--- Rung 0: compiling RTL ---"
-	@mkdir -p sim/build/rung0
+	@mkdir -p build/sim/rung0
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
-		-o sim/build/rung0/tb_rung0_reset_loop.vvp \
+		-o build/sim/rung0/tb_rung0_reset_loop.vvp \
 		$(IVERILOG_SOURCES)
 	@echo "--- Rung 0: running simulation ---"
-	vvp sim/build/rung0/tb_rung0_reset_loop.vvp
+	vvp build/sim/rung0/tb_rung0_reset_loop.vvp
 
 rung0-regress: ucode
 	@echo "--- Rung 0 regression ---"
 	@python3 scripts/rung0_regress.py
 
 rung0-clean:
-	@rm -rf sim/build/rung0
+	@rm -rf build/sim/rung0
 	@echo "Rung 0 build artifacts removed."
 
 .PHONY: rung0-sim rung0-regress rung0-clean
@@ -173,20 +227,20 @@ IVERILOG_SOURCES_RUNG1 = \
 
 rung1-sim: ucode
 	@echo "--- Rung 1: compiling RTL ---"
-	@mkdir -p sim/build/rung1
+	@mkdir -p build/sim/rung1
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
-		-o sim/build/rung1/tb_rung1_nop_loop.vvp \
+		-o build/sim/rung1/tb_rung1_nop_loop.vvp \
 		$(IVERILOG_SOURCES_RUNG1)
 	@echo "--- Rung 1: running simulation ---"
-	vvp sim/build/rung1/tb_rung1_nop_loop.vvp
+	vvp build/sim/rung1/tb_rung1_nop_loop.vvp
 
 rung1-regress: ucode
 	@echo "--- Rung 1 regression (includes Rung 0 baseline check) ---"
 	@python3 scripts/rung1_regress.py
 
 rung1-clean:
-	@rm -rf sim/build/rung1
+	@rm -rf build/sim/rung1
 	@echo "Rung 1 build artifacts removed."
 
 .PHONY: rung1-sim rung1-regress rung1-clean
@@ -202,27 +256,27 @@ IVERILOG_SOURCES_RUNG2 = \
 
 rung2-sim: ucode
 	@echo "--- Rung 2: compiling RTL ---"
-	@mkdir -p sim/build/rung2
+	@mkdir -p build/sim/rung2
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
-		-o sim/build/rung2/tb_rung2_jmp.vvp \
+		-o build/sim/rung2/tb_rung2_jmp.vvp \
 		$(IVERILOG_SOURCES_RUNG2)
 	@echo "--- Rung 2: running simulation ---"
-	vvp sim/build/rung2/tb_rung2_jmp.vvp
+	vvp build/sim/rung2/tb_rung2_jmp.vvp
 
 rung2-regress: ucode
 	@echo "--- Rung 2 regression (includes Rung 0 + Rung 1 baseline checks) ---"
 	@python3 scripts/rung1_regress.py
 	@echo "--- Rung 2: running Rung 2 testbench ---"
-	@mkdir -p sim/build/rung2
+	@mkdir -p build/sim/rung2
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
-		-o sim/build/rung2/tb_rung2_jmp.vvp \
+		-o build/sim/rung2/tb_rung2_jmp.vvp \
 		$(IVERILOG_SOURCES_RUNG2)
-	vvp sim/build/rung2/tb_rung2_jmp.vvp
+	vvp build/sim/rung2/tb_rung2_jmp.vvp
 
 rung2-clean:
-	@rm -rf sim/build/rung2
+	@rm -rf build/sim/rung2
 	@echo "Rung 2 build artifacts removed."
 
 .PHONY: rung2-sim rung2-regress rung2-clean
@@ -238,32 +292,40 @@ IVERILOG_SOURCES_RUNG3 = \
 
 rung3-sim: ucode
 	@echo "--- Rung 3: compiling RTL ---"
-	@mkdir -p sim/build/rung3
+	@mkdir -p build/sim/rung3
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
-		-o sim/build/rung3/tb_rung3_call_ret.vvp \
+		-o build/sim/rung3/tb_rung3_call_ret.vvp \
 		$(IVERILOG_SOURCES_RUNG3)
 	@echo "--- Rung 3: running simulation ---"
-	vvp sim/build/rung3/tb_rung3_call_ret.vvp
+	vvp build/sim/rung3/tb_rung3_call_ret.vvp
 
 rung3-regress: ucode
 	@echo "--- Rung 3 regression (includes Rung 0 + Rung 1 + Rung 2 baseline checks) ---"
 	@python3 scripts/rung1_regress.py
-	@mkdir -p sim/build/rung2
+	@mkdir -p build/sim/rung2
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
-		-o sim/build/rung2/tb_rung2_jmp.vvp \
+		-o build/sim/rung2/tb_rung2_jmp.vvp \
 		$(IVERILOG_SOURCES_RUNG2)
-	vvp sim/build/rung2/tb_rung2_jmp.vvp
-	@mkdir -p sim/build/rung3
+	vvp build/sim/rung2/tb_rung2_jmp.vvp
+	@mkdir -p build/sim/rung3
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
-		-o sim/build/rung3/tb_rung3_call_ret.vvp \
+		-o build/sim/rung3/tb_rung3_call_ret.vvp \
 		$(IVERILOG_SOURCES_RUNG3)
-	vvp sim/build/rung3/tb_rung3_call_ret.vvp
+	vvp build/sim/rung3/tb_rung3_call_ret.vvp
 
 rung3-clean:
-	@rm -rf sim/build/rung3
+	@rm -rf build/sim/rung3
 	@echo "Rung 3 build artifacts removed."
 
 .PHONY: rung3-sim rung3-regress rung3-clean
+
+# ----------------------------------------------------------------
+# Clean — single build/ directory covers everything
+# ----------------------------------------------------------------
+
+clean:
+	@rm -rf build/
+	@echo "Project clean complete."

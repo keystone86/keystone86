@@ -2,7 +2,7 @@
 
 Keystone86 is an in-progress clean-room x86 RTL core project focused on building a structured, understandable, and maintainable 80486-class-compatible design path.
 
-The project is organized around **spec-first development**, explicit ownership boundaries between blocks, generated/shared definitions, and staged bring-up through simulation "rungs." The current codebase includes working bootstrap infrastructure plus implemented early front-end/control-path bring-up through **Rung 2**.
+The project is organized around **spec-first development**, explicit ownership boundaries between blocks, generated/shared definitions, and staged bring-up through simulation "rungs." The authoritative passing baseline is **Rung 2**. Rung 3 is being re-proven from the clean Rung 2 baseline after drift was discovered during Rung 4 work.
 
 ## Current status
 
@@ -21,6 +21,7 @@ What is present now:
 - Rung 0 simulation target — **passing**
 - Rung 1 simulation target — **passing**
 - Rung 2 simulation target — **passing**
+- Rung 3 — **needs re-proof** (drift discovered during Rung 4, reset to Rung 2 baseline)
 - self-checking simulation testbenches for early bring-up
 
 What is **not** present yet:
@@ -80,6 +81,77 @@ Run:
 ```bash
 make rung2-sim
 ```
+
+### Rung 3
+Near CALL and RET service path.
+
+Goal:
+- near CALL pushes correct return address, decrements ESP
+- near RET restores EIP and ESP exactly
+- RET imm16 applies post-pop stack adjustment
+- nested CALL/RET depth 4 all unwind correctly
+- stack-touching control-transfer path proven end-to-end
+
+Run:
+```bash
+make rung3-sim
+```
+
+## Development environment
+
+The recommended way to develop on this project is the Docker-based dev
+environment. It provides a complete, reproducible toolchain for every
+contributor without installing anything on your host system.
+
+### Tools included
+
+- `iverilog` + `vvp` — RTL simulation
+- `verilator` — fast simulation and lint
+- `gtkwave` — waveform inspection
+- `yosys` — synthesis frontend
+- `nextpnr-ecp5` + `prjtrellis` — ECP5 place and route
+- `openFPGALoader` — ECP5 hardware flashing
+- `symbiyosys` + `z3` — formal verification
+- `sv2v` — SystemVerilog to Verilog conversion
+- `python3` + `pytest` + `pyyaml` + `jinja2` + `click` — scripting layer
+- `make`, `git`, `ripgrep`, `jq`, `tree`, `dos2unix`, `entr` — repo tooling
+- `claude` (Claude Code) — AI coding agent
+
+### First-time setup
+
+```bash
+# Build the image (once, or after Dockerfile changes)
+make dev-build
+
+# Enter the dev environment
+make dev
+```
+
+On first entry, run `claude` to log in with your personal Anthropic account.
+Your credentials persist in a local Docker volume (`keystone86-claude-auth`)
+and survive container restarts.
+
+Your host `~/.ssh` and `~/.gitconfig` are mounted read-only into the
+container. Git push to GitHub works from inside the container using your
+existing SSH key. Claude Code can commit and push on your behalf.
+
+### Daily workflow
+
+```bash
+make dev         # enter dev environment (sim, formal, claude, git)
+make dev-fpga    # enter dev environment with USB passthrough (ECP5 flashing)
+```
+
+Inside the container, all simulation, formal, synthesis, and git operations
+work normally. Your host system needs nothing installed except Docker.
+
+### Codespaces
+
+The repo includes `.devcontainer/devcontainer.json` for GitHub Codespaces
+support. The same Docker image is used. Set `ANTHROPIC_API_KEY` as a
+personal Codespaces secret before opening a Codespace.
+
+Note: `make dev-fpga` (USB passthrough) is not available in Codespaces.
 
 ## Project principles
 
@@ -162,7 +234,7 @@ after cloning. Run these two commands before anything else:
 
 ```bash
 make codegen   # generates microcode/tools/generators/exports/*.inc
-make ucode     # generates microcode/build/*.hex and *.lst
+make ucode     # generates build/microcode/*.hex and *.lst
 ```
 
 `make codegen` must be run once after a fresh clone and any time
@@ -174,7 +246,7 @@ make ucode     # generates microcode/build/*.hex and *.lst
 ```bash
 make namespace-check       # confirms namespace export files are present
 make ucode-bootstrap-check # confirms microcode ROM seed is consistent
-make rung2-regress         # runs Rung 0 + Rung 1 + Rung 2 full baseline
+make rung2-regress         # runs Rung 0 + Rung 1 + Rung 2 full baseline (authoritative passing baseline)
 ```
 
 ### Run the early bring-up simulations
@@ -182,6 +254,7 @@ make rung2-regress         # runs Rung 0 + Rung 1 + Rung 2 full baseline
 make rung0-sim
 make rung1-sim
 make rung2-sim
+make rung3-sim
 ```
 
 ### Run regression (each rung includes all prior rungs)
@@ -189,6 +262,7 @@ make rung2-sim
 make rung0-regress
 make rung1-regress
 make rung2-regress
+make rung3-regress
 ```
 
 ### Run all bootstrap smoke checks

@@ -6,7 +6,7 @@
     make rung1-regress  # run Rung 1 + Rung 0 baseline together
 
 Prerequisites: `iverilog` installed, repo root as working directory.
-Run `make ucode` first if `microcode/build/` is empty.
+Run `make ucode` first if `build/microcode/` is empty.
 
 ## Tests
 
