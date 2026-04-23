@@ -1,8 +1,11 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 2 top-level with service-based JMP path, while preserving the
-// pre-existing top-level compatibility ports expected by earlier testbenches.
+// Bounded top-level wiring for Rung 3 CALL/RET while preserving the
+// existing Rung 0/1/2 paths and interfaces expected by current testbenches.
+//
+// This file does not invent new behavior. It only forwards decoder-owned
+// Rung 3 metadata into the existing microsequencer/commit path.
 
 import keystone86_pkg::*;
 
@@ -71,6 +74,13 @@ module cpu_top (
     logic        decode_done;
     logic [7:0]  entry_id;
     logic [31:0] next_eip;
+    logic [31:0] target_eip_dec;
+    logic        has_target_dec;
+    logic        is_call_dec;
+    logic        is_ret_dec;
+    logic        has_ret_imm_dec;
+    logic [15:0] ret_imm_dec;
+    logic [7:0]  modrm_byte_dec;
     logic        dec_ack;
 
     // ------------------------------------------------------------
@@ -95,6 +105,10 @@ module cpu_top (
     logic [31:0] pc_eip_val;
     logic        pc_target_en;
     logic [31:0] pc_target_val;
+    logic        pc_ret_addr_en;
+    logic [31:0] pc_ret_addr_val;
+    logic        pc_ret_imm_en;
+    logic [15:0] pc_ret_imm_val;
 
     logic        mode_prot;
     logic        cs_d_bit;
@@ -129,12 +143,10 @@ module cpu_top (
     logic        fc_t2_wr_en;
     logic [31:0] fc_t2_wr_data;
 
-    // scratch/state registers used by current rung2 path
     logic [31:0] t2_r;
     logic [31:0] t4_r;
     logic [31:0] meta_next_eip;
 
-    // debug wires from microsequencer
     logic [1:0]  dbg_mseq_state_w;
     logic [11:0] dbg_upc_w;
     logic [7:0]  dbg_entry_id_w;
@@ -214,6 +226,13 @@ module cpu_top (
         .decode_done  (decode_done),
         .entry_id     (entry_id),
         .next_eip     (next_eip),
+        .target_eip   (target_eip_dec),
+        .has_target   (has_target_dec),
+        .is_call      (is_call_dec),
+        .is_ret       (is_ret_dec),
+        .has_ret_imm  (has_ret_imm_dec),
+        .ret_imm      (ret_imm_dec),
+        .modrm_byte   (modrm_byte_dec),
         .dec_ack      (dec_ack),
         .q_fetch_eip  (q_fetch_eip)
     );
@@ -227,6 +246,12 @@ module cpu_top (
         .decode_done     (decode_done),
         .entry_id_in     (entry_id),
         .next_eip_in     (next_eip),
+        .target_eip_in   (target_eip_dec),
+        .has_target_in   (has_target_dec),
+        .is_call_in      (is_call_dec),
+        .is_ret_in       (is_ret_dec),
+        .has_ret_imm_in  (has_ret_imm_dec),
+        .ret_imm_in      (ret_imm_dec),
         .dec_ack         (dec_ack),
         .squash          (squash),
         .upc             (upc),
@@ -245,6 +270,10 @@ module cpu_top (
         .pc_eip_val      (pc_eip_val),
         .pc_target_en    (pc_target_en),
         .pc_target_val   (pc_target_val),
+        .pc_ret_addr_en  (pc_ret_addr_en),
+        .pc_ret_addr_val (pc_ret_addr_val),
+        .pc_ret_imm_en   (pc_ret_imm_en),
+        .pc_ret_imm_val  (pc_ret_imm_val),
 
         .svc_id_out      (svc_id_out),
         .svc_req_out     (svc_req_out),
@@ -321,7 +350,7 @@ module cpu_top (
     );
 
     // ------------------------------------------------------------
-    // Commit / architectural visibility
+    // Commit / architectural state
     // ------------------------------------------------------------
     commit_engine u_commit (
         .clk                        (clk),
@@ -341,12 +370,10 @@ module cpu_top (
         .pc_eip_val                 (pc_eip_val),
         .pc_target_en               (pc_target_en),
         .pc_target_val              (pc_target_val),
-
-        .pc_ret_addr_en             (1'b0),
-        .pc_ret_addr_val            (32'h0),
-        .pc_ret_imm_en              (1'b0),
-        .pc_ret_imm_val             (16'h0),
-
+        .pc_ret_addr_en             (pc_ret_addr_en),
+        .pc_ret_addr_val            (pc_ret_addr_val),
+        .pc_ret_imm_en              (pc_ret_imm_en),
+        .pc_ret_imm_val             (pc_ret_imm_val),
         .indirect_call_target       (indirect_call_target),
         .indirect_call_target_valid (indirect_call_target_valid),
 

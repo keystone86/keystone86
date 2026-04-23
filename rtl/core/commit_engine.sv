@@ -2,19 +2,27 @@
 // rtl/core/commit_engine.sv
 //
 // Current active role:
-//   Commit behavior required by the delivered Rung 2 direct-JMP path.
+//   Commit behavior required by the delivered Rung 2 direct-JMP path and the
+//   bounded Rung 3 CALL/RET path.
 //
-// Rung 2 contract:
+// Rung 2 / Rung 3 contract:
 //   - Redirect becomes architecturally visible only at ENDI.
 //   - CM_FLUSHQ must generate a committed flush pulse.
-//   - For the active JMP path, flush_addr must be the committed redirect target.
-//   - ENDI launch must be able to consume LIVE pending EIP/target inputs
-//     in the same cycle, not only staged *_r copies.
+//   - For the active JMP/CALL path, flush_addr must be the committed redirect target.
+//   - RET must restore architectural EIP from the stack pop path and update ESP
+//     only when that pop completes.
 //
-// Scope note:
-//   This file may contain structural surfaces that later rungs can build on,
-//   but current Rung 2 verification claims only the bounded direct-JMP commit
-//   and flush behavior proven by the active regression.
+// Current failing shape:
+//   - CALL behavior is already correct.
+//   - RET ENDI fires, but EIP/ESP still reflect fall-through state instead of
+//     the stack-pop restore result. :contentReference[oaicite:0]{index=0}
+//
+// Bounded repair:
+//   - On RET launch, clear any staged fall-through / target metadata before
+//     entering the stack-pop wait path.
+//   - While RET completion is pending, do not restage fresh fall-through state.
+//   - On stack-pop completion, restore EIP from stk_rd_data and apply the RET
+//     immediate adjustment (if any).
 
 module commit_engine (
     input  logic        clk,
@@ -30,7 +38,7 @@ module commit_engine (
     input  logic [3:0]  raise_fc,
     input  logic [31:0] raise_fe,
 
-    // --- Pending GPR commit (unused in active Rung 2 path) ---
+    // --- Pending GPR commit (unused in active path) ---
     input  logic        pc_gpr_en,
     input  logic [2:0]  pc_gpr_idx,
     input  logic [31:0] pc_gpr_val,
@@ -43,11 +51,13 @@ module commit_engine (
     input  logic        pc_target_en,
     input  logic [31:0] pc_target_val,
 
-    // --- Reserved structural surfaces for later rungs ---
+    // --- Bounded Rung 3 CALL/RET metadata ---
     input  logic        pc_ret_addr_en,
     input  logic [31:0] pc_ret_addr_val,
     input  logic        pc_ret_imm_en,
     input  logic [15:0] pc_ret_imm_val,
+
+    // --- Bounded Rung 3 indirect CALL target ---
     input  logic [31:0] indirect_call_target,
     input  logic        indirect_call_target_valid,
 
@@ -61,12 +71,12 @@ module commit_engine (
     output logic        flush_req,
     output logic [31:0] flush_addr,
 
-    // --- Stack write bus ---
+    // --- Stack write bus (CALL: push return address) ---
     output logic        stk_wr_en,
     output logic [31:0] stk_wr_addr,
     output logic [31:0] stk_wr_data,
 
-    // --- Stack read bus ---
+    // --- Stack read bus (RET: pop return address) ---
     output logic        stk_rd_req,
     output logic [31:0] stk_rd_addr,
     input  logic [31:0] stk_rd_data,
@@ -81,16 +91,12 @@ module commit_engine (
     localparam logic [31:0] RESET_FETCH_ADDR = 32'hFFFFFFF0;
     localparam logic [31:0] RESET_ESP        = 32'h000FFFF0;
 
-    // Architectural registers
     logic [31:0] eip_r;
     logic [31:0] esp_r;
     logic        fault_pending_r;
     logic [3:0]  fault_class_r;
     logic [31:0] fault_error_r;
 
-    // Pending commit staging. Rung 2 actively uses the EIP/target path.
-    // The remaining fields are retained as structural surfaces but are not
-    // part of current Rung 2 acceptance claims.
     logic        pc_eip_en_r;
     logic [31:0] pc_eip_val_r;
     logic        pc_target_en_r;
@@ -100,18 +106,13 @@ module commit_engine (
     logic        pc_ret_imm_en_r;
     logic [15:0] pc_ret_imm_val_r;
 
-    // Reserved wait state for later-rung stack-based returns.
     logic        ret_wait_r;
     logic        ret_imm_en_saved;
     logic [15:0] ret_imm_val_saved;
 
-    // ENDI rising-edge detection
     logic        endi_req_d;
     logic        reset_flush_done;
 
-    // Effective live-or-staged values for ENDI launch. This lets the
-    // commit boundary consume the active redirect handoff even if the
-    // value is still live on the launch cycle.
     logic        eff_pc_eip_en;
     logic [31:0] eff_pc_eip_val;
     logic        eff_pc_target_en;
@@ -172,7 +173,6 @@ module commit_engine (
             stk_rd_req        <= 1'b0;
             stk_rd_addr       <= 32'h0;
         end else begin
-            // Default pulse clears
             flush_req  <= 1'b0;
             endi_done  <= 1'b0;
             stk_wr_en  <= 1'b0;
@@ -180,7 +180,6 @@ module commit_engine (
 
             endi_req_d <= endi_req;
 
-            // Initial authoritative reset flush
             if (!reset_flush_done) begin
                 flush_req        <= 1'b1;
                 flush_addr       <= RESET_FETCH_ADDR;
@@ -193,10 +192,8 @@ module commit_engine (
                 fault_error_r   <= raise_fe;
             end
 
-            // Stage pending values for later visibility / fallback use.
-            // While a RET stack-pop completion is in flight, do not restage
-            // fresh decoder fall-through state on top of the architectural
-            // return result that is about to be restored from the stack.
+            // Preserve pending values for launch, but never restage while the
+            // RET pop-completion path is in flight.
             if (!ret_wait_r && pc_eip_en) begin
                 pc_eip_en_r  <= 1'b1;
                 pc_eip_val_r <= pc_eip_val;
@@ -217,7 +214,8 @@ module commit_engine (
                 pc_ret_imm_val_r <= pc_ret_imm_val;
             end
 
-            // Reserved RET completion path for later rungs.
+            // RET completion path: architectural restore happens only when the
+            // stack pop completes.
             if (ret_wait_r) begin
                 if (stk_rd_ready) begin
                     ret_wait_r        <= 1'b0;
@@ -248,11 +246,11 @@ module commit_engine (
                     endi_done <= 1'b1;
                 end
             end
-            // ENDI launch edge only
             else if (endi_req && !endi_req_d) begin
-                // Reserved CALL / RET commit path
+                // CALL / RET path
                 if (endi_mask[4] && !fault_pending_r) begin
                     if (eff_pc_ret_addr_en) begin
+                        // CALL
                         stk_wr_en   <= 1'b1;
                         stk_wr_addr <= esp_r - 32'h4;
                         stk_wr_data <= eff_pc_ret_addr_val;
@@ -266,7 +264,7 @@ module commit_engine (
                             eip_r      <= indirect_call_target;
                             flush_req  <= 1'b1;
                             flush_addr <= indirect_call_target;
-                        end else begin
+                        end else if (eff_pc_eip_en) begin
                             eip_r      <= eff_pc_eip_val;
                             flush_req  <= 1'b1;
                             flush_addr <= eff_pc_eip_val;
@@ -289,6 +287,19 @@ module commit_engine (
 
                         endi_done <= 1'b1;
                     end else begin
+                        // RET launch:
+                        //   clear any staged fall-through/target state before
+                        //   the stack-pop completion path begins, so RET cannot
+                        //   retire using stale next_eip metadata.
+                        pc_eip_en_r       <= 1'b0;
+                        pc_eip_val_r      <= 32'h0;
+                        pc_target_en_r    <= 1'b0;
+                        pc_target_val_r   <= 32'h0;
+                        pc_ret_addr_en_r  <= 1'b0;
+                        pc_ret_addr_val_r <= 32'h0;
+                        pc_ret_imm_en_r   <= 1'b0;
+                        pc_ret_imm_val_r  <= 16'h0;
+
                         stk_rd_req        <= 1'b1;
                         stk_rd_addr       <= esp_r;
                         ret_wait_r        <= 1'b1;
@@ -307,7 +318,6 @@ module commit_engine (
                         flush_req  <= 1'b1;
                         flush_addr <= eff_pc_eip_val;
                     end else begin
-                        // CM_FLUSHQ still means the queue must restart.
                         flush_req  <= 1'b1;
                         flush_addr <= eip_r;
                     end

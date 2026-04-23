@@ -1,24 +1,19 @@
 // Keystone86 / Aegis
 // rtl/core/microsequencer.sv
 //
-// Rung 2 service-capable microsequencer.
+// Bounded Rung 3 sequencer:
+//   - preserve the working Rung 2 JMP path
+//   - carry decoder-owned CALL/RET metadata to commit_engine
+//   - keep architectural control-transfer visibility at ENDI
 //
-// Rung 2 intent:
-//   - Decoder hands off only decode-owned metadata.
-//   - Services fetch displacement and compute/validate the target.
-//   - ENDI in commit_engine is the architectural redirect boundary.
+// Rung 3 intent:
+//   - decoder owns classification and RET/CALL metadata
+//   - microsequencer owns dispatch, wait behavior, and ENDI launch
+//   - commit_engine owns architectural CALL/RET visibility at ENDI
 //
-// Control-transfer cleanup rule for this rung:
-//   - Do NOT squash on JMP dispatch. fetch_engine still needs fall-through
-//     displacement bytes.
-//   - Do assert squash when the committed redirect retires so stale decoder
-//     state and abandoned-stream work do not survive past ENDI.
-//
-// Service handoff rule:
-//   - svc_req_out is a one-cycle start pulse.
-//   - svc_id_r remains stable while WAIT_SERVICE is active.
-//   - SR_WAIT is a true hold condition. The sequencer does not advance until
-//     the selected service reports a terminal result.
+// This file does not invent a new framework. It only extends the current
+// Rung 2 sequencer so the existing bounded Rung 3 CALL/RET metadata path
+// can reach commit_engine correctly.
 
 import keystone86_pkg::*;
 
@@ -30,6 +25,12 @@ module microsequencer (
     input  logic        decode_done,
     input  logic [7:0]  entry_id_in,
     input  logic [31:0] next_eip_in,
+    input  logic [31:0] target_eip_in,
+    input  logic        has_target_in,
+    input  logic        is_call_in,
+    input  logic        is_ret_in,
+    input  logic        has_ret_imm_in,
+    input  logic [15:0] ret_imm_in,
     output logic        dec_ack,
 
     // --- Squash output ---
@@ -49,11 +50,15 @@ module microsequencer (
     output logic [31:0] raise_fe,
     input  logic        endi_done,
 
-    // --- EIP staging ---
+    // --- Commit staging ---
     output logic        pc_eip_en,
     output logic [31:0] pc_eip_val,
     output logic        pc_target_en,
     output logic [31:0] pc_target_val,
+    output logic        pc_ret_addr_en,
+    output logic [31:0] pc_ret_addr_val,
+    output logic        pc_ret_imm_en,
+    output logic [15:0] pc_ret_imm_val,
 
     // --- Service dispatch interface ---
     output logic [7:0]  svc_id_out,
@@ -84,7 +89,13 @@ module microsequencer (
     logic [11:0] upc_r, upc_next;
     logic [7:0]  entry_id_r;
     logic [31:0] next_eip_r;
+    logic [31:0] target_eip_r;
+    logic [15:0] ret_imm_r;
     logic        is_jmp_r;
+    logic        is_call_r;
+    logic        is_ret_r;
+    logic        has_target_r;
+    logic        has_ret_imm_r;
 
     logic        dispatch_rom_pending;
     logic        dispatch_pending;
@@ -97,6 +108,13 @@ module microsequencer (
     logic [7:0]  svc_id_r;
     logic [1:0]  sr_r;
 
+    logic [3:0] uop_class;
+    logic [5:0] uop_target;
+    logic [3:0] uop_cond;
+    logic [9:0] uop_imm10;
+    logic       br_taken;
+    logic       retire_ctrl_xfer_pulse;
+
     assign upc            = upc_r;
     assign dispatch_entry = dispatch_entry_latch;
     assign dbg_state      = state;
@@ -104,19 +122,11 @@ module microsequencer (
     assign dbg_entry_id   = entry_id_r;
     assign meta_next_eip  = next_eip_r;
 
-    logic [3:0] uop_class;
-    logic [5:0] uop_target;
-    logic [3:0] uop_cond;
-    logic [9:0] uop_imm10;
-
     assign uop_class  = uinst[31:28];
     assign uop_target = uinst[27:22];
     assign uop_cond   = uinst[21:18];
     assign uop_imm10  = uinst[9:0];
 
-    logic br_taken;
-
-    logic retire_ctrl_xfer_pulse;
     always_comb begin
         case (uop_cond)
             C_ALWAYS: br_taken = 1'b1;
@@ -127,9 +137,6 @@ module microsequencer (
         endcase
     end
 
-    // Committed redirect cleanup pulse.
-    // This is asserted only when ENDI for an in-flight control transfer
-    // retires. It is intentionally not asserted at dispatch time.
     assign retire_ctrl_xfer_pulse = ctrl_transfer_pending &&
                                     (state == MSEQ_EXECUTE) &&
                                     !execute_fetch_pending &&
@@ -147,7 +154,13 @@ module microsequencer (
             upc_r                 <= 12'h000;
             entry_id_r            <= ENTRY_RESET;
             next_eip_r            <= 32'h0;
+            target_eip_r          <= 32'h0;
+            ret_imm_r             <= 16'h0;
             is_jmp_r              <= 1'b0;
+            is_call_r             <= 1'b0;
+            is_ret_r              <= 1'b0;
+            has_target_r          <= 1'b0;
+            has_ret_imm_r         <= 1'b0;
             dispatch_rom_pending  <= 1'b0;
             dispatch_pending      <= 1'b0;
             dispatch_entry_latch  <= 8'h00;
@@ -160,8 +173,6 @@ module microsequencer (
             state <= state_next;
             upc_r <= upc_next;
 
-            // Clear the control-transfer pending flag exactly when the
-            // committed redirect retires.
             if (retire_ctrl_xfer_pulse)
                 ctrl_transfer_pending <= 1'b0;
 
@@ -171,7 +182,13 @@ module microsequencer (
                         && !ctrl_transfer_pending) begin
                         entry_id_r           <= entry_id_in;
                         next_eip_r           <= next_eip_in;
+                        target_eip_r         <= target_eip_in;
+                        ret_imm_r            <= ret_imm_in;
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
+                        is_call_r            <= is_call_in;
+                        is_ret_r             <= is_ret_in;
+                        has_target_r         <= has_target_in;
+                        has_ret_imm_r        <= has_ret_imm_in;
                         dispatch_entry_latch <= entry_id_in;
                         dispatch_rom_pending <= 1'b1;
                     end
@@ -185,15 +202,15 @@ module microsequencer (
                         dispatch_pending      <= 1'b0;
                         execute_fetch_pending <= 1'b1;
 
-                        // Keep the queue alive through displacement fetches.
-                        if (entry_id_r == ENTRY_JMP_NEAR)
+                        if (entry_id_r == ENTRY_JMP_NEAR ||
+                            entry_id_r == ENTRY_CALL_NEAR ||
+                            entry_id_r == ENTRY_RET_NEAR)
                             ctrl_transfer_pending <= 1'b1;
                     end
                 end
 
                 MSEQ_EXECUTE: begin
                     if (execute_fetch_pending) begin
-                        // Consume one settle cycle after any uPC change.
                         execute_fetch_pending <= 1'b0;
                     end else begin
                         case (uop_class)
@@ -211,14 +228,8 @@ module microsequencer (
                                 end
                             end
 
-                            UOP_NOP: begin
-                                execute_fetch_pending <= 1'b1;
-                            end
-
-                            UOP_BR: begin
-                                execute_fetch_pending <= 1'b1;
-                            end
-
+                            UOP_NOP,
+                            UOP_BR,
                             UOP_RAISE: begin
                                 execute_fetch_pending <= 1'b1;
                             end
@@ -236,7 +247,6 @@ module microsequencer (
                 end
 
                 MSEQ_FAULT_HOLD: begin
-                    // no sequential action
                 end
 
                 default: ;
@@ -256,12 +266,16 @@ module microsequencer (
         raise_req       = 1'b0;
         raise_fc        = 4'h0;
         raise_fe        = 32'h0;
+
         pc_eip_en       = 1'b0;
         pc_eip_val      = 32'h0;
         pc_target_en    = 1'b0;
         pc_target_val   = 32'h0;
+        pc_ret_addr_en  = 1'b0;
+        pc_ret_addr_val = 32'h0;
+        pc_ret_imm_en   = 1'b0;
+        pc_ret_imm_val  = 16'h0;
 
-        // Keep selected service visible while waiting.
         svc_id_out      = svc_id_r;
         svc_req_out     = 1'b0;
 
@@ -272,9 +286,22 @@ module microsequencer (
                     upc_next   = dispatch_upc_in;
                     state_next = MSEQ_EXECUTE;
 
-                    // Stage architectural fall-through EIP.
-                    pc_eip_en  = 1'b1;
-                    pc_eip_val = next_eip_r;
+                    // Stage only the metadata owned by this decoded entry.
+                    if (entry_id_r == ENTRY_JMP_NEAR) begin
+                        pc_eip_en  = 1'b1;
+                        pc_eip_val = next_eip_r;
+                    end else if (entry_id_r == ENTRY_CALL_NEAR) begin
+                        pc_ret_addr_en  = 1'b1;
+                        pc_ret_addr_val = next_eip_r;
+                    end else if (entry_id_r == ENTRY_RET_NEAR) begin
+                        if (has_ret_imm_r) begin
+                            pc_ret_imm_en  = 1'b1;
+                            pc_ret_imm_val = ret_imm_r;
+                        end
+                    end else begin
+                        pc_eip_en  = 1'b1;
+                        pc_eip_val = next_eip_r;
+                    end
                 end
             end
 
@@ -314,13 +341,21 @@ module microsequencer (
                         end
 
                         UOP_ENDI: begin
-                            // Present the JMP target only while ENDI is still
-                            // in flight. Once commit reports endi_done, do not
-                            // re-present the same target on the retire-complete
-                            // cycle or commit_engine will stage it again.
-                            if (is_jmp_r && !endi_done) begin
+                            if (entry_id_r == ENTRY_JMP_NEAR && !endi_done) begin
                                 pc_target_en  = 1'b1;
                                 pc_target_val = t2_data;
+                            end else if (entry_id_r == ENTRY_CALL_NEAR && !endi_done) begin
+                                pc_ret_addr_en  = 1'b1;
+                                pc_ret_addr_val = next_eip_r;
+                                if (has_target_r) begin
+                                    pc_target_en  = 1'b1;
+                                    pc_target_val = target_eip_r;
+                                end
+                            end else if (entry_id_r == ENTRY_RET_NEAR && !endi_done) begin
+                                if (has_ret_imm_r) begin
+                                    pc_ret_imm_en  = 1'b1;
+                                    pc_ret_imm_val = ret_imm_r;
+                                end
                             end
 
                             endi_req  = 1'b1;
