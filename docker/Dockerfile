@@ -101,7 +101,7 @@ RUN mkdir -p /etc/udev/rules.d \
 #   Local:      named Docker volume keystone86-claude-auth:/root/.claude
 #   Codespaces: ANTHROPIC_API_KEY personal secret
 # --------------------------------------------------------------------
-RUN curl -fsSL https://claude.ai/install.sh | sh
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # --------------------------------------------------------------------
 # Working directory
