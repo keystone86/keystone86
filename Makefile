@@ -67,7 +67,8 @@ dev:
 	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
 	  -v $(PWD):/work \
 	  -w /work \
-	  keystone86-dev
+	  keystone86-dev \
+	  bash -c 'git config --global --add safe.directory /work; exec bash'
 
 # Hardware session — adds USB passthrough for ECP5 flashing
 # Not available in Codespaces (no USB access)
@@ -82,7 +83,8 @@ dev-fpga:
 	  --device /dev/bus/usb \
 	  -v /dev/bus/usb:/dev/bus/usb \
 	  --privileged \
-	  keystone86-dev
+	  keystone86-dev \
+	  bash -c 'git config --global --add safe.directory /work; exec bash'
 
 # ----------------------------------------------------------------
 # Project checks
