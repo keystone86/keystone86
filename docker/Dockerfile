@@ -6,7 +6,6 @@ ENV LC_ALL=C.UTF-8
 
 # --------------------------------------------------------------------
 # Layer 1 — Base system and build tools
-# (your existing base, extended)
 # --------------------------------------------------------------------
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -28,6 +27,7 @@ RUN apt-get update \
     xz-utils \
     libssl-dev \
     libreadline-dev \
+    libffi-dev \
     zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
 
@@ -59,59 +59,36 @@ RUN pip3 install --no-cache-dir \
     pytest
 
 # --------------------------------------------------------------------
-# Layer 4 — Yosys (synthesis frontend, used for both ECP5 and formal)
+# Layer 4 — OSS CAD Suite
+# Includes: yosys, nextpnr-ecp5, prjtrellis/ecppack, sv2v,
+#           symbiyosys, z3, yosys-smtbmc, openFPGALoader and more.
+#
+# This is the recommended distribution for this open source toolchain.
+# All tools install to /opt/oss-cad-suite/bin
 # --------------------------------------------------------------------
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-    yosys \
- && rm -rf /var/lib/apt/lists/*
+RUN OSS_DATE=$(curl -s https://api.github.com/repos/YosysHQ/oss-cad-suite-build/releases/latest \
+      | grep '"tag_name"' | sed 's/.*"tag_name": "\(.*\)".*/\1/') \
+ && OSS_VERSION=$(echo $OSS_DATE | sed 's/-//g') \
+ && echo "Installing OSS CAD Suite $OSS_DATE" \
+ && curl -L \
+    "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${OSS_DATE}/oss-cad-suite-linux-x64-${OSS_VERSION}.tgz" \
+    -o /tmp/oss-cad-suite.tgz \
+ && tar -xzf /tmp/oss-cad-suite.tgz -C /opt \
+ && rm /tmp/oss-cad-suite.tgz
+
+ENV PATH="/opt/oss-cad-suite/bin:${PATH}"
 
 # --------------------------------------------------------------------
-# Layer 5 — ECP5 toolchain (prjtrellis + nextpnr-ecp5)
+# Layer 5 — USB support for openFPGALoader (ECP5 hardware flashing)
+# Use 'make dev-fpga' to enable USB passthrough
 # --------------------------------------------------------------------
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-    libtrellis-dev \
-    prjtrellis \
-    prjtrellis-tools \
-    nextpnr-ecp5 \
- && rm -rf /var/lib/apt/lists/*
-
-# --------------------------------------------------------------------
-# Layer 6 — sv2v (SystemVerilog to Verilog for tools that need it)
-# --------------------------------------------------------------------
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-    haskell-stack \
- && rm -rf /var/lib/apt/lists/* \
- && stack install sv2v \
- && cp /root/.local/bin/sv2v /usr/local/bin/sv2v
-
-# --------------------------------------------------------------------
-# Layer 7 — Formal verification (SymbiYosys + solvers)
-# --------------------------------------------------------------------
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-    symbiyosys \
-    yosys-smtbmc \
-    z3 \
-    boolector \
- && rm -rf /var/lib/apt/lists/*
-
-# --------------------------------------------------------------------
-# Layer 8 — openFPGALoader + USB framework for ECP5 hardware flashing
-# (use 'make dev-fpga' to enable USB passthrough)
-# --------------------------------------------------------------------
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-    openfpgaloader \
     libusb-1.0-0 \
-    libusb-1.0-0-dev \
     udev \
  && rm -rf /var/lib/apt/lists/*
 
-# Install ECP5 udev rules so openFPGALoader can claim USB devices
-# without needing root inside the container
+# ECP5 udev rules so openFPGALoader can claim USB devices
 RUN mkdir -p /etc/udev/rules.d \
  && echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0403", MODE="0666", GROUP="plugdev"' \
     > /etc/udev/rules.d/99-openfpgaloader.rules \
@@ -119,7 +96,7 @@ RUN mkdir -p /etc/udev/rules.d \
     >> /etc/udev/rules.d/99-openfpgaloader.rules
 
 # --------------------------------------------------------------------
-# Layer 9 — Claude Code
+# Layer 6 — Claude Code
 # Credentials are NOT baked in. Auth is handled per-developer via:
 #   Local:      named Docker volume keystone86-claude-auth:/root/.claude
 #   Codespaces: ANTHROPIC_API_KEY personal secret
