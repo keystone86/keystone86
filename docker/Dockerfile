@@ -3,6 +3,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
+ENV TERM=xterm-256color
 
 # --------------------------------------------------------------------
 # Layer 1 — Base system and build tools
@@ -103,6 +104,12 @@ RUN mkdir -p /etc/udev/rules.d \
 # --------------------------------------------------------------------
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:${PATH}"
+
+# Colored bash prompt and color ls aliases
+RUN echo 'export PS1="\[\033[01;32m\]\u@keystone86-dev\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "' >> /root/.bashrc \
+ && echo 'alias ls="ls --color=auto"' >> /root/.bashrc \
+ && echo 'alias grep="grep --color=auto"' >> /root/.bashrc \
+ && echo 'force_color_prompt=yes' >> /root/.bashrc
 
 # --------------------------------------------------------------------
 # Working directory
