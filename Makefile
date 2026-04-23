@@ -65,10 +65,12 @@ dev:
 	  -v $(HOME)/.ssh:/root/.ssh:ro \
 	  -v $(HOME)/.gitconfig:/root/.gitconfig:ro \
 	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+	  -e GIT_CONFIG_COUNT=1 \
+	  -e GIT_CONFIG_KEY_0=safe.directory \
+	  -e GIT_CONFIG_VALUE_0=/work \
 	  -v $(PWD):/work \
 	  -w /work \
-	  keystone86-dev \
-	  bash -c 'git config --global --add safe.directory /work; exec bash'
+	  keystone86-dev
 
 # Hardware session — adds USB passthrough for ECP5 flashing
 # Not available in Codespaces (no USB access)
@@ -78,13 +80,15 @@ dev-fpga:
 	  -v $(HOME)/.ssh:/root/.ssh:ro \
 	  -v $(HOME)/.gitconfig:/root/.gitconfig:ro \
 	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+	  -e GIT_CONFIG_COUNT=1 \
+	  -e GIT_CONFIG_KEY_0=safe.directory \
+	  -e GIT_CONFIG_VALUE_0=/work \
 	  -v $(PWD):/work \
 	  -w /work \
 	  --device /dev/bus/usb \
 	  -v /dev/bus/usb:/dev/bus/usb \
 	  --privileged \
-	  keystone86-dev \
-	  bash -c 'git config --global --add safe.directory /work; exec bash'
+	  keystone86-dev
 
 # ----------------------------------------------------------------
 # Project checks
