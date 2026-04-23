@@ -109,7 +109,8 @@ ENV TERM=xterm-256color
 RUN echo 'export PS1="\[\033[01;32m\]\u@keystone86-dev\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "' >> /root/.bashrc \
  && echo 'alias ls="ls --color=auto"' >> /root/.bashrc \
  && echo 'alias grep="grep --color=auto"' >> /root/.bashrc \
- && echo 'force_color_prompt=yes' >> /root/.bashrc
+ && echo 'force_color_prompt=yes' >> /root/.bashrc \
+ && git config --global --add safe.directory /work
 
 # --------------------------------------------------------------------
 # Working directory
