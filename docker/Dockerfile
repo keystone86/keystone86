@@ -102,6 +102,7 @@ RUN mkdir -p /etc/udev/rules.d \
 #   Codespaces: ANTHROPIC_API_KEY personal secret
 # --------------------------------------------------------------------
 RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.local/bin:${PATH}"
 
 # --------------------------------------------------------------------
 # Working directory
