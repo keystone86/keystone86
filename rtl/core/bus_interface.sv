@@ -19,6 +19,10 @@ module bus_interface (
     input  logic        clk,
     input  logic        reset_n,
 
+    // --- Flush (from commit_engine via cpu_top) ---
+    // Aborts any in-flight fetch so the queue can re-issue for the new address.
+    input  logic        flush,
+
     // --- EU fetch request (from prefetch_queue) ---
     input  logic        fetch_req,          // request a fetch
     input  logic [31:0] fetch_addr,         // fetch physical address
@@ -64,6 +68,9 @@ module bus_interface (
             state      <= S_IDLE;
             addr_latch <= 32'h0;
             data_latch <= 32'h0;
+        end else if (flush) begin
+            // Abort any in-flight transaction so queue can re-issue for new address.
+            state <= S_IDLE;
         end else begin
             state <= state_next;
             if (state == S_IDLE && fetch_req)

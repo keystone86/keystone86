@@ -129,14 +129,18 @@ rom[0x056] = svcw_ext(VALIDATE_NEAR_TRANSFER)
 rom[0x057] = br(C_FAULT, rel10(0x057, 0x000))
 rom[0x058] = endi(CM_JMP)
 
-# Rung 3 placeholders retained but not active in this rung verification
-rom[0x060] = endi(CM_CALL)
-rom[0x070] = endi(CM_RET)
+# Rung 3: CALL and RET entry routines.
+# Both are single-ENDI because the decoder consumes all instruction bytes
+# (including displacement/imm16) before asserting decode_done, and the
+# microsequencer stages the return address and target at dispatch time.
+# commit_engine distinguishes CALL from RET by whether pc_ret_addr_en is staged.
+rom[0x060] = endi(CM_CALL)   # ENTRY_CALL_NEAR
+rom[0x070] = endi(CM_RET)    # ENTRY_RET_NEAR
 
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
 listing = f"""; Keystone86 / Aegis bootstrap microcode listing
-; Rung 2 service-based JMP
+; Rung 2: service-based JMP  |  Rung 3: CALL/RET single-ENDI paths
 address  encoding     source
 0x000    {endi(CM_FAULT_END)}   SUB_FAULT_HANDLER: ENDI CM_FAULT_END
 0x010    {raise_fc(0x6)}   ENTRY_NULL: RAISE FC_UD
@@ -153,14 +157,14 @@ address  encoding     source
 0x056    {svcw_ext(VALIDATE_NEAR_TRANSFER)}   SVCW VALIDATE_NEAR_TRANSFER
 0x057    {br(C_FAULT, rel10(0x057, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
 0x058    {endi(CM_JMP)}   ENDI CM_JMP (0x{CM_JMP:03X})
-0x060    {endi(CM_CALL)}   ENTRY_CALL_NEAR: ENDI CM_CALL (placeholder)
-0x070    {endi(CM_RET)}   ENTRY_RET_NEAR: ENDI CM_RET (placeholder)
+0x060    {endi(CM_CALL)}   ENTRY_CALL_NEAR: ENDI CM_CALL (0x{CM_CALL:03X})
+0x070    {endi(CM_RET)}   ENTRY_RET_NEAR: ENDI CM_RET (0x{CM_RET:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
 print("Wrote bootstrap ucode.hex, dispatch.hex, ucode.lst, dispatch.lst")
 print(f"  CM_JMP  = 0x{CM_JMP:03X}")
-print(f"  CM_CALL = 0x{CM_CALL:03X} (placeholder)")
-print(f"  CM_RET  = 0x{CM_RET:03X}  (placeholder)")
-print(f"  ENTRY_CALL_NEAR at dispatch[0x09] -> uPC 0x060")
-print(f"  ENTRY_RET_NEAR  at dispatch[0x0B] -> uPC 0x070")
+print(f"  CM_CALL = 0x{CM_CALL:03X}")
+print(f"  CM_RET  = 0x{CM_RET:03X}")
+print(f"  ENTRY_CALL_NEAR at dispatch[0x09] -> uPC 0x060 -> ENDI CM_CALL")
+print(f"  ENTRY_RET_NEAR  at dispatch[0x0B] -> uPC 0x070 -> ENDI CM_RET")

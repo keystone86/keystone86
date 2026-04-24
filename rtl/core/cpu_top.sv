@@ -1,8 +1,9 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 2 top-level with service-based JMP path, while preserving the
-// pre-existing top-level compatibility ports expected by earlier testbenches.
+// Rung 3 top-level: adds wiring for CALL/RET metadata from decoder to
+// microsequencer, and CALL/RET staging signals from microsequencer to
+// commit_engine. Preserves all prior rung compatibility ports.
 
 import keystone86_pkg::*;
 
@@ -134,6 +135,22 @@ module cpu_top (
     logic [31:0] t4_r;
     logic [31:0] meta_next_eip;
 
+    // Rung 3: decoder CALL/RET metadata wires (decoder → microsequencer)
+    logic [31:0] dec_target_eip;
+    logic        dec_has_target;
+    logic        dec_is_call;
+    logic        dec_is_ret;
+    logic        dec_has_ret_imm;
+    logic [15:0] dec_ret_imm;
+
+    // Rung 3: CALL/RET staging wires (microsequencer → commit_engine)
+    // pc_ret_addr: return address to push on CALL; distinguishes CALL from RET.
+    // pc_ret_imm:  post-pop ESP adjustment for RET imm16.
+    logic        pc_ret_addr_en;
+    logic [31:0] pc_ret_addr_val;
+    logic        pc_ret_imm_en;
+    logic [15:0] pc_ret_imm_val;
+
     // debug wires from microsequencer
     logic [1:0]  dbg_mseq_state_w;
     logic [11:0] dbg_upc_w;
@@ -170,6 +187,7 @@ module cpu_top (
     bus_interface u_bus (
         .clk        (clk),
         .reset_n    (reset_n),
+        .flush      (flush_req),
         .fetch_req  (fetch_req),
         .fetch_addr (fetch_addr_internal),
         .fetch_done (fetch_done),
@@ -214,6 +232,14 @@ module cpu_top (
         .decode_done  (decode_done),
         .entry_id     (entry_id),
         .next_eip     (next_eip),
+        // Rung 3: CALL/RET decode-owned metadata
+        .target_eip   (dec_target_eip),
+        .has_target   (dec_has_target),
+        .is_call      (dec_is_call),
+        .is_ret       (dec_is_ret),
+        .has_ret_imm  (dec_has_ret_imm),
+        .ret_imm      (dec_ret_imm),
+        .modrm_byte   (),              // routed through decoder for classification only
         .dec_ack      (dec_ack),
         .q_fetch_eip  (q_fetch_eip)
     );
@@ -228,6 +254,13 @@ module cpu_top (
         .entry_id_in     (entry_id),
         .next_eip_in     (next_eip),
         .dec_ack         (dec_ack),
+        // Rung 3: CALL/RET metadata from decoder
+        .is_call_in         (dec_is_call),
+        .call_target_in     (dec_target_eip),
+        .has_call_target_in (dec_has_target),
+        .is_ret_in          (dec_is_ret),
+        .has_ret_imm_in     (dec_has_ret_imm),
+        .ret_imm_in         (dec_ret_imm),
         .squash          (squash),
         .upc             (upc),
         .uinst           (uinst),
@@ -245,6 +278,11 @@ module cpu_top (
         .pc_eip_val      (pc_eip_val),
         .pc_target_en    (pc_target_en),
         .pc_target_val   (pc_target_val),
+        // Rung 3: CALL/RET staging to commit_engine
+        .pc_ret_addr_en  (pc_ret_addr_en),
+        .pc_ret_addr_val (pc_ret_addr_val),
+        .pc_ret_imm_en   (pc_ret_imm_en),
+        .pc_ret_imm_val  (pc_ret_imm_val),
 
         .svc_id_out      (svc_id_out),
         .svc_req_out     (svc_req_out),
@@ -342,10 +380,11 @@ module cpu_top (
         .pc_target_en               (pc_target_en),
         .pc_target_val              (pc_target_val),
 
-        .pc_ret_addr_en             (1'b0),
-        .pc_ret_addr_val            (32'h0),
-        .pc_ret_imm_en              (1'b0),
-        .pc_ret_imm_val             (16'h0),
+        // Rung 3: CALL/RET staging from microsequencer
+        .pc_ret_addr_en             (pc_ret_addr_en),
+        .pc_ret_addr_val            (pc_ret_addr_val),
+        .pc_ret_imm_en              (pc_ret_imm_en),
+        .pc_ret_imm_val             (pc_ret_imm_val),
 
         .indirect_call_target       (indirect_call_target),
         .indirect_call_target_valid (indirect_call_target_valid),

@@ -1,7 +1,3 @@
-// LEGACY COMPATIBILITY HEADER — do not use in new RTL source files.
-// The authoritative source for these constants is rtl/include/keystone86_pkg.sv.
-// RTL modules must use: import keystone86_pkg::*;
-// This file is retained for external tooling compatibility only.
 `ifndef KEYSTONE86_COMMIT_DEFS_SVH
 `define KEYSTONE86_COMMIT_DEFS_SVH
 

@@ -1,16 +1,20 @@
 // Keystone86 / Aegis
 // rtl/core/microsequencer.sv
 //
-// Rung 2 service-capable microsequencer.
+// Rung 3 service-capable microsequencer.
 //
-// Rung 2 intent:
-//   - Decoder hands off only decode-owned metadata.
-//   - Services fetch displacement and compute/validate the target.
-//   - ENDI in commit_engine is the architectural redirect boundary.
+// Rung 3 additions over Rung 2:
+//   - Latches CALL/RET decode-owned metadata (is_call, call_target,
+//     has_call_target, is_ret, has_ret_imm, ret_imm) at decode handoff.
+//   - Stages pc_ret_addr_en/val at dispatch for CALL (return address to push).
+//   - Stages pc_target_en/val at dispatch for direct CALL (decoder-computed target).
+//   - Stages pc_ret_imm_en/val at dispatch for RET imm16.
+//   - Sets ctrl_transfer_pending for CALL and RET (same as JMP) so squash
+//     fires when the committed redirect retires at ENDI.
 //
-// Control-transfer cleanup rule for this rung:
-//   - Do NOT squash on JMP dispatch. fetch_engine still needs fall-through
-//     displacement bytes.
+// Control-transfer cleanup rule:
+//   - Do NOT squash on JMP/CALL/RET dispatch. fetch_engine still needs
+//     fall-through displacement bytes for the JMP path.
 //   - Do assert squash when the committed redirect retires so stale decoder
 //     state and abandoned-stream work do not survive past ENDI.
 //
@@ -31,6 +35,16 @@ module microsequencer (
     input  logic [7:0]  entry_id_in,
     input  logic [31:0] next_eip_in,
     output logic        dec_ack,
+
+    // --- Decoder CALL/RET metadata (Rung 3) ---
+    // Staged at decode handoff; used to drive commit_engine staging at dispatch.
+    // Decoder owns classification; microsequencer must not recompute these.
+    input  logic        is_call_in,
+    input  logic [31:0] call_target_in,
+    input  logic        has_call_target_in,
+    input  logic        is_ret_in,
+    input  logic        has_ret_imm_in,
+    input  logic [15:0] ret_imm_in,
 
     // --- Squash output ---
     output logic        squash,
@@ -54,6 +68,14 @@ module microsequencer (
     output logic [31:0] pc_eip_val,
     output logic        pc_target_en,
     output logic [31:0] pc_target_val,
+
+    // --- CALL/RET staging (Rung 3) ---
+    // pc_ret_addr: return address to push to stack on CALL.
+    // pc_ret_imm:  post-pop ESP adjustment for RET imm16.
+    output logic        pc_ret_addr_en,
+    output logic [31:0] pc_ret_addr_val,
+    output logic        pc_ret_imm_en,
+    output logic [15:0] pc_ret_imm_val,
 
     // --- Service dispatch interface ---
     output logic [7:0]  svc_id_out,
@@ -96,6 +118,15 @@ module microsequencer (
     logic        ext_pending_r;
     logic [7:0]  svc_id_r;
     logic [1:0]  sr_r;
+
+    // Rung 3: latched CALL/RET decode-owned metadata.
+    // Captured at decode handoff; held stable through dispatch and ENDI.
+    logic        is_call_r;
+    logic [31:0] call_target_r;
+    logic        has_call_target_r;
+    logic        is_ret_r;
+    logic        has_ret_imm_r;
+    logic [15:0] ret_imm_r;
 
     assign upc            = upc_r;
     assign dispatch_entry = dispatch_entry_latch;
@@ -156,6 +187,12 @@ module microsequencer (
             ext_pending_r         <= 1'b0;
             svc_id_r              <= 8'h00;
             sr_r                  <= SR_OK;
+            is_call_r             <= 1'b0;
+            call_target_r         <= 32'h0;
+            has_call_target_r     <= 1'b0;
+            is_ret_r              <= 1'b0;
+            has_ret_imm_r         <= 1'b0;
+            ret_imm_r             <= 16'h0;
         end else begin
             state <= state_next;
             upc_r <= upc_next;
@@ -174,6 +211,14 @@ module microsequencer (
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
                         dispatch_entry_latch <= entry_id_in;
                         dispatch_rom_pending <= 1'b1;
+                        // Rung 3: latch CALL/RET decode-owned metadata.
+                        // Decoder owns these values; we only preserve them.
+                        is_call_r         <= is_call_in;
+                        call_target_r     <= call_target_in;
+                        has_call_target_r <= has_call_target_in;
+                        is_ret_r          <= is_ret_in;
+                        has_ret_imm_r     <= has_ret_imm_in;
+                        ret_imm_r         <= ret_imm_in;
                     end
 
                     if (dispatch_rom_pending) begin
@@ -185,8 +230,12 @@ module microsequencer (
                         dispatch_pending      <= 1'b0;
                         execute_fetch_pending <= 1'b1;
 
-                        // Keep the queue alive through displacement fetches.
-                        if (entry_id_r == ENTRY_JMP_NEAR)
+                        // JMP: keep queue alive through displacement fetches.
+                        // CALL/RET: also set pending — both redirect EIP and
+                        // require squash + prefetch flush when ENDI retires.
+                        if (entry_id_r == ENTRY_JMP_NEAR  ||
+                            entry_id_r == ENTRY_CALL_NEAR ||
+                            entry_id_r == ENTRY_RET_NEAR)
                             ctrl_transfer_pending <= 1'b1;
                     end
                 end
@@ -260,6 +309,11 @@ module microsequencer (
         pc_eip_val      = 32'h0;
         pc_target_en    = 1'b0;
         pc_target_val   = 32'h0;
+        // Rung 3 staging defaults — asserted only at dispatch for CALL/RET.
+        pc_ret_addr_en  = 1'b0;
+        pc_ret_addr_val = 32'h0;
+        pc_ret_imm_en   = 1'b0;
+        pc_ret_imm_val  = 16'h0;
 
         // Keep selected service visible while waiting.
         svc_id_out      = svc_id_r;
@@ -272,9 +326,30 @@ module microsequencer (
                     upc_next   = dispatch_upc_in;
                     state_next = MSEQ_EXECUTE;
 
-                    // Stage architectural fall-through EIP.
+                    // Stage fall-through / return EIP (all instructions).
                     pc_eip_en  = 1'b1;
                     pc_eip_val = next_eip_r;
+
+                    // Rung 3 CALL: stage return address for stack push, and
+                    // direct call target if decoder provided one.
+                    // Decoder owns these values — microsequencer only relays them.
+                    if (is_call_r) begin
+                        pc_ret_addr_en  = 1'b1;
+                        pc_ret_addr_val = next_eip_r;  // return address = M_NEXT_EIP
+                        if (has_call_target_r) begin
+                            // Direct CALL: decoder computed target_eip.
+                            pc_target_en  = 1'b1;
+                            pc_target_val = call_target_r;
+                        end
+                        // Indirect CALL: no pc_target_en; commit_engine uses
+                        // indirect_call_target_valid input directly.
+                    end
+
+                    // Rung 3 RET imm16: stage ESP adjustment immediate.
+                    if (is_ret_r && has_ret_imm_r) begin
+                        pc_ret_imm_en  = 1'b1;
+                        pc_ret_imm_val = ret_imm_r;
+                    end
                 end
             end
 
