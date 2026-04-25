@@ -1,9 +1,11 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 3 top-level: adds wiring for CALL/RET metadata from decoder to
-// microsequencer, and CALL/RET staging signals from microsequencer to
-// commit_engine. Preserves all prior rung compatibility ports.
+// Rung 3 top-level: wires CALL/RET metadata from decoder to microsequencer,
+// adds stack_engine instantiation, routes stack bus signals through stack_engine
+// (not commit_engine), and connects pc_stack staging from stack_engine to
+// commit_engine. The stack bus (stk_wr_en etc.) is exported as compatibility
+// ports for the testbench stack memory model.
 
 import keystone86_pkg::*;
 
@@ -143,13 +145,24 @@ module cpu_top (
     logic        dec_has_ret_imm;
     logic [15:0] dec_ret_imm;
 
-    // Rung 3: CALL/RET staging wires (microsequencer → commit_engine)
-    // pc_ret_addr: return address to push on CALL; distinguishes CALL from RET.
-    // pc_ret_imm:  post-pop ESP adjustment for RET imm16.
-    logic        pc_ret_addr_en;
-    logic [31:0] pc_ret_addr_val;
+    // Rung 3: RET imm16 adjustment (microsequencer → commit_engine)
     logic        pc_ret_imm_en;
     logic [15:0] pc_ret_imm_val;
+
+    // Rung 3: staged new ESP from stack_engine (stack_engine → commit_engine)
+    logic        pc_stack_en;
+    logic [31:0] pc_stack_val;
+
+    // Rung 3: stack_engine service routing
+    logic [7:0]  sk_svc_id;
+    logic        sk_svc_req;
+    logic        sk_svc_done;
+    logic [1:0]  sk_svc_sr;
+
+    // Rung 3: T2 mux — stack_engine and flow_control both write T2
+    // (popped return address and computed JMP target, respectively)
+    logic        sk_t2_wr_en;
+    logic [31:0] sk_t2_wr_data;
 
     // debug wires from microsequencer
     logic [1:0]  dbg_mseq_state_w;
@@ -170,6 +183,11 @@ module cpu_top (
 
     // ------------------------------------------------------------
     // Simple T2/T4 storage for current service path
+    //
+    // T2 write priority: stack_engine (POP32 popped value) and flow_control
+    // (COMPUTE_REL_TARGET result) are mutually exclusive by microcode sequencing —
+    // they are never called in the same instruction's service sequence.
+    // stack_engine wins if both somehow assert simultaneously (defensive).
     // ------------------------------------------------------------
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -177,7 +195,8 @@ module cpu_top (
             t4_r <= 32'h0;
         end else begin
             if (fe_t4_wr_en) t4_r <= fe_t4_wr_data;
-            if (fc_t2_wr_en) t2_r <= fc_t2_wr_data;
+            if (sk_t2_wr_en) t2_r <= sk_t2_wr_data;
+            else if (fc_t2_wr_en) t2_r <= fc_t2_wr_data;
         end
     end
 
@@ -278,9 +297,7 @@ module cpu_top (
         .pc_eip_val      (pc_eip_val),
         .pc_target_en    (pc_target_en),
         .pc_target_val   (pc_target_val),
-        // Rung 3: CALL/RET staging to commit_engine
-        .pc_ret_addr_en  (pc_ret_addr_en),
-        .pc_ret_addr_val (pc_ret_addr_val),
+        // Rung 3: RET imm16 adjustment to commit_engine
         .pc_ret_imm_en   (pc_ret_imm_en),
         .pc_ret_imm_val  (pc_ret_imm_val),
 
@@ -322,7 +339,13 @@ module cpu_top (
         .fc_svc_id   (fc_svc_id),
         .fc_svc_req  (fc_svc_req),
         .fc_svc_done (fc_svc_done),
-        .fc_svc_sr   (fc_svc_sr)
+        .fc_svc_sr   (fc_svc_sr),
+
+        // Rung 3: stack_engine routing
+        .sk_svc_id   (sk_svc_id),
+        .sk_svc_req  (sk_svc_req),
+        .sk_svc_done (sk_svc_done),
+        .sk_svc_sr   (sk_svc_sr)
     );
 
     fetch_engine u_fetch_eng (
@@ -339,6 +362,34 @@ module cpu_top (
         .t4_wr_en    (fe_t4_wr_en),
         .t4_wr_data  (fe_t4_wr_data),
         .squash      (squash)
+    );
+
+    // Rung 3: stack_engine — PUSH32/POP32/PUSH16/POP16 service leaf.
+    // push_val is wired to meta_next_eip (return address for CALL).
+    // Popped value (RET return address) is written to T2 via sk_t2_wr_*.
+    // New ESP is staged via pc_stack_en/val for commit_engine to apply at ENDI.
+    // Stack bus (stk_wr_en etc.) is exported through cpu_top compatibility ports.
+    stack_engine u_stack (
+        .clk          (clk),
+        .reset_n      (reset_n),
+        .svc_id       (sk_svc_id),
+        .svc_req      (sk_svc_req),
+        .svc_done     (sk_svc_done),
+        .svc_sr       (sk_svc_sr),
+        .esp_in       (esp),
+        .push_val     (meta_next_eip),
+        .t2_wr_en     (sk_t2_wr_en),
+        .t2_wr_data   (sk_t2_wr_data),
+        .pc_stack_en  (pc_stack_en),
+        .pc_stack_val (pc_stack_val),
+        .stk_wr_en    (stk_wr_en),
+        .stk_wr_addr  (stk_wr_addr),
+        .stk_wr_data  (stk_wr_data),
+        .stk_rd_req   (stk_rd_req),
+        .stk_rd_addr  (stk_rd_addr),
+        .stk_rd_data  (stk_rd_data),
+        .stk_rd_ready (stk_rd_ready),
+        .squash       (squash)
     );
 
     flow_control u_flow (
@@ -380,11 +431,13 @@ module cpu_top (
         .pc_target_en               (pc_target_en),
         .pc_target_val              (pc_target_val),
 
-        // Rung 3: CALL/RET staging from microsequencer
-        .pc_ret_addr_en             (pc_ret_addr_en),
-        .pc_ret_addr_val            (pc_ret_addr_val),
+        // Rung 3: RET imm16 adjustment from microsequencer
         .pc_ret_imm_en              (pc_ret_imm_en),
         .pc_ret_imm_val             (pc_ret_imm_val),
+
+        // Rung 3: new ESP staged by stack_engine after PUSH32/POP32
+        .pc_stack_en                (pc_stack_en),
+        .pc_stack_val               (pc_stack_val),
 
         .indirect_call_target       (indirect_call_target),
         .indirect_call_target_valid (indirect_call_target_valid),
@@ -396,14 +449,6 @@ module cpu_top (
 
         .flush_req                  (flush_req),
         .flush_addr                 (flush_addr),
-
-        .stk_wr_en                  (stk_wr_en),
-        .stk_wr_addr                (stk_wr_addr),
-        .stk_wr_data                (stk_wr_data),
-        .stk_rd_req                 (stk_rd_req),
-        .stk_rd_addr                (stk_rd_addr),
-        .stk_rd_data                (stk_rd_data),
-        .stk_rd_ready               (stk_rd_ready),
 
         .fault_pending              (fault_pending),
         .fault_class                (fault_class),

@@ -158,6 +158,7 @@ module tb_rung3_call_ret;
                 bus_din    <= {24'h0, mem_code[bus_addr[7:0]]};
                 bus_ready  <= 1'b1;
                 rd_pending <= 1'b0;
+                $display("  [MEM] bus fetch: addr=%08X data=%02X @%0t", bus_addr, mem_code[bus_addr[7:0]], $time);
             end
         end
     end
@@ -179,8 +180,10 @@ module tb_rung3_call_ret;
             stk_rd_ready <= 1'b0;
 
             // Write port (synchronous, one cycle)
-            if (stk_wr_en)
+            if (stk_wr_en) begin
                 stack_mem[stk_wr_addr[9:2]] <= stk_wr_data;
+                $display("  [STK] push: addr=%08X data=%08X @%0t", stk_wr_addr, stk_wr_data, $time);
+            end
 
             // Read port (one-cycle latency)
             if (stk_rd_req && !stk_rd_pending)
@@ -429,7 +432,12 @@ module tb_rung3_call_ret;
 
         // Wait 6 ENDIs: JMP + CALL + CALL + CALL + RET + RET + RET = 7
         // (actually JMP to E0 first, then 3 CALLs and 3 RETs = 7 ENDIs total)
-        wait_n_endi(7, timed_out);
+        timed_out = 0;
+        for (int _i = 0; _i < 7; _i++) begin
+            wait_endi(timed_out);
+            $display("  [TRACE] ENDI %0d: EIP=%08X ESP=%08X fault=%0d", _i+1, dbg_eip, dbg_esp, dbg_fault_pending);
+            if (timed_out) break;
+        end
         check("C.1: all 7 ENDIs fire without timeout",   !timed_out);
         check("C.2: EIP = 0xFFFFFFE3 (depth-1 return)",  dbg_eip == 32'hFFFFFFE3);
         check("C.3: ESP = RESET_ESP (fully unwound)",    dbg_esp == RESET_ESP);

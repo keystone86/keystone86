@@ -70,10 +70,9 @@ module microsequencer (
     output logic [31:0] pc_target_val,
 
     // --- CALL/RET staging (Rung 3) ---
-    // pc_ret_addr: return address to push to stack on CALL.
-    // pc_ret_imm:  post-pop ESP adjustment for RET imm16.
-    output logic        pc_ret_addr_en,
-    output logic [31:0] pc_ret_addr_val,
+    // pc_ret_imm: post-pop ESP adjustment for RET imm16.
+    // Staged at dispatch; applied by commit_engine at ENDI on top of pc_stack_val.
+    // pc_ret_addr was removed: stack_engine now owns the push via SVCW PUSH32.
     output logic        pc_ret_imm_en,
     output logic [15:0] pc_ret_imm_val,
 
@@ -309,11 +308,10 @@ module microsequencer (
         pc_eip_val      = 32'h0;
         pc_target_en    = 1'b0;
         pc_target_val   = 32'h0;
-        // Rung 3 staging defaults — asserted only at dispatch for CALL/RET.
-        pc_ret_addr_en  = 1'b0;
-        pc_ret_addr_val = 32'h0;
-        pc_ret_imm_en   = 1'b0;
-        pc_ret_imm_val  = 16'h0;
+        // Rung 3 staging defaults — asserted only at dispatch.
+        // pc_ret_addr removed: stack_engine owns push via SVCW PUSH32.
+        pc_ret_imm_en  = 1'b0;
+        pc_ret_imm_val = 16'h0;
 
         // Keep selected service visible while waiting.
         svc_id_out      = svc_id_r;
@@ -330,22 +328,21 @@ module microsequencer (
                     pc_eip_en  = 1'b1;
                     pc_eip_val = next_eip_r;
 
-                    // Rung 3 CALL: stage return address for stack push, and
-                    // direct call target if decoder provided one.
-                    // Decoder owns these values — microsequencer only relays them.
+                    // Rung 3 CALL: stage direct call target if decoder provided one.
+                    // Return address push is handled by stack_engine via SVCW PUSH32 —
+                    // microsequencer does NOT stage pc_ret_addr here.
                     if (is_call_r) begin
-                        pc_ret_addr_en  = 1'b1;
-                        pc_ret_addr_val = next_eip_r;  // return address = M_NEXT_EIP
                         if (has_call_target_r) begin
-                            // Direct CALL: decoder computed target_eip.
+                            // Direct CALL: stage decoder-computed target for commit_engine.
                             pc_target_en  = 1'b1;
                             pc_target_val = call_target_r;
                         end
-                        // Indirect CALL: no pc_target_en; commit_engine uses
-                        // indirect_call_target_valid input directly.
+                        // Indirect CALL: no pc_target_en here; commit_engine uses
+                        // indirect_call_target_valid input at ENDI.
                     end
 
-                    // Rung 3 RET imm16: stage ESP adjustment immediate.
+                    // Rung 3 RET imm16: stage ESP adjustment for commit_engine.
+                    // Applied on top of pc_stack_val (from stack_engine POP32) at ENDI.
                     if (is_ret_r && has_ret_imm_r) begin
                         pc_ret_imm_en  = 1'b1;
                         pc_ret_imm_val = ret_imm_r;
@@ -389,11 +386,13 @@ module microsequencer (
                         end
 
                         UOP_ENDI: begin
-                            // Present the JMP target only while ENDI is still
-                            // in flight. Once commit reports endi_done, do not
-                            // re-present the same target on the retire-complete
-                            // cycle or commit_engine will stage it again.
-                            if (is_jmp_r && !endi_done) begin
+                            // JMP and RET both deliver their EIP target via T2.
+                            //   JMP: T2 = COMPUTE_REL_TARGET result (flow_control)
+                            //   RET: T2 = popped return address (stack_engine POP32)
+                            // CALL target was staged at dispatch; no T2 action needed.
+                            // Do not re-present after endi_done or commit_engine
+                            // will double-stage the target.
+                            if ((is_jmp_r || is_ret_r) && !endi_done) begin
                                 pc_target_en  = 1'b1;
                                 pc_target_val = t2_data;
                             end

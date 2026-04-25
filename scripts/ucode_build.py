@@ -63,6 +63,8 @@ CM_RET       = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 FETCH_DISP8            = 0x04
 COMPUTE_REL_TARGET     = 0x46
 VALIDATE_NEAR_TRANSFER = 0x44
+PUSH32                 = 0x41
+POP32                  = 0x43
 
 C_ALWAYS = 0x0
 C_OK     = 0x1
@@ -129,18 +131,43 @@ rom[0x056] = svcw_ext(VALIDATE_NEAR_TRANSFER)
 rom[0x057] = br(C_FAULT, rel10(0x057, 0x000))
 rom[0x058] = endi(CM_JMP)
 
-# Rung 3: CALL and RET entry routines.
-# Both are single-ENDI because the decoder consumes all instruction bytes
-# (including displacement/imm16) before asserting decode_done, and the
-# microsequencer stages the return address and target at dispatch time.
-# commit_engine distinguishes CALL from RET by whether pc_ret_addr_en is staged.
-rom[0x060] = endi(CM_CALL)   # ENTRY_CALL_NEAR
-rom[0x070] = endi(CM_RET)    # ENTRY_RET_NEAR
+# Rung 3: ENTRY_CALL_NEAR at 0x060
+#
+# PUSH32 pushes M_NEXT_EIP (the return address) onto the stack.
+# The call target was staged at dispatch by the microsequencer from
+# decoder-owned metadata (direct CALL) or indirect_call_target (FF/2).
+# After PUSH32 completes, ENDI CM_CALL commits the staged ESP and EIP.
+#
+# 0x060  EXT
+# 0x061  SVCW PUSH32
+# 0x062  BR   C_FAULT, SUB_FAULT_HANDLER
+# 0x063  ENDI CM_CALL
+rom[0x060] = ext_word()
+rom[0x061] = svcw_ext(PUSH32)
+rom[0x062] = br(C_FAULT, rel10(0x062, 0x000))
+rom[0x063] = endi(CM_CALL)
+
+# Rung 3: ENTRY_RET_NEAR at 0x070
+#
+# POP32 pops the return address from the stack into T2.
+# New ESP (esp+4) is staged by stack_engine via pc_stack.
+# At ENDI, microsequencer presents T2 as pc_target so commit_engine
+# sets EIP = popped return address. RET imm16 adjustment (if any) is
+# applied by commit_engine from pc_ret_imm staged at dispatch.
+#
+# 0x070  EXT
+# 0x071  SVCW POP32
+# 0x072  BR   C_FAULT, SUB_FAULT_HANDLER
+# 0x073  ENDI CM_RET
+rom[0x070] = ext_word()
+rom[0x071] = svcw_ext(POP32)
+rom[0x072] = br(C_FAULT, rel10(0x072, 0x000))
+rom[0x073] = endi(CM_RET)
 
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
 listing = f"""; Keystone86 / Aegis bootstrap microcode listing
-; Rung 2: service-based JMP  |  Rung 3: CALL/RET single-ENDI paths
+; Rung 2: service-based JMP  |  Rung 3: CALL/RET via PUSH32/POP32 service path
 address  encoding     source
 0x000    {endi(CM_FAULT_END)}   SUB_FAULT_HANDLER: ENDI CM_FAULT_END
 0x010    {raise_fc(0x6)}   ENTRY_NULL: RAISE FC_UD
@@ -157,8 +184,14 @@ address  encoding     source
 0x056    {svcw_ext(VALIDATE_NEAR_TRANSFER)}   SVCW VALIDATE_NEAR_TRANSFER
 0x057    {br(C_FAULT, rel10(0x057, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
 0x058    {endi(CM_JMP)}   ENDI CM_JMP (0x{CM_JMP:03X})
-0x060    {endi(CM_CALL)}   ENTRY_CALL_NEAR: ENDI CM_CALL (0x{CM_CALL:03X})
-0x070    {endi(CM_RET)}   ENTRY_RET_NEAR: ENDI CM_RET (0x{CM_RET:03X})
+0x060    {ext_word()}   ENTRY_CALL_NEAR: EXT
+0x061    {svcw_ext(PUSH32)}   SVCW PUSH32
+0x062    {br(C_FAULT, rel10(0x062, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x063    {endi(CM_CALL)}   ENDI CM_CALL (0x{CM_CALL:03X})
+0x070    {ext_word()}   ENTRY_RET_NEAR: EXT
+0x071    {svcw_ext(POP32)}   SVCW POP32
+0x072    {br(C_FAULT, rel10(0x072, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x073    {endi(CM_RET)}   ENDI CM_RET (0x{CM_RET:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
@@ -166,5 +199,5 @@ print("Wrote bootstrap ucode.hex, dispatch.hex, ucode.lst, dispatch.lst")
 print(f"  CM_JMP  = 0x{CM_JMP:03X}")
 print(f"  CM_CALL = 0x{CM_CALL:03X}")
 print(f"  CM_RET  = 0x{CM_RET:03X}")
-print(f"  ENTRY_CALL_NEAR at dispatch[0x09] -> uPC 0x060 -> ENDI CM_CALL")
-print(f"  ENTRY_RET_NEAR  at dispatch[0x0B] -> uPC 0x070 -> ENDI CM_RET")
+print(f"  ENTRY_CALL_NEAR at dispatch[0x09] -> uPC 0x060 -> EXT / SVCW PUSH32 / BR / ENDI CM_CALL")
+print(f"  ENTRY_RET_NEAR  at dispatch[0x0B] -> uPC 0x070 -> EXT / SVCW POP32  / BR / ENDI CM_RET")
