@@ -39,9 +39,6 @@ module tb_rung2_jmp;
         .bus_din                    (bus_din),
         .bus_ready                  (bus_ready),
 
-        .indirect_call_target       (32'h0),
-        .indirect_call_target_valid (1'b0),
-
         .dbg_eip                    (dbg_eip),
         .dbg_esp                    (dbg_esp),
         .dbg_mseq_state             (dbg_mseq_state),

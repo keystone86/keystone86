@@ -50,15 +50,25 @@
 //     Verify: after all RETs unwind, EIP=0xFB, ESP=RESET_ESP
 //
 //   Test D — Indirect CALL (FF /2, register form)
-//     indirect_call_target wired to a fixed value (0x000000A0).
 //     Code at 0xFFFFFFF0: FF D0  (FF /2, mod=11, reg=2, rm=0 => ModRM=0xD0)
-//     After CALL: EIP=0x000000A0, ESP=RESET_ESP-4, [ESP]=0xFFFFFFF2
-//     Code at 0x000000A0: C3  RET
-//     After RET:  EIP=0xFFFFFFF2, ESP=RESET_ESP
+//     Bootstrap EAX reads as zero, so the register-form target is 0x00000000.
+//     Code at 0x00000000: C3  RET
+//     After RET: EIP=0xFFFFFFF2, ESP=RESET_ESP
 //
-//   Test E — Rung 2 regression (JMP SHORT self-loop, 200 cycles)
+//   Test E — Indirect CALL (FF /2, memory direct disp32 form)
+//     Code at 0xFFFFFFF0: FF 15 80 00 00 00  CALL dword [0x80]
+//     Data at 0x00000080: 0xFFFFFFA0
+//     Code at 0xFFFFFFA0: C3  RET
+//     After RET: EIP=0xFFFFFFF6, ESP=RESET_ESP
 //
-//   Test F — Rung 1 regression (10 NOPs, EIP advances correctly)
+//   Test F — Unsupported FF /2 memory form fails safely
+//     Code at 0xFFFFFFF0: FF 10  CALL dword [EAX]
+//     Rung 3 consumes bytes for M_NEXT_EIP but does not execute this memory form.
+//     Verify no CALL stack effect or redirect is committed.
+//
+//   Test G — Rung 2 regression (JMP SHORT self-loop, 200 cycles)
+//
+//   Test H — Rung 1 regression (10 NOPs, EIP advances correctly)
 
 `timescale 1ns/1ps
 
@@ -78,10 +88,6 @@ module tb_rung3_call_ret;
     logic [3:0]  bus_byteen;
     logic [31:0] bus_dout, bus_din;
     logic        bus_ready;
-
-    // Indirect CALL target
-    logic [31:0] indirect_call_target;
-    logic        indirect_call_target_valid;
 
     // Debug
     logic [31:0] dbg_eip, dbg_esp;
@@ -106,8 +112,6 @@ module tb_rung3_call_ret;
         .bus_dout                   (bus_dout),
         .bus_din                    (bus_din),
         .bus_ready                  (bus_ready),
-        .indirect_call_target       (indirect_call_target),
-        .indirect_call_target_valid (indirect_call_target_valid),
         .dbg_eip                    (dbg_eip),
         .dbg_esp                    (dbg_esp),
         .dbg_mseq_state             (dbg_mseq_state),
@@ -132,6 +136,7 @@ module tb_rung3_call_ret;
     logic        bus_wr_pending;
     logic [31:0] bus_addr_pending;
     logic [31:0] bus_dout_pending;
+    logic [3:0]  bus_byteen_pending;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -148,12 +153,13 @@ module tb_rung3_call_ret;
                 bus_wr_pending   <= bus_wr;
                 bus_addr_pending <= bus_addr;
                 bus_dout_pending <= bus_dout;
+                bus_byteen_pending <= bus_byteen;
             end
             if (bus_pending) begin
                 if (bus_wr_pending) begin
                     stack_mem[bus_addr_pending[9:2]] <= bus_dout_pending;
                     bus_din <= 32'h0;
-                end else if (bus_addr_pending[31:8] == 24'hFFFFFF) begin
+                end else if (bus_byteen_pending == 4'b0001) begin
                     bus_din <= {24'h0, mem_code[bus_addr_pending[7:0]]};
                 end else begin
                     bus_din <= stack_mem[bus_addr_pending[9:2]];
@@ -263,8 +269,7 @@ module tb_rung3_call_ret;
     // ----------------------------------------------------------------
     task test_a_call_ret_pair;
         logic timed_out;
-        logic [31:0] esp_after_call, eip_after_call;
-        logic [31:0] esp_after_ret, eip_after_ret;
+        logic [31:0] esp_after_call;
         $display("--- Test A: Direct CALL + RET pair ---");
 
         for (int i = 0; i < 256; i++) mem_code[i] = 8'h90;  // NOPs
@@ -276,8 +281,6 @@ module tb_rung3_call_ret;
         mem_code[8'hF5] = 8'hC3;  // RET
         // After RET lands at F3: NOPs run indefinitely (safe)
 
-        indirect_call_target       = 32'h0;
-        indirect_call_target_valid = 1'b0;
         reset_cpu();
 
         // First ENDI = CALL
@@ -328,8 +331,6 @@ module tb_rung3_call_ret;
         mem_code[8'hF6] = 8'h08;   // imm16 lo = 8
         mem_code[8'hF7] = 8'h00;   // imm16 hi = 0
 
-        indirect_call_target       = 32'h0;
-        indirect_call_target_valid = 1'b0;
         reset_cpu();
 
         // CALL
@@ -349,45 +350,26 @@ module tb_rung3_call_ret;
     // Test C — Nested CALL/RET depth 4
     //
     // Depth-4 layout using only 0xFFFFFFxx window:
-    //   E0: E8 02 00  CALL +2 -> E5  (depth 1 call)
-    //   E3: EB 08     JMP +8  -> ED  (depth 1 return landing -> skip to end)
-    //   E5: E8 02 00  CALL +2 -> EA  (depth 2 call)
-    //   E8: C3        RET          (depth 2 return)
-    //   EA: E8 02 00  CALL +2 -> EF (depth 3 call)
-    //   ED: EB FE     JMP self (stable end landing)
-    //   EF: C3        RET          (depth 3+4 return — returns to E8 -> then to E3)
-    //
-    // Wait, we need 4 frames. Let's be precise:
-    //   Frame sequence: E0 calls E5, E5 calls EA, EA calls EF, EF rets to ED,
-    //     ED rets to E8, E8 rets to E3... that's only 3 unique frames.
-    //   For 4 frames:
-    //   E0: E8 04 00  CALL +4 -> E7  (frame 1 → frame 2)
-    //   E3: EB 08     JMP +8  -> ED  (frame 1 return landing)
-    //   E5: 90 90     NOPs
-    //   E7: E8 04 00  CALL +4 -> EE  (frame 2 → frame 3)
-    //   EA: C3        RET            (frame 2 return)
-    //   EB: 90 90 90  NOPs
-    //   EE: E8 02 00  CALL +2 -> F3  (frame 3 → frame 4)
-    //   F1: C3        RET            (frame 3 return)
-    //   F3: C3        RET            (frame 4 return, rets to F1 → wait that loops)
-    //
-    // Cleaner: use a simple 4-deep chain where each frame RETs immediately.
-    //   E0: E8 02 00  CALL +2 -> E5  (calls frame2; return addr = E3)
-    //   E3: EB FE     JMP self (after all returns land here — stable)
-    //   E5: E8 02 00  CALL +2 -> EA  (calls frame3; return addr = E8)
-    //   E8: C3        RET            (returns to E3 after frame2+3+4 unwind)
-    //   EA: E8 02 00  CALL +2 -> EF  (calls frame4; return addr = ED)
-    //   ED: C3        RET            (returns to E8)
-    //   EF: C3        RET            (returns to ED)
+    //   C0: E8 02 00  CALL +2 -> C5  (calls frame2; return addr = C3)
+    //   C3: EB FE     JMP self (after all returns land here — stable)
+    //   C5: E8 02 00  CALL +2 -> CA  (calls frame3; return addr = C8)
+    //   C8: C3        RET            (returns to C3 after unwind)
+    //   CA: E8 02 00  CALL +2 -> CF  (calls frame4; return addr = CD)
+    //   CD: C3        RET            (returns to C8)
+    //   CF: E8 02 00  CALL +2 -> D4  (calls frame5; return addr = D2)
+    //   D2: C3        RET            (returns to CD)
+    //   D4: C3        RET            (returns to D2)
     //
     // Execution:
-    //   1. E0 CALL -> E5  (ESP=R-4,  [R-4]=E3)
-    //   2. E5 CALL -> EA  (ESP=R-8,  [R-8]=E8)
-    //   3. EA CALL -> EF  (ESP=R-12, [R-12]=ED)
-    //   4. EF RET  -> ED  (ESP=R-8)
-    //   5. ED RET  -> E8  (ESP=R-4)
-    //   6. E8 RET  -> E3  (ESP=R)
-    //   Final: EIP=E3, ESP=RESET_ESP, no fault
+    //   1. C0 CALL -> C5  (ESP=R-4,  [R-4]=C3)
+    //   2. C5 CALL -> CA  (ESP=R-8,  [R-8]=C8)
+    //   3. CA CALL -> CF  (ESP=R-12, [R-12]=CD)
+    //   4. CF CALL -> D4  (ESP=R-16, [R-16]=D2)
+    //   5. D4 RET  -> D2  (ESP=R-12)
+    //   6. D2 RET  -> CD  (ESP=R-8)
+    //   7. CD RET  -> C8  (ESP=R-4)
+    //   8. C8 RET  -> C3  (ESP=R)
+    //   Final: EIP=C3, ESP=RESET_ESP, no fault
     // ----------------------------------------------------------------
     task test_c_nested_depth4;
         logic timed_out;
@@ -395,39 +377,40 @@ module tb_rung3_call_ret;
 
         for (int i = 0; i < 256; i++) mem_code[i] = 8'h90;
 
-        // Frame 1 call: E0
-        mem_code[8'hE0] = 8'hE8; mem_code[8'hE1] = 8'h02; mem_code[8'hE2] = 8'h00;
-        // Frame 1 return landing: E3
-        mem_code[8'hE3] = 8'hEB; mem_code[8'hE4] = 8'hFE;  // JMP self
+        // Frame 1 call: C0
+        mem_code[8'hC0] = 8'hE8; mem_code[8'hC1] = 8'h02; mem_code[8'hC2] = 8'h00;
+        // Frame 1 return landing: C3
+        mem_code[8'hC3] = 8'hEB; mem_code[8'hC4] = 8'hFE;  // JMP self
 
-        // Frame 2 call: E5
-        mem_code[8'hE5] = 8'hE8; mem_code[8'hE6] = 8'h02; mem_code[8'hE7] = 8'h00;
-        // Frame 2 return: E8
-        mem_code[8'hE8] = 8'hC3;
+        // Frame 2 call: C5
+        mem_code[8'hC5] = 8'hE8; mem_code[8'hC6] = 8'h02; mem_code[8'hC7] = 8'h00;
+        // Frame 2 return: C8
+        mem_code[8'hC8] = 8'hC3;
 
-        // Frame 3 call: EA
-        mem_code[8'hEA] = 8'hE8; mem_code[8'hEB] = 8'h02; mem_code[8'hEC] = 8'h00;
-        // Frame 3 return: ED
-        mem_code[8'hED] = 8'hC3;
+        // Frame 3 call: CA
+        mem_code[8'hCA] = 8'hE8; mem_code[8'hCB] = 8'h02; mem_code[8'hCC] = 8'h00;
+        // Frame 3 return: CD
+        mem_code[8'hCD] = 8'hC3;
 
-        // Frame 4 body: EF
-        mem_code[8'hEF] = 8'hC3;  // RET immediately
+        // Frame 4 call: CF
+        mem_code[8'hCF] = 8'hE8; mem_code[8'hD0] = 8'h02; mem_code[8'hD1] = 8'h00;
+        // Frame 4 return: D2
+        mem_code[8'hD2] = 8'hC3;
+        // Frame 5 body reached by the fourth nested CALL.
+        mem_code[8'hD4] = 8'hC3;
 
-        // Reset vector starts at E0 — patch fetch start.
-        // The CPU always resets to 0xFFFFFFF0, so set F0 to JMP to E0.
-        // JMP SHORT to 0xFFFFFFE0: disp = E0 - (F0+2) = -18 = 0xEE
+        // Reset vector starts at C0 — patch fetch start after frame bytes.
+        // The CPU always resets to 0xFFFFFFF0, so set F0 to JMP to C0.
+        // JMP SHORT to 0xFFFFFFC0: disp = C0 - (F0+2) = -50 = 0xCE
         mem_code[8'hF0] = 8'hEB;
-        mem_code[8'hF1] = 8'hEE;  // JMP -18 -> lands at 0xFFFFFFE0
+        mem_code[8'hF1] = 8'hCE;  // JMP -50 -> lands at 0xFFFFFFC0
 
-        indirect_call_target       = 32'h0;
-        indirect_call_target_valid = 1'b0;
         reset_cpu();
 
-        // Wait 6 ENDIs: JMP + CALL + CALL + CALL + RET + RET + RET = 7
-        // (actually JMP to E0 first, then 3 CALLs and 3 RETs = 7 ENDIs total)
-        wait_n_endi(7, timed_out);
-        check("C.1: all 7 ENDIs fire without timeout",   !timed_out);
-        check("C.2: EIP = 0xFFFFFFE3 (depth-1 return)",  dbg_eip == 32'hFFFFFFE3);
+        // JMP to E0, four nested CALLs, then four RETs.
+        wait_n_endi(9, timed_out);
+        check("C.1: all 9 ENDIs fire without timeout",   !timed_out);
+        check("C.2: EIP = 0xFFFFFFC3 (depth-1 return)",  dbg_eip == 32'hFFFFFFC3);
         check("C.3: ESP = RESET_ESP (fully unwound)",    dbg_esp == RESET_ESP);
         check("C.4: no fault during nested CALL/RET",    !dbg_fault_pending);
     endtask
@@ -439,11 +422,8 @@ module tb_rung3_call_ret;
     //   F0: FF D0   FF /2, ModRM=0xD0 (mod=11, reg=2, rm=0)
     //   F2: 90      NOP (return landing)
     //   ...
-    // indirect_call_target = 0x000000A0
-    // Code at 0x000000A0: C3 (RET)
-    //   -> mem_code[0xA0] = 0xC3
-    //
-    // After CALL: EIP=0x000000A0, ESP=RESET_ESP-4, [RESET_ESP-4]=0xFFFFFFF2
+    // EAX bootstrap value is 0, so code at 0x00000000 is RET.
+    // After CALL: EIP=0x00000000, ESP=RESET_ESP-4, [RESET_ESP-4]=0xFFFFFFF2
     // After RET:  EIP=0xFFFFFFF2, ESP=RESET_ESP
     // ----------------------------------------------------------------
     task test_d_indirect_call;
@@ -455,16 +435,14 @@ module tb_rung3_call_ret;
         mem_code[8'hF0] = 8'hFF;  // FF /2 opcode
         mem_code[8'hF1] = 8'hD0;  // ModRM = 0xD0 (mod=11, reg=2, rm=0)
         mem_code[8'hF2] = 8'h90;  // return landing NOP
-        mem_code[8'hA0] = 8'hC3;  // RET at call target
+        mem_code[8'h00] = 8'hC3;  // RET at register target
 
-        indirect_call_target       = 32'hFFFFFFA0;  // target in 0xFF window
-        indirect_call_target_valid = 1'b1;
         reset_cpu();
 
         // CALL ENDI
         wait_endi(timed_out);
         check("D.1: indirect CALL ENDI fires",               !timed_out);
-        check("D.2: EIP = indirect target (0xFFFFFFA0)",     dbg_eip == 32'hFFFFFFA0);
+        check("D.2: EIP = indirect register target (0)",     dbg_eip == 32'h00000000);
         check("D.3: ESP decremented by 4",                   dbg_esp == RESET_ESP - 32'h4);
         check("D.4: no fault after indirect CALL",           !dbg_fault_pending);
         esp_after_call = dbg_esp;
@@ -482,19 +460,82 @@ module tb_rung3_call_ret;
     endtask
 
     // ----------------------------------------------------------------
-    // Test E — Rung 2 regression: JMP SHORT self-loop
+    // Test E — Indirect CALL (FF /2) memory direct disp32 + RET
     // ----------------------------------------------------------------
-    task test_e_rung2_regression;
+    task test_e_indirect_call_memory;
+        logic timed_out;
+        logic [31:0] esp_after_call;
+        $display("--- Test E: Indirect CALL (FF /2, memory direct disp32) ---");
+
+        for (int i = 0; i < 256; i++) mem_code[i] = 8'h90;
+        mem_code[8'hF0] = 8'hFF;  // FF /2 opcode
+        mem_code[8'hF1] = 8'h15;  // ModRM = 00 010 101: disp32 memory operand
+        mem_code[8'hF2] = 8'h80;
+        mem_code[8'hF3] = 8'h00;
+        mem_code[8'hF4] = 8'h00;
+        mem_code[8'hF5] = 8'h00;  // disp32 = 0x00000080
+        mem_code[8'hF6] = 8'h90;  // return landing
+        mem_code[8'hA0] = 8'hC3;  // RET at loaded target
+
+        reset_cpu();
+        stack_mem[8'h20] = 32'hFFFFFFA0;
+
+        wait_endi(timed_out);
+        check("E.1: memory indirect CALL ENDI fires",        !timed_out);
+        check("E.2: EIP = loaded memory target",             dbg_eip == 32'hFFFFFFA0);
+        check("E.3: ESP decremented by 4",                   dbg_esp == RESET_ESP - 32'h4);
+        check("E.4: no fault after memory indirect CALL",    !dbg_fault_pending);
+        esp_after_call = dbg_esp;
+
+        @(posedge clk);
+        check("E.5: return address on stack = 0xFFFFFFF6",
+              stack_mem[esp_after_call[9:2]] == 32'hFFFFFFF6);
+
+        wait_endi(timed_out);
+        check("E.6: RET after memory indirect CALL fires",   !timed_out);
+        check("E.7: EIP = 0xFFFFFFF6 (return address)",      dbg_eip == 32'hFFFFFFF6);
+        check("E.8: ESP restored",                           dbg_esp == RESET_ESP);
+        check("E.9: no fault after memory indirect RET",      !dbg_fault_pending);
+    endtask
+
+    // ----------------------------------------------------------------
+    // Test F — Unsupported FF /2 memory forms do not execute successfully
+    // ----------------------------------------------------------------
+    task test_f_unsupported_memory_form;
+        logic timed_out;
+        logic [31:0] would_be_return_slot;
+        $display("--- Test F: Unsupported FF /2 memory form fails safely ---");
+
+        for (int i = 0; i < 256; i++) mem_code[i] = 8'h90;
+        mem_code[8'hF0] = 8'hFF;  // FF /2 opcode
+        mem_code[8'hF1] = 8'h10;  // ModRM = 00 010 000: [EAX], not direct disp32
+        mem_code[8'h00] = 8'hC3;  // Old broad behavior would have used target 0.
+
+        reset_cpu();
+
+        wait_endi(timed_out);
+        would_be_return_slot = RESET_ESP - 32'h4;
+        check("F.1: unsupported memory form reaches fault-end ENDI", !timed_out);
+        check("F.2: EIP is not redirected to placeholder target",
+              dbg_eip == 32'hFFFFFFF0);
+        check("F.3: ESP unchanged; CALL stack effect not committed",
+              dbg_esp == RESET_ESP);
+        check("F.4: return address was not pushed",
+              stack_mem[would_be_return_slot[9:2]] == 32'h0);
+    endtask
+
+    // ----------------------------------------------------------------
+    // Test G — Rung 2 regression: JMP SHORT self-loop
+    // ----------------------------------------------------------------
+    task test_g_rung2_regression;
         logic timed_out;
         int   endi_count, cyc;
         logic saw_fault;
-        $display("--- Test E: Rung 2 regression (JMP SHORT self-loop) ---");
+        $display("--- Test G: Rung 2 regression (JMP SHORT self-loop) ---");
 
         for (int i = 0; i < 256; i++)
             mem_code[i] = (i % 2 == 0) ? 8'hEB : 8'hFE;
 
-        indirect_call_target       = 32'h0;
-        indirect_call_target_valid = 1'b0;
         reset_cpu();
 
         saw_fault  = 0;
@@ -507,37 +548,35 @@ module tb_rung3_call_ret;
             if (dbg_fault_pending) saw_fault = 1;
         end
 
-        check("E.1: no fault in 500 cycles (JMP loop)",  !saw_fault);
-        check("E.2: JMP ENDIs fired in 500 cycles",       endi_count >= 5);
-        check("E.3: EIP stays at reset vector",           dbg_eip == 32'hFFFFFFF0);
+        check("G.1: no fault in 500 cycles (JMP loop)",  !saw_fault);
+        check("G.2: JMP ENDIs fired in 500 cycles",       endi_count >= 5);
+        check("G.3: EIP stays at reset vector",           dbg_eip == 32'hFFFFFFF0);
     endtask
 
     // ----------------------------------------------------------------
-    // Test F — Rung 1 regression: 10 consecutive NOPs
+    // Test H — Rung 1 regression: 10 consecutive NOPs
     // ----------------------------------------------------------------
-    task test_f_rung1_regression;
+    task test_h_rung1_regression;
         logic timed_out;
-        $display("--- Test F: Rung 1 regression (10 consecutive NOPs) ---");
+        $display("--- Test H: Rung 1 regression (10 consecutive NOPs) ---");
 
         for (int i = 0; i < 256; i++) mem_code[i] = 8'h90;
 
-        indirect_call_target       = 32'h0;
-        indirect_call_target_valid = 1'b0;
         reset_cpu();
 
         begin : nop_loop
             for (int n = 0; n < 10; n++) begin
                 wait_endi(timed_out);
                 if (timed_out) begin
-                    check("F: NOP timeout", 0);
+                    check("H: NOP timeout", 0);
                     disable nop_loop;
                 end
             end
         end
 
-        check("F.1: EIP advanced by 10 after 10 NOPs",
+        check("H.1: EIP advanced by 10 after 10 NOPs",
               dbg_eip == 32'hFFFFFFF0 + 32'hA);
-        check("F.2: no fault during NOP regression",       !dbg_fault_pending);
+        check("H.2: no fault during NOP regression",       !dbg_fault_pending);
     endtask
 
     // ----------------------------------------------------------------
@@ -551,16 +590,16 @@ module tb_rung3_call_ret;
         pass_count = 0;
         fail_count = 0;
         reset_n    = 0;
-        indirect_call_target       = 32'h0;
-        indirect_call_target_valid = 1'b0;
         for (int i = 0; i < 256; i++) mem_code[i] = 8'h90;
 
         test_a_call_ret_pair();
         test_b_ret_imm16();
         test_c_nested_depth4();
         test_d_indirect_call();
-        test_e_rung2_regression();
-        test_f_rung1_regression();
+        test_e_indirect_call_memory();
+        test_f_unsupported_memory_form();
+        test_g_rung2_regression();
+        test_h_rung1_regression();
 
         $display("============================================================");
         $display(" RESULTS: %0d passed, %0d failed", pass_count, fail_count);

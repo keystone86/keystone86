@@ -71,8 +71,6 @@ module tb_rung0_reset_loop;
         .bus_dout          (bus_dout),
         .bus_din           (bus_din),
         .bus_ready         (bus_ready),
-        .indirect_call_target       (32'h0),
-        .indirect_call_target_valid (1'b0),
         .dbg_eip           (dbg_eip),
         .dbg_esp           (dbg_esp_nc),
         .dbg_mseq_state    (dbg_mseq_state),

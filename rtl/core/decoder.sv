@@ -39,6 +39,11 @@ module decoder (
     output logic        has_ret_imm,
     output logic [15:0] ret_imm,
     output logic [7:0]  modrm_byte,
+    output logic [7:0]  sib_byte,
+    output logic        modrm_present,
+    output logic [3:0]  modrm_class,
+    output logic        disp_valid,
+    output logic [31:0] disp_value,
     output logic        payload16_valid,
     output logic        payload16_signed,
     output logic [15:0] payload16,
@@ -53,7 +58,9 @@ module decoder (
         DEC_CONSUME = 4'h1,
         DEC_DISP16  = 4'h2,   // E8 disp16 and C2 imm16 payload acquisition
         DEC_MODRM   = 4'h3,   // used for FF forms
-        DEC_DONE    = 4'h4
+        DEC_SIB     = 4'h4,
+        DEC_DISP    = 4'h5,
+        DEC_DONE    = 4'h6
     } dec_state_t;
 
     dec_state_t state, state_next;
@@ -65,6 +72,10 @@ module decoder (
     logic [7:0]  aux_hi;
     logic        aux_lo_valid;
     logic        aux_hi_valid;
+    logic [7:0]  sib_latch;
+    logic [31:0] disp_latch;
+    logic [2:0]  disp_idx;
+    logic [2:0]  disp_total;
 
     logic        is_jmp_short;
     logic        is_jmp_near;
@@ -75,6 +86,9 @@ module decoder (
 
     logic        opcode_consumed;
     logic [7:0]  modrm_latch;
+    logic        ff_is_call_near;
+
+    assign ff_is_call_near = (modrm_latch[5:3] == 3'b010);
 
     // ----------------------------------------------------------------
     // State register
@@ -88,6 +102,10 @@ module decoder (
             aux_hi            <= 8'h0;
             aux_lo_valid      <= 1'b0;
             aux_hi_valid      <= 1'b0;
+            sib_latch         <= 8'h0;
+            disp_latch        <= 32'h0;
+            disp_idx          <= 3'h0;
+            disp_total        <= 3'h0;
             is_jmp_short      <= 1'b0;
             is_jmp_near       <= 1'b0;
             is_call_direct    <= 1'b0;
@@ -104,6 +122,10 @@ module decoder (
             aux_hi            <= 8'h0;
             aux_lo_valid      <= 1'b0;
             aux_hi_valid      <= 1'b0;
+            sib_latch         <= 8'h0;
+            disp_latch        <= 32'h0;
+            disp_idx          <= 3'h0;
+            disp_total        <= 3'h0;
             is_jmp_short      <= 1'b0;
             is_jmp_near       <= 1'b0;
             is_call_direct    <= 1'b0;
@@ -128,6 +150,10 @@ module decoder (
                         is_ret_imm16      <= (q_data == 8'hC2);
                         aux_lo_valid      <= 1'b0;
                         aux_hi_valid      <= 1'b0;
+                        sib_latch         <= 8'h0;
+                        disp_latch        <= 32'h0;
+                        disp_idx          <= 3'h0;
+                        disp_total        <= 3'h0;
                         opcode_consumed   <= 1'b0;
                         modrm_latch       <= 8'h0;
                     end
@@ -160,7 +186,28 @@ module decoder (
                         if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h1)) begin
                             modrm_latch  <= q_data;
                             aux_lo_valid <= 1'b1;
+                            disp_total   <= disp_bytes_for_modrm(q_data, 8'h0, 1'b0);
                         end
+                    end
+                end
+
+                DEC_SIB: begin
+                    if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h2)) begin
+                        sib_latch  <= q_data;
+                        disp_total <= disp_bytes_for_modrm(modrm_latch, q_data, 1'b1);
+                    end
+                end
+
+                DEC_DISP: begin
+                    if (q_valid && (q_fetch_eip == opcode_eip_latch + disp_start_offset())) begin
+                        case (disp_idx)
+                            3'd0: disp_latch[7:0]   <= q_data;
+                            3'd1: disp_latch[15:8]  <= q_data;
+                            3'd2: disp_latch[23:16] <= q_data;
+                            3'd3: disp_latch[31:24] <= q_data;
+                            default: ;
+                        endcase
+                        disp_idx <= disp_idx + 3'd1;
                     end
                 end
 
@@ -201,7 +248,27 @@ module decoder (
             end
 
             DEC_MODRM: begin
-                if (opcode_consumed && aux_lo_valid)
+                if (opcode_consumed && aux_lo_valid) begin
+                    if (ff_is_call_near && modrm_needs_sib(modrm_latch))
+                        state_next = DEC_SIB;
+                    else if (ff_is_call_near && (disp_total != 3'd0))
+                        state_next = DEC_DISP;
+                    else
+                        state_next = DEC_DONE;
+                end
+            end
+
+            DEC_SIB: begin
+                if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h2)) begin
+                    if (disp_bytes_for_modrm(modrm_latch, q_data, 1'b1) != 3'd0)
+                        state_next = DEC_DISP;
+                    else
+                        state_next = DEC_DONE;
+                end
+            end
+
+            DEC_DISP: begin
+                if (disp_idx == disp_total)
                     state_next = DEC_DONE;
             end
 
@@ -217,8 +284,58 @@ module decoder (
     // ----------------------------------------------------------------
     // Helper decode
     // ----------------------------------------------------------------
-    logic ff_is_call_near;
-    assign ff_is_call_near = (modrm_latch[5:3] == 3'b010);
+    function automatic logic modrm_needs_sib(input logic [7:0] m);
+        return (m[7:6] != 2'b11) && (m[2:0] == 3'b100);
+    endfunction
+
+    function automatic logic [2:0] disp_bytes_for_modrm(
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       have_sib
+    );
+        logic [1:0] mod_bits;
+        logic [2:0] rm_bits;
+        logic [2:0] base_bits;
+        begin
+            mod_bits = m[7:6];
+            rm_bits  = m[2:0];
+            base_bits = have_sib ? s[2:0] : rm_bits;
+
+            if (mod_bits == 2'b11)
+                return 3'd0;
+            if (mod_bits == 2'b01)
+                return 3'd1;
+            if (mod_bits == 2'b10)
+                return 3'd4;
+            if (base_bits == 3'b101)
+                return 3'd4;
+            return 3'd0;
+        end
+    endfunction
+
+    function automatic logic [31:0] disp_start_offset();
+        return 32'd2 + (modrm_needs_sib(modrm_latch) ? 32'd1 : 32'd0) +
+               {29'h0, disp_idx};
+    endfunction
+
+    function automatic logic [3:0] classify_modrm(input logic [7:0] m);
+        if (m[7:6] == 2'b11)
+            return 4'h0; // MRM_REG
+        if (modrm_needs_sib(m)) begin
+            if (m[7:6] == 2'b01)
+                return 4'h6; // MRM_SIB_DISP8
+            if (m[7:6] == 2'b10)
+                return 4'h7; // MRM_SIB_DISP32
+            return 4'h5;     // MRM_SIB
+        end
+        if (m[7:6] == 2'b00 && m[2:0] == 3'b101)
+            return 4'h3;     // MRM_MEM_DISP32 / direct32 in this 32-bit slice
+        if (m[7:6] == 2'b01)
+            return 4'h2;     // MRM_MEM_DISP8
+        if (m[7:6] == 2'b10)
+            return 4'h3;     // MRM_MEM_DISP32
+        return 4'h1;         // MRM_MEM_NO_DISP
+    endfunction
 
     function automatic logic [7:0] classify_opcode(
         input logic [7:0] op,
@@ -255,7 +372,9 @@ module decoder (
         else if (is_jmp_near || is_call_direct || is_ret_imm16)
             next_eip = opcode_eip_latch + 32'h3;
         else if (is_call_ff)
-            next_eip = opcode_eip_latch + 32'h2;
+            next_eip = opcode_eip_latch + 32'h2 +
+                       (modrm_needs_sib(modrm_latch) ? 32'h1 : 32'h0) +
+                       {29'h0, disp_total};
         else
             next_eip = opcode_eip_latch + 32'h1;
 
@@ -270,6 +389,15 @@ module decoder (
         has_ret_imm  = 1'b0;
         ret_imm      = 16'h0;
         modrm_byte   = modrm_latch;
+        sib_byte     = sib_latch;
+        modrm_present= is_call_ff;
+        modrm_class  = classify_modrm(modrm_latch);
+        disp_valid   = (disp_total != 3'd0);
+        case (disp_total)
+            3'd1: disp_value = {{24{disp_latch[7]}}, disp_latch[7:0]};
+            3'd4: disp_value = disp_latch;
+            default: disp_value = 32'h0;
+        endcase
         payload16_valid  = 1'b0;
         payload16_signed = 1'b0;
         payload16        = {aux_hi, aux_lo};
@@ -298,6 +426,16 @@ module decoder (
                              (q_fetch_eip == opcode_eip_latch + 32'h1)) begin
                     q_consume = 1'b1;
                 end
+            end
+
+            DEC_SIB: begin
+                if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h2))
+                    q_consume = 1'b1;
+            end
+
+            DEC_DISP: begin
+                if (q_valid && (q_fetch_eip == opcode_eip_latch + disp_start_offset()))
+                    q_consume = 1'b1;
             end
 
             DEC_DONE: begin

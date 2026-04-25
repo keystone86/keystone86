@@ -27,27 +27,37 @@ make ucode && make rung3-sim
 |------|---------------|-------------|
 | A    | E8 / C3       | Direct CALL pushes correct return address through the shared bus path; ESP decrements by 4; RET restores EIP and ESP exactly |
 | B    | E8 / C2       | RET imm16 applies post-pop stack adjustment; ESP = pre-CALL ESP + 8 |
-| C    | E8 / C3 (×3)  | Nested CALL/RET depth 4: all frames unwind to correct EIP; ESP fully restored |
-| D    | FF /2 / C3    | Indirect CALL (register form): correct target EIP, correct return address pushed, RET unwinds correctly |
-| E    | EB FE         | Rung 2 regression: JMP SHORT self-loop runs 500 cycles without fault |
-| F    | 90 ×10        | Rung 1 regression: 10 consecutive NOPs advance EIP correctly |
+| C    | E8 / C3 (×4)  | Nested CALL depth 4: four CALL frames unwind through four RETs to the correct EIP; ESP fully restored |
+| D    | FF /2 / C3    | Indirect CALL register form: r/m register target is read through the bounded operand path; return address pushed; RET unwinds correctly |
+| E    | FF /2 / C3    | Indirect CALL memory disp32 form: r/m memory target is read through the shared EU bus path; return address pushed; RET unwinds correctly |
+| F    | FF /2         | Unsupported FF /2 memory form does not commit a CALL stack effect or redirect |
+| G    | EB FE         | Rung 2 regression: JMP SHORT self-loop runs 500 cycles without fault |
+| H    | 90 ×10        | Rung 1 regression: 10 consecutive NOPs advance EIP correctly |
 
 ---
 
-## Passing baseline
+## Local verification run
 
 ```
-Date:        2026-04-25
+Date:        2026-04-25T21:19:52Z
 Branch:      rung3-codex
-Commit:      working tree
+HEAD:        f8d870796ddce6ebe05e21044491837b207d5090
+Tree state:  dirty before and after the run; Rung 3 blocker fixes were uncommitted
 Commands:    make codegen
              make ucode
+             make rung2-regress
              make rung3-regress
 ```
 
 The Rung 3 stack memory path is exercised through `bus_interface` EU
-transactions on the main bus. There is no dedicated `cpu_top` stack sideband
-port in the passing baseline.
+transactions on the main bus. FF /2 register targets and the direct disp32
+memory target are exercised through the bounded Rung 3 operand service path;
+unsupported FF /2 memory forms fail safely without committing a CALL redirect
+or stack effect. There is no dedicated `cpu_top` indirect-call target sideband.
+
+This is not a clean committed acceptance baseline. A final acceptance record
+still requires committing the implementation and rerunning the required
+regression commands against that exact committed state.
 
 ### Rung 0 + Rung 1 regression
 
@@ -101,13 +111,19 @@ RESULT: ALL RUNG 2 TESTS PASSED
 --- Test D: Indirect CALL (FF /2, register form) ---
   [PASS] D.1 through D.9
 
---- Test E: Rung 2 regression (JMP SHORT self-loop) ---
-  [PASS] E.1 through E.3
+--- Test E: Indirect CALL (FF /2, memory direct disp32) ---
+  [PASS] E.1 through E.9
 
---- Test F: Rung 1 regression (10 consecutive NOPs) ---
-  [PASS] F.1 through F.2
+--- Test F: Unsupported FF /2 memory form fails safely ---
+  [PASS] F.1 through F.4
 
-RESULTS: 33 passed, 0 failed
+--- Test G: Rung 2 regression (JMP SHORT self-loop) ---
+  [PASS] G.1 through G.3
+
+--- Test H: Rung 1 regression (10 consecutive NOPs) ---
+  [PASS] H.1 through H.2
+
+RESULTS: 46 passed, 0 failed
 ALL TESTS PASSED — Rung 3 acceptance criteria met.
 ```
 
@@ -116,8 +132,10 @@ ALL TESTS PASSED — Rung 3 acceptance criteria met.
 ## What Rung 3 does not cover
 
 - Far CALL / far RET
-- CALL r/m with memory-form ModRM (phase-1: register form only; FF with non-/2 ModRM returns ENTRY_NULL)
+- Full CALL r/m addressing matrix: Rung 3 currently proves register form and
+  direct disp32 memory form; broader SIB/base/index combinations fail safely
+  and are not claimed as successful operand loads
 - Stack-limit faults (FC_SS): fault paths are present in Appendix D but not triggered in phase-1
-- General-purpose register file (EAX–EDI): not implemented; indirect CALL target is supplied externally via `indirect_call_target` input
+- Full general-purpose register file behavior beyond the bounded Rung 3 operand source
 - EFLAGS preservation across CALL/RET (no flags modified by these instructions)
 - JCC (Rung 4)

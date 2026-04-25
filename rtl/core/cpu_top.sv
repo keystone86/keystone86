@@ -18,10 +18,6 @@ module cpu_top (
     input  logic [31:0] bus_din,
     input  logic        bus_ready,
 
-    // --- Rung 3 register-form indirect CALL operand source ---
-    input  logic [31:0] indirect_call_target,
-    input  logic        indirect_call_target_valid,
-
     // --- Debug ports ---
     output logic [31:0] dbg_eip,
     output logic [31:0] dbg_esp,
@@ -76,11 +72,15 @@ module cpu_top (
     logic [31:0] dec_target_eip;
     logic        dec_has_target;
     logic        dec_is_call;
-    logic        dec_is_call_indirect;
     logic        dec_is_ret;
     logic        dec_has_ret_imm;
     logic [15:0] dec_ret_imm;
     logic [7:0]  dec_modrm_byte;
+    logic [7:0]  dec_sib_byte;
+    logic        dec_modrm_present;
+    logic [3:0]  dec_modrm_class;
+    logic        dec_disp_valid;
+    logic [31:0] dec_disp_value;
     logic        dec_payload16_valid;
     logic        dec_payload16_signed;
     logic [15:0] dec_payload16;
@@ -152,6 +152,10 @@ module cpu_top (
     logic [1:0]  op_svc_sr;
     logic        op_t2_wr_en;
     logic [31:0] op_t2_wr_data;
+    logic        op_mem_rd_req;
+    logic [31:0] op_mem_rd_addr;
+    logic        op_mem_rd_ready;
+    logic [31:0] op_mem_rd_data;
 
     // stack_engine side
     logic [7:0]  se_svc_id;
@@ -177,6 +181,11 @@ module cpu_top (
     logic [31:0] t2_r;
     logic [31:0] t4_r;
     logic [31:0] meta_next_eip;
+    logic        meta_modrm_present_r;
+    logic [7:0]  meta_modrm_byte_r;
+    logic [7:0]  meta_sib_byte_r;
+    logic [3:0]  meta_modrm_class_r;
+    logic [31:0] meta_disp_value_r;
 
     // debug wires from microsequencer
     logic [1:0]  dbg_mseq_state_w;
@@ -195,14 +204,17 @@ module cpu_top (
     assign dbg_decode_done   = decode_done;
     assign dbg_fetch_addr    = fetch_addr_internal;
 
-    assign eu_req     = commit_stack_wr_pending || se_stk_rd_req;
+    assign eu_req     = commit_stack_wr_pending || se_stk_rd_req || op_mem_rd_req;
     assign eu_wr      = commit_stack_wr_pending;
-    assign eu_addr    = commit_stack_wr_pending ? commit_stack_wr_addr_r : se_stk_rd_addr;
+    assign eu_addr    = commit_stack_wr_pending ? commit_stack_wr_addr_r :
+                        (se_stk_rd_req ? se_stk_rd_addr : op_mem_rd_addr);
     assign eu_byteen  = commit_stack_wr_pending ? 4'b1111 : 4'b1111;
     assign eu_wdata   = commit_stack_wr_pending ? commit_stack_wr_data_r : 32'h0;
 
     assign se_stk_rd_ready = (!commit_stack_wr_pending) && eu_done;
     assign se_stk_rd_data  = eu_rdata;
+    assign op_mem_rd_ready = (!commit_stack_wr_pending) && (!se_stk_rd_req) && eu_done;
+    assign op_mem_rd_data  = eu_rdata;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -227,13 +239,27 @@ module cpu_top (
         if (!reset_n) begin
             t2_r <= 32'h0;
             t4_r <= 32'h0;
+            meta_modrm_present_r <= 1'b0;
+            meta_modrm_byte_r    <= 8'h0;
+            meta_sib_byte_r      <= 8'h0;
+            meta_modrm_class_r   <= 4'hF;
+            meta_disp_value_r    <= 32'h0;
         end else begin
+            if (dec_ack) begin
+                meta_modrm_present_r <= dec_modrm_present;
+                meta_modrm_byte_r    <= dec_modrm_byte;
+                meta_sib_byte_r      <= dec_sib_byte;
+                meta_modrm_class_r   <= dec_modrm_class;
+                meta_disp_value_r    <= dec_disp_value;
+            end
             if (fe_t4_wr_en) t4_r <= fe_t4_wr_data;
             if (dec_ack && dec_payload16_valid) begin
                 if (dec_payload16_signed)
                     t4_r <= {{16{dec_payload16[15]}}, dec_payload16};
                 else
                     t4_r <= {16'h0, dec_payload16};
+            end else if (dec_ack && dec_is_ret && !dec_has_ret_imm) begin
+                t4_r <= 32'h0;
             end
             if (fc_t2_wr_en) t2_r <= fc_t2_wr_data;
             if (op_t2_wr_en) t2_r <= op_t2_wr_data;
@@ -301,11 +327,16 @@ module cpu_top (
         .target_eip   (dec_target_eip),
         .has_target   (dec_has_target),
         .is_call      (dec_is_call),
-        .is_call_indirect (dec_is_call_indirect),
+        .is_call_indirect (),
         .is_ret       (dec_is_ret),
         .has_ret_imm  (dec_has_ret_imm),
         .ret_imm      (dec_ret_imm),
         .modrm_byte   (dec_modrm_byte),
+        .sib_byte     (dec_sib_byte),
+        .modrm_present(dec_modrm_present),
+        .modrm_class  (dec_modrm_class),
+        .disp_valid   (dec_disp_valid),
+        .disp_value   (dec_disp_value),
         .payload16_valid (dec_payload16_valid),
         .payload16_signed(dec_payload16_signed),
         .payload16    (dec_payload16),
@@ -323,9 +354,7 @@ module cpu_top (
         .entry_id_in     (entry_id),
         .next_eip_in     (next_eip),
         .dec_is_call     (dec_is_call),
-        .dec_is_call_indirect (dec_is_call_indirect),
         .dec_is_ret      (dec_is_ret),
-        .dec_has_ret_imm (dec_has_ret_imm),
         .dec_ack         (dec_ack),
         .squash          (squash),
         .upc             (upc),
@@ -434,16 +463,24 @@ module cpu_top (
     );
 
     operand_engine u_operand (
-        .clk                        (clk),
-        .reset_n                    (reset_n),
-        .svc_id                     (op_svc_id),
-        .svc_req                    (op_svc_req),
-        .svc_done                   (op_svc_done),
-        .svc_sr                     (op_svc_sr),
-        .indirect_call_target       (indirect_call_target),
-        .indirect_call_target_valid (indirect_call_target_valid),
-        .t2_wr_en                   (op_t2_wr_en),
-        .t2_wr_data                 (op_t2_wr_data)
+        .clk           (clk),
+        .reset_n       (reset_n),
+        .svc_id        (op_svc_id),
+        .svc_req       (op_svc_req),
+        .svc_done      (op_svc_done),
+        .svc_sr        (op_svc_sr),
+        .esp_in        (esp),
+        .modrm_present (meta_modrm_present_r),
+        .modrm_byte    (meta_modrm_byte_r),
+        .sib_byte      (meta_sib_byte_r),
+        .modrm_class   (meta_modrm_class_r),
+        .disp_value    (meta_disp_value_r),
+        .mem_rd_req    (op_mem_rd_req),
+        .mem_rd_addr   (op_mem_rd_addr),
+        .mem_rd_data   (op_mem_rd_data),
+        .mem_rd_ready  (op_mem_rd_ready),
+        .t2_wr_en      (op_t2_wr_en),
+        .t2_wr_data    (op_t2_wr_data)
     );
 
     stack_engine u_stack (

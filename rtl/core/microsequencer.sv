@@ -33,9 +33,7 @@ module microsequencer (
     input  logic [7:0]  entry_id_in,
     input  logic [31:0] next_eip_in,
     input  logic        dec_is_call,
-    input  logic        dec_is_call_indirect,
     input  logic        dec_is_ret,
-    input  logic        dec_has_ret_imm,
     output logic        dec_ack,
 
     // --- Squash output ---
@@ -88,6 +86,7 @@ module microsequencer (
     localparam logic [3:0] UOP_NOP   = 4'h0;
     localparam logic [3:0] UOP_BR    = 4'h4;
     localparam logic [3:0] UOP_SVCW  = 4'h9;
+    localparam logic [3:0] UOP_STAGE = 4'hA;
     localparam logic [3:0] UOP_RAISE = 4'hC;
     localparam logic [3:0] UOP_ENDI  = 4'hE;
     localparam logic [3:0] UOP_EXT   = 4'hF;
@@ -98,9 +97,7 @@ module microsequencer (
     logic [31:0] next_eip_r;
     logic        is_jmp_r;
     logic        is_call_r;
-    logic        is_call_indirect_r;
     logic        is_ret_r;
-    logic        has_ret_imm_r;
 
     logic        dispatch_rom_pending;
     logic        dispatch_pending;
@@ -132,7 +129,6 @@ module microsequencer (
 
     logic br_taken;
     logic [7:0] current_svc_id;
-    logic       skip_current_svc;
 
     logic retire_ctrl_xfer_pulse;
     always_comb begin
@@ -156,13 +152,6 @@ module microsequencer (
 
     assign squash = retire_ctrl_xfer_pulse;
     assign current_svc_id = ext_pending_r ? uinst[7:0] : {2'b00, uop_target};
-    assign skip_current_svc =
-        (is_call_indirect_r &&
-         (current_svc_id == COMPUTE_REL_TARGET)) ||
-        (is_call_r && !is_call_indirect_r &&
-         ((current_svc_id == LOAD_RM16) ||
-          (current_svc_id == LOAD_RM32)));
-
     // ----------------------------------------------------------------
     // State register
     // ----------------------------------------------------------------
@@ -174,9 +163,7 @@ module microsequencer (
             next_eip_r            <= 32'h0;
             is_jmp_r              <= 1'b0;
             is_call_r             <= 1'b0;
-            is_call_indirect_r    <= 1'b0;
             is_ret_r              <= 1'b0;
-            has_ret_imm_r         <= 1'b0;
             dispatch_rom_pending  <= 1'b0;
             dispatch_pending      <= 1'b0;
             dispatch_entry_latch  <= 8'h00;
@@ -202,9 +189,7 @@ module microsequencer (
                         next_eip_r           <= next_eip_in;
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
                         is_call_r            <= dec_is_call;
-                        is_call_indirect_r   <= dec_is_call_indirect;
                         is_ret_r             <= dec_is_ret;
-                        has_ret_imm_r        <= dec_has_ret_imm;
                         dispatch_entry_latch <= entry_id_in;
                         dispatch_rom_pending <= 1'b1;
                     end
@@ -243,9 +228,6 @@ module microsequencer (
                                     svc_id_r <= {2'b00, uop_target};
                                 end
 
-                                if (skip_current_svc) begin
-                                    execute_fetch_pending <= 1'b1;
-                                end
                             end
 
                             UOP_NOP: begin
@@ -257,6 +239,10 @@ module microsequencer (
                             end
 
                             UOP_RAISE: begin
+                                execute_fetch_pending <= 1'b1;
+                            end
+
+                            UOP_STAGE: begin
                                 execute_fetch_pending <= 1'b1;
                             end
 
@@ -341,17 +327,16 @@ module microsequencer (
 
                         UOP_SVCW: begin
                             svc_id_out = current_svc_id;
+                            svc_req_out = 1'b1;
+                            state_next  = MSEQ_WAIT_SERVICE;
+                        end
 
-                            // Metadata-selected no-ops keep one shared
-                            // microcode entry for direct/indirect CALL and
-                            // RET/RET imm16 while avoiding payload fetches
-                            // that do not belong to the active form.
-                            if (skip_current_svc) begin
-                                upc_next = upc_r + 12'h1;
-                            end else begin
-                                svc_req_out = 1'b1;
-                                state_next  = MSEQ_WAIT_SERVICE;
+                        UOP_STAGE: begin
+                            if (uop_imm10[5:0] == STAGE_STACK_ADJ) begin
+                                pc_stack_adj_en  = 1'b1;
+                                pc_stack_adj_val = t4_data;
                             end
+                            upc_next = upc_r + 12'h1;
                         end
 
                         UOP_RAISE: begin
@@ -370,11 +355,6 @@ module microsequencer (
                             if (((is_jmp_r || is_call_r || is_ret_r) && !endi_done)) begin
                                 pc_target_en  = 1'b1;
                                 pc_target_val = t2_data;
-                            end
-
-                            if (is_ret_r && has_ret_imm_r && !endi_done) begin
-                                pc_stack_adj_en  = 1'b1;
-                                pc_stack_adj_val = {16'h0, t4_data[15:0]};
                             end
 
                             endi_req  = 1'b1;

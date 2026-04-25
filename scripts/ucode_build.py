@@ -67,6 +67,9 @@ PUSH32                 = 0x41
 POP32                  = 0x43
 COMPUTE_REL_TARGET     = 0x46
 VALIDATE_NEAR_TRANSFER = 0x44
+STAGE_STACK_ADJ        = 0x06
+REG_T4                 = 0x4
+REG_SPECIAL            = 0xF
 
 C_ALWAYS = 0x0
 C_OK     = 0x1
@@ -90,6 +93,9 @@ def svcw_ext(service_id: int) -> str:
 
 def br(cond: int, rel10: int) -> str:
     return f"{0x40000000 | ((cond & 0xF) << 18) | (rel10 & 0x3FF):08X}"
+
+def stage(field: int, src: int, dst: int = REG_SPECIAL) -> str:
+    return f"{0xA0000000 | ((dst & 0xF) << 14) | ((src & 0xF) << 10) | (field & 0x3FF):08X}"
 
 def rel10(from_addr: int, to_addr: int) -> int:
     delta = to_addr - (from_addr + 1)
@@ -137,11 +143,9 @@ rom[0x058] = endi(CM_JMP)
 # Rung 3: ENTRY_CALL_NEAR at 0x060
 #
 # Direct CALL uses the decoder-staged disp16 payload with COMPUTE_REL_TARGET.
-# Indirect CALL uses LOAD_RM32. Both forms then PUSH32,
-# VALIDATE_NEAR_TRANSFER, and ENDI.
-#
-# Indirect CALL (FF /2, register form) shares this entry. The
-# microsequencer metadata-skips services that do not belong to the active form.
+# Indirect CALL uses LOAD_RM32 to overwrite T2 with the r/m target. Direct CALL
+# has no ModRM metadata, so LOAD_RM32 is a leaf no-op and preserves T2.
+# Both forms then PUSH32, VALIDATE_NEAR_TRANSFER, and ENDI.
 # --------------------------------------------------------------------
 rom[0x060] = ext_word()
 rom[0x061] = svcw_ext(COMPUTE_REL_TARGET)
@@ -159,8 +163,8 @@ rom[0x06B] = endi(CM_CALL)
 # --------------------------------------------------------------------
 # Rung 3: ENTRY_RET_NEAR at 0x070
 #
-# RET uses POP32, validates the popped target, and ENDI commits the staged
-# stack/EIP state. C2 imm16 is consumed by decoder and carried as metadata.
+# RET uses POP32, validates the popped target, stages the C2 stack adjustment
+# from T4 (zero for C3), and ENDI commits the staged stack/EIP state.
 # --------------------------------------------------------------------
 rom[0x070] = ext_word()
 rom[0x071] = svcw_ext(POP32)
@@ -168,7 +172,8 @@ rom[0x072] = br(C_FAULT, rel10(0x072, 0x000))
 rom[0x073] = ext_word()
 rom[0x074] = svcw_ext(VALIDATE_NEAR_TRANSFER)
 rom[0x075] = br(C_FAULT, rel10(0x075, 0x000))
-rom[0x076] = endi(CM_RET)
+rom[0x076] = stage(STAGE_STACK_ADJ, REG_T4)
+rom[0x077] = endi(CM_RET)
 
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
@@ -208,7 +213,8 @@ address  encoding     source
 0x073    {ext_word()}   EXT
 0x074    {svcw_ext(VALIDATE_NEAR_TRANSFER)}   SVCW VALIDATE_NEAR_TRANSFER
 0x075    {br(C_FAULT, rel10(0x075, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x076    {endi(CM_RET)}   ENDI CM_RET (0x{CM_RET:03X})
+0x076    {stage(STAGE_STACK_ADJ, REG_T4)}   STAGE STACK_ADJ, T4
+0x077    {endi(CM_RET)}   ENDI CM_RET (0x{CM_RET:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
