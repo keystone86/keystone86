@@ -209,6 +209,52 @@ Comments and documentation are part of the deliverable. A change is not complete
 if the implementation passes but the surrounding comments or documentation leave
 the behavior unclear or misleading.
 
+## Host/container execution boundary
+
+Host-side Make targets are limited to dev-container lifecycle commands such as:
+
+- `make dev-build`
+- `make dev`
+- `make dev-fpga`
+
+Project build, code generation, microcode, simulation, smoke-check, regression,
+formal, and cleanup targets must run inside the Keystone86 dev container at
+`/work`.
+
+If a Make target fails because it must be run inside the container, do not bypass
+the guard. Stop and report that the dev container must be entered with
+`make dev`.
+
+Codex must not fake, export, or override the container marker used by the
+Makefile to bypass this boundary.
+
+## Container credential boundary
+
+The dev container is the execution boundary for AI coding agents.
+
+Do not mount persistent AI-agent authentication directories into the container by
+default. In particular, do not add persistent mounts for:
+
+- `/home/dev/.codex`
+- `/home/dev/.claude`
+
+Credentials must not be baked into the Docker image.
+
+When agent credentials are needed, they should be supplied from the native host at
+container startup through the minimum available mechanism, such as:
+
+- `OPENAI_API_KEY` for Codex,
+- `ANTHROPIC_API_KEY` for Claude Code.
+
+Do not print, inspect, persist, or copy credential values unless the user
+explicitly asks for credential debugging.
+
+Do not add commands that recursively dump `$HOME`, environment variables, auth
+directories, or secret files.
+
+If a task appears to require persistent credential storage inside the container,
+stop and report the proposed credential flow instead of implementing it.
+
 ## Generated artifacts
 
 If a task changes sources that feed generated RTL, packages, ROMs, microcode, or

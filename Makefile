@@ -3,8 +3,40 @@ SHELL := /bin/bash
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
-.PHONY: help tree spec-check lint ucode ucode-clean sim-smoke regress formal clean bootstrap-info \
+.PHONY: help require-container \
+        tree spec-check lint ucode ucode-clean sim-smoke regress formal clean bootstrap-info \
+        bootstrap-status namespace-check codegen spec-sync-status frozen-manifest-check \
+        version-status release-notes ucode-bootstrap-check decode-dispatch-smoke \
+        microseq-smoke commit-smoke service-abi-smoke prefetch-decode-smoke \
+        bootstrap-report \
+        rung0-sim rung0-regress rung0-clean \
+        rung1-sim rung1-regress rung1-clean \
+        rung2-sim rung2-regress rung2-clean \
+        rung3-sim rung3-regress rung3-clean \
         dev dev-build dev-fpga
+
+# Host-side targets:
+#   make dev-build
+#   make dev
+#   make dev-fpga
+#
+# Project build, code generation, microcode, simulation, smoke-check,
+# regression, formal, and cleanup targets are intended to run inside the
+# Keystone86 dev container at /work.
+#
+# The container image sets KEYSTONE86_CONTAINER=1. Container-only targets use
+# require-container as a light safety rail to avoid accidental native-host runs.
+
+require-container:
+	@if [ "$${KEYSTONE86_CONTAINER:-0}" != "1" ]; then \
+		echo "ERROR: this target must be run inside the Keystone86 dev container."; \
+		echo; \
+		echo "Use:"; \
+		echo "  make dev"; \
+		echo; \
+		echo "Then run this target again inside /work."; \
+		exit 1; \
+	fi
 
 help:
 	@echo "Keystone86 task runner"
@@ -62,48 +94,47 @@ dev-build:
 #   HOST_UID/HOST_GID are passed into the entrypoint so files created under
 #   /work are owned by the host user, not root.
 # Auth:
-#   Claude Code credentials persist in keystone86-claude-auth:/home/dev/.claude
-#   Codex CLI credentials persist in keystone86-codex-auth:/home/dev/.codex
-# SSH: mounts host ~/.ssh read-only for git push to GitHub
-# Gitconfig: mounts host ~/.gitconfig read-only for git identity
-# API keys:
-#   ANTHROPIC_API_KEY passed through as fallback for Claude Code / Codespaces
-#   OPENAI_API_KEY passed through as fallback for Codex CLI / Codespaces
+#   Persistent agent auth directories are intentionally NOT mounted.
+#   OPENAI_API_KEY and ANTHROPIC_API_KEY are passed from the host shell at
+#   container startup when present. This avoids persistent .codex/.claude auth
+#   volumes inside a broad-access agent container.
+# SSH:
+#   Mounts host ~/.ssh read-only for git push to GitHub.
+# Gitconfig:
+#   Mounts host ~/.gitconfig read-only for git identity.
 dev:
 	docker run --rm -it \
 	  -e HOST_UID=$(HOST_UID) \
 	  -e HOST_GID=$(HOST_GID) \
 	  -e HOME=/home/dev \
-	  -v keystone86-claude-auth:/home/dev/.claude \
-	  -v keystone86-codex-auth:/home/dev/.codex \
-	  -v $(HOME)/.ssh:/home/dev/.ssh:ro \
-	  -v $(HOME)/.gitconfig:/home/dev/.gitconfig:ro \
-	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
-	  -e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+	  -e KEYSTONE86_CONTAINER=1 \
+	  -e ANTHROPIC_API_KEY="$${ANTHROPIC_API_KEY}" \
+	  -e OPENAI_API_KEY="$${OPENAI_API_KEY}" \
 	  -e GIT_CONFIG_COUNT=1 \
 	  -e GIT_CONFIG_KEY_0=safe.directory \
 	  -e GIT_CONFIG_VALUE_0=/work \
+	  -v $(HOME)/.ssh:/home/dev/.ssh:ro \
+	  -v $(HOME)/.gitconfig:/home/dev/.gitconfig:ro \
 	  -v $(PWD):/work \
 	  -w /work \
 	  keystone86-dev
 
-# Hardware session — adds USB passthrough for ECP5 flashing
-# Includes both Claude Code and Codex CLI auth volumes.
-# Not available in Codespaces (no USB access)
+# Hardware session — adds USB passthrough for ECP5 flashing.
+# Persistent agent auth directories are intentionally NOT mounted.
+# Not available in Codespaces (no USB access).
 dev-fpga:
 	docker run --rm -it \
 	  -e HOST_UID=$(HOST_UID) \
 	  -e HOST_GID=$(HOST_GID) \
 	  -e HOME=/home/dev \
-	  -v keystone86-claude-auth:/home/dev/.claude \
-	  -v keystone86-codex-auth:/home/dev/.codex \
-	  -v $(HOME)/.ssh:/home/dev/.ssh:ro \
-	  -v $(HOME)/.gitconfig:/home/dev/.gitconfig:ro \
-	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
-	  -e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+	  -e KEYSTONE86_CONTAINER=1 \
+	  -e ANTHROPIC_API_KEY="$${ANTHROPIC_API_KEY}" \
+	  -e OPENAI_API_KEY="$${OPENAI_API_KEY}" \
 	  -e GIT_CONFIG_COUNT=1 \
 	  -e GIT_CONFIG_KEY_0=safe.directory \
 	  -e GIT_CONFIG_VALUE_0=/work \
+	  -v $(HOME)/.ssh:/home/dev/.ssh:ro \
+	  -v $(HOME)/.gitconfig:/home/dev/.gitconfig:ro \
 	  -v $(PWD):/work \
 	  -w /work \
 	  --device /dev/bus/usb \
@@ -115,83 +146,83 @@ dev-fpga:
 # Project checks
 # ----------------------------------------------------------------
 
-tree:
+tree: require-container
 	@python3 scripts/tree.py .
 
-spec-check:
+spec-check: require-container
 	@python3 scripts/spec_check.py
 
-lint:
+lint: require-container
 	@python3 scripts/lint.py
 
-bootstrap-info:
+bootstrap-info: require-container
 	@echo "Keystone86 / Aegis bootstrap repository"
 
-bootstrap-status:
+bootstrap-status: require-container
 	@python3 scripts/bootstrap_status.py
 
-namespace-check:
+namespace-check: require-container
 	@python3 scripts/namespace_check.py
 
-codegen:
+codegen: require-container
 	@python3 scripts/codegen.py
 
-spec-sync-status:
+spec-sync-status: require-container
 	@python3 scripts/spec_sync_status.py
 
-frozen-manifest-check:
+frozen-manifest-check: require-container
 	@python3 scripts/frozen_manifest_check.py
 
-version-status:
+version-status: require-container
 	@python3 scripts/version_status.py
 
-release-notes:
+release-notes: require-container
 	@python3 scripts/release_notes_stub.py
 
 # ----------------------------------------------------------------
 # Build — all generated artifacts go under build/
 # ----------------------------------------------------------------
 
-ucode:
+ucode: require-container
 	@python3 scripts/ucode_build.py
 
-ucode-bootstrap-check:
+ucode-bootstrap-check: require-container
 	@python3 scripts/ucode_bootstrap_check.py
 
-ucode-clean:
+ucode-clean: require-container
 	@rm -f build/microcode/ucode.hex build/microcode/dispatch.hex \
 	       build/microcode/ucode.lst build/microcode/dispatch.lst
 	@echo "Removed generated microcode outputs."
 
 # ----------------------------------------------------------------
-# Smoke checks (host-side, no RTL simulation)
+# Smoke checks
 # ----------------------------------------------------------------
 
-sim-smoke:
+sim-smoke: require-container
 	@python3 scripts/sim_smoke.py
 
-regress:
+regress: require-container
 	@python3 scripts/regress.py
 
-formal:
+formal: require-container
 	@python3 scripts/formal.py
 
-decode-dispatch-smoke:
+decode-dispatch-smoke: require-container
 	@python3 scripts/decode_dispatch_smoke.py
 
-microseq-smoke:
+microseq-smoke: require-container
 	@python3 scripts/microseq_smoke.py
 
-commit-smoke:
+commit-smoke: require-container
 	@python3 scripts/commit_smoke.py
 
-service-abi-smoke:
+service-abi-smoke: require-container
 	@python3 scripts/service_abi_smoke.py
 
-prefetch-decode-smoke:
+prefetch-decode-smoke: require-container
 	@python3 scripts/prefetch_decode_smoke.py
 
-bootstrap-report:
+bootstrap-report: require-container
 	@python3 scripts/bootstrap_report.py
 
 # ----------------------------------------------------------------
@@ -225,7 +256,7 @@ IVERILOG_SOURCES = \
   sim/models/bootstrap_mem.sv \
   sim/tb/tb_rung0_reset_loop.sv
 
-rung0-sim: ucode
+rung0-sim: require-container ucode
 	@echo "--- Rung 0: compiling RTL ---"
 	@mkdir -p build/sim/rung0
 	iverilog -g2012 -Wall \
@@ -235,15 +266,13 @@ rung0-sim: ucode
 	@echo "--- Rung 0: running simulation ---"
 	vvp build/sim/rung0/tb_rung0_reset_loop.vvp
 
-rung0-regress: ucode
+rung0-regress: require-container ucode
 	@echo "--- Rung 0 regression ---"
 	@python3 scripts/rung0_regress.py
 
-rung0-clean:
+rung0-clean: require-container
 	@rm -rf build/sim/rung0
 	@echo "Rung 0 build artifacts removed."
-
-.PHONY: rung0-sim rung0-regress rung0-clean
 
 # ----------------------------------------------------------------
 # Rung 1 RTL simulation targets
@@ -254,7 +283,7 @@ IVERILOG_SOURCES_RUNG1 = \
   sim/models/bootstrap_mem.sv \
   sim/tb/tb_rung1_nop_loop.sv
 
-rung1-sim: ucode
+rung1-sim: require-container ucode
 	@echo "--- Rung 1: compiling RTL ---"
 	@mkdir -p build/sim/rung1
 	iverilog -g2012 -Wall \
@@ -264,15 +293,13 @@ rung1-sim: ucode
 	@echo "--- Rung 1: running simulation ---"
 	vvp build/sim/rung1/tb_rung1_nop_loop.vvp
 
-rung1-regress: ucode
+rung1-regress: require-container ucode
 	@echo "--- Rung 1 regression (includes Rung 0 baseline check) ---"
 	@python3 scripts/rung1_regress.py
 
-rung1-clean:
+rung1-clean: require-container
 	@rm -rf build/sim/rung1
 	@echo "Rung 1 build artifacts removed."
-
-.PHONY: rung1-sim rung1-regress rung1-clean
 
 # ----------------------------------------------------------------
 # Rung 2 — JMP control-transfer
@@ -283,7 +310,7 @@ IVERILOG_SOURCES_RUNG2 = \
   sim/models/bootstrap_mem.sv \
   sim/tb/tb_rung2_jmp.sv
 
-rung2-sim: ucode
+rung2-sim: require-container ucode
 	@echo "--- Rung 2: compiling RTL ---"
 	@mkdir -p build/sim/rung2
 	iverilog -g2012 -Wall \
@@ -293,7 +320,7 @@ rung2-sim: ucode
 	@echo "--- Rung 2: running simulation ---"
 	vvp build/sim/rung2/tb_rung2_jmp.vvp
 
-rung2-regress: ucode
+rung2-regress: require-container ucode
 	@echo "--- Rung 2 regression (includes Rung 0 + Rung 1 baseline checks) ---"
 	@python3 scripts/rung1_regress.py
 	@echo "--- Rung 2: running Rung 2 testbench ---"
@@ -304,11 +331,9 @@ rung2-regress: ucode
 		$(IVERILOG_SOURCES_RUNG2)
 	vvp build/sim/rung2/tb_rung2_jmp.vvp
 
-rung2-clean:
+rung2-clean: require-container
 	@rm -rf build/sim/rung2
 	@echo "Rung 2 build artifacts removed."
-
-.PHONY: rung2-sim rung2-regress rung2-clean
 
 # ----------------------------------------------------------------
 # Rung 3 — Near CALL and near RET
@@ -319,7 +344,7 @@ IVERILOG_SOURCES_RUNG3 = \
   sim/models/bootstrap_mem.sv \
   sim/tb/tb_rung3_call_ret.sv
 
-rung3-sim: ucode
+rung3-sim: require-container ucode
 	@echo "--- Rung 3: compiling RTL ---"
 	@mkdir -p build/sim/rung3
 	iverilog -g2012 -Wall \
@@ -329,7 +354,7 @@ rung3-sim: ucode
 	@echo "--- Rung 3: running simulation ---"
 	vvp build/sim/rung3/tb_rung3_call_ret.vvp
 
-rung3-regress: ucode
+rung3-regress: require-container ucode
 	@echo "--- Rung 3 regression (includes Rung 0 + Rung 1 + Rung 2 baseline checks) ---"
 	@python3 scripts/rung1_regress.py
 	@mkdir -p build/sim/rung2
@@ -345,16 +370,14 @@ rung3-regress: ucode
 		$(IVERILOG_SOURCES_RUNG3)
 	vvp build/sim/rung3/tb_rung3_call_ret.vvp
 
-rung3-clean:
+rung3-clean: require-container
 	@rm -rf build/sim/rung3
 	@echo "Rung 3 build artifacts removed."
-
-.PHONY: rung3-sim rung3-regress rung3-clean
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything
 # ----------------------------------------------------------------
 
-clean:
+clean: require-container
 	@rm -rf build/
 	@echo "Project clean complete."

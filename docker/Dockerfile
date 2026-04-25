@@ -3,6 +3,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
+ENV KEYSTONE86_CONTAINER=1
 
 # --------------------------------------------------------------------
 # Layer 1 — Base system and build tools
@@ -100,9 +101,8 @@ RUN mkdir -p /etc/udev/rules.d \
 
 # --------------------------------------------------------------------
 # Layer 6 — Claude Code
-# Credentials are NOT baked in. Auth is handled per-developer via:
-#   Local:      named Docker volume mounted at /home/dev/.claude
-#   Codespaces: ANTHROPIC_API_KEY personal secret
+# Credentials are NOT baked in and persistent Claude auth directories are not
+# mounted by default. Pass ANTHROPIC_API_KEY from the host when needed.
 # --------------------------------------------------------------------
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:${PATH}"
@@ -115,9 +115,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 #   claude   # Claude Code
 #   codex    # OpenAI Codex CLI
 #
-# Credentials are NOT baked in. Auth should be handled per-developer via:
-#   Local:      named Docker volume mounted at /home/dev/.codex
-#   Codespaces: OPENAI_API_KEY personal secret, or interactive Codex login
+# Credentials are NOT baked in and persistent Codex auth directories are not
+# mounted by default. Pass OPENAI_API_KEY from the host when needed.
 # --------------------------------------------------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get update \

@@ -7,18 +7,14 @@
   "containerEnv": {
     "HOST_UID": "1000",
     "HOST_GID": "1000",
-    "HOME": "/home/dev"
+    "HOME": "/home/dev",
+    "KEYSTONE86_CONTAINER": "1"
   },
 
   "remoteEnv": {
     "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
     "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}"
   },
-
-  "mounts": [
-    "source=keystone86-claude-auth,target=/home/dev/.claude,type=volume",
-    "source=keystone86-codex-auth,target=/home/dev/.codex,type=volume"
-  ],
 
   "customizations": {
     "vscode": {
@@ -38,8 +34,6 @@
 
   "postCreateCommand": "make codegen && make ucode && make namespace-check && make ucode-bootstrap-check",
 
-  "features": {}
-
   // ------------------------------------------------------------
   // NOTE ON CODESPACES PREBUILDS
   // For faster Codespace startup, enable prebuilds in your repo:
@@ -48,4 +42,5 @@
   // Without prebuilds, first Codespace creation builds the full
   // image which may take 15-20 minutes due to the tool stack size.
   // ------------------------------------------------------------
+  "features": {}
 }
