@@ -120,9 +120,10 @@ The live files currently used in simulation are:
 
 ## Testbenches and Simulation
 
-**Authoritative:** `sim/tb/tb_rung0_reset_loop.sv`, `tb_rung1_nop_loop.sv`, `tb_rung2_jmp.sv`
+**Authoritative:** `sim/tb/tb_rung0_reset_loop.sv`, `tb_rung1_nop_loop.sv`, `tb_rung2_jmp.sv`, `tb_rung3_call_ret.sv`
 
-These are the rung acceptance proofs. They are the gate criteria for each rung.
+These are the accepted rung acceptance proofs through Rung 3. They are the gate
+criteria for each accepted rung.
 
 Files under `sim/tb/integration/` and `sim/tb/unit/` are scaffold placeholders
 for future deeper regression infrastructure.

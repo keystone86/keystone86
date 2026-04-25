@@ -80,9 +80,13 @@ make ucode
 make namespace-check
 make ucode-bootstrap-check
 make rung2-regress
+make rung3-regress
 ```
 
-`rung2-regress` is the comprehensive gate — it runs Rung 0 and Rung 1 baseline checks before running Rung 2. Passing `rung2-regress` with no failures means the complete current baseline is green.
+`rung3-regress` is the comprehensive current gate. The committed Rung 3
+acceptance run also records `make rung2-regress` explicitly before
+`make rung3-regress`; both must pass before a Rung 3 handoff is considered
+valid.
 
 ### Abbreviated baseline check
 
@@ -140,6 +144,8 @@ This is acceptable for targeted verification but does not replace the full regre
 | `make rung1-regress` | Run Rung 1 + Rung 0 baseline |
 | `make rung2-sim` | Compile and run Rung 2 testbench |
 | `make rung2-regress` | Run Rung 2 + Rung 1 + Rung 0 baseline |
+| `make rung3-sim` | Compile and run Rung 3 testbench |
+| `make rung3-regress` | Run Rung 3 + Rung 2 + Rung 1 + Rung 0 baseline |
 
 ### Cleanup
 
@@ -148,6 +154,7 @@ This is acceptable for targeted verification but does not replace the full regre
 | `make rung0-clean` | Remove Rung 0 build artifacts |
 | `make rung1-clean` | Remove Rung 1 build artifacts |
 | `make rung2-clean` | Remove Rung 2 build artifacts |
+| `make rung3-clean` | Remove Rung 3 build artifacts |
 | `make clean` | Remove all generated files (ucode + all rung builds) |
 
 ---
@@ -170,9 +177,12 @@ This is acceptable for targeted verification but does not replace the full regre
 
 ## RTL simulation source lists
 
-The exact source files compiled for each rung are defined in the Makefile under `IVERILOG_SOURCES`, `IVERILOG_SOURCES_RUNG1`, and `IVERILOG_SOURCES_RUNG2`. Any RTL change to a file in these lists requires re-running the affected rung's simulation before claiming the baseline is still passing.
+The exact source files compiled for each rung are defined in the Makefile under
+the active `IVERILOG_SOURCES*` variables. Any RTL change to a file in these
+lists requires re-running the affected rung's simulation before claiming the
+baseline is still passing.
 
-Current source list (all rungs share the same core set):
+Current source list for the accepted Rung 3 baseline includes:
 
 ```
 rtl/include/keystone86_pkg.sv
@@ -182,6 +192,11 @@ rtl/core/decoder.sv
 rtl/core/microcode_rom.sv
 rtl/core/microsequencer.sv
 rtl/core/commit_engine.sv
+rtl/core/services/fetch_engine.sv
+rtl/core/services/flow_control.sv
+rtl/core/services/operand_engine.sv
+rtl/core/services/stack_engine.sv
+rtl/core/services/service_dispatch.sv
 rtl/core/cpu_top.sv
 sim/models/bootstrap_mem.sv      (Rung 0 only)
 sim/tb/tb_rung{N}_{name}.sv      (rung-specific testbench)
@@ -218,7 +233,10 @@ Do not leave temporary instrumentation in committed RTL. See `docs/process/post_
 
 ### Testbench timeout behavior
 
-All three testbenches have timeout watchdogs. On timeout, they print the current values of key debug signals before calling `$finish`. This output is the primary deadlock diagnostic. If a simulation hangs rather than reporting pass/fail, the timeout dump is the starting point for investigation.
+All active rung testbenches have timeout watchdogs. On timeout, they print the
+current values of key debug signals before calling `$finish`. This output is
+the primary deadlock diagnostic. If a simulation hangs rather than reporting
+pass/fail, the timeout dump is the starting point for investigation.
 
 ---
 

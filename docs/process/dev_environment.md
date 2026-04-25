@@ -164,13 +164,13 @@ claude
 Claude credentials are stored in:
 
 ```text
-/root/.claude
+/home/dev/.claude
 ```
 
 The Makefile mounts this path from a named Docker volume:
 
 ```text
-keystone86-claude-auth:/root/.claude
+keystone86-claude-auth:/home/dev/.claude
 ```
 
 This preserves Claude login state across container restarts.
@@ -194,13 +194,13 @@ codex
 Codex credentials are stored in:
 
 ```text
-/root/.codex
+/home/dev/.codex
 ```
 
 The Makefile mounts this path from a named Docker volume:
 
 ```text
-keystone86-codex-auth:/root/.codex
+keystone86-codex-auth:/home/dev/.codex
 ```
 
 This preserves Codex login state across container restarts.
@@ -255,6 +255,7 @@ make ucode
 make namespace-check
 make ucode-bootstrap-check
 make rung2-regress
+make rung3-regress
 ```
 
 Only commit after reviewing the diff and understanding the change.
@@ -269,11 +270,12 @@ make ucode
 make namespace-check
 make ucode-bootstrap-check
 make rung2-regress
+make rung3-regress
 ```
 
-`rung2-regress` is the current authoritative passing baseline.
-
-Rung 3 exists, but it is being re-proven from the clean Rung 2 baseline.
+`rung3-regress` is the current authoritative passing baseline. Rung 3 was
+accepted from committed verification: implementation commit `de68b1d`,
+verification record commit `f05a5b5`.
 
 ## GitHub authentication notes
 
