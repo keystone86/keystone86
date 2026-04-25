@@ -1,3 +1,4 @@
+cat > README.md <<'EOF'
 # Keystone86
 
 Keystone86 is an in-progress clean-room x86 RTL core project focused on building a structured, understandable, and maintainable 80486-class-compatible design path.
@@ -43,6 +44,7 @@ So the correct way to describe the project today is:
 The repo currently uses staged bring-up targets.
 
 ### Rung 0
+
 Bootstrap reset/fetch/dispatch plumbing.
 
 Goal:
@@ -56,6 +58,7 @@ make rung0-sim
 ```
 
 ### Rung 1
+
 Basic opcode classification and sequential architectural advance.
 
 Goal:
@@ -68,6 +71,7 @@ make rung1-sim
 ```
 
 ### Rung 2
+
 Early control-transfer correctness for short/near jump handling.
 
 Goal:
@@ -83,6 +87,7 @@ make rung2-sim
 ```
 
 ### Rung 3
+
 Near CALL and RET service path.
 
 Goal:
@@ -103,6 +108,9 @@ The recommended way to develop on this project is the Docker-based dev
 environment. It provides a complete, reproducible toolchain for every
 contributor without installing anything on your host system.
 
+The same image includes both Claude Code and OpenAI Codex CLI. They are intended
+to coexist in the same environment. Use one AI coding agent at a time.
+
 ### Tools included
 
 - `iverilog` + `vvp` — RTL simulation
@@ -115,7 +123,8 @@ contributor without installing anything on your host system.
 - `sv2v` — SystemVerilog to Verilog conversion
 - `python3` + `pytest` + `pyyaml` + `jinja2` + `click` — scripting layer
 - `make`, `git`, `ripgrep`, `jq`, `tree`, `dos2unix`, `entr` — repo tooling
-- `claude` (Claude Code) — AI coding agent
+- `claude` — Claude Code AI coding agent
+- `codex` — OpenAI Codex CLI AI coding agent
 
 ### First-time setup
 
@@ -128,28 +137,57 @@ make dev
 ```
 
 On first entry, run `claude` to log in with your personal Anthropic account.
-Your credentials persist in a local Docker volume (`keystone86-claude-auth`)
-and survive container restarts.
+Your Claude Code credentials persist in a local Docker volume
+(`keystone86-claude-auth`) and survive container restarts.
+
+You may also run `codex` to log in with your OpenAI / ChatGPT account, or use an
+`OPENAI_API_KEY` environment variable if that is the workflow you prefer. Your
+Codex CLI credentials persist in a separate local Docker volume
+(`keystone86-codex-auth`) and survive container restarts.
+
+Claude Code and Codex CLI are installed side by side. Do not run both against the
+same working tree at the same time. Use one agent at a time, review its diff, and
+commit only after validating the result.
 
 Your host `~/.ssh` and `~/.gitconfig` are mounted read-only into the
 container. Git push to GitHub works from inside the container using your
-existing SSH key. Claude Code can commit and push on your behalf.
+existing SSH key. Claude Code or Codex CLI can commit and push on your behalf
+when you explicitly choose to let them do so.
 
 ### Daily workflow
 
 ```bash
-make dev         # enter dev environment (sim, formal, claude, git)
+make dev         # enter dev environment (sim, formal, claude, codex, git)
 make dev-fpga    # enter dev environment with USB passthrough (ECP5 flashing)
 ```
 
 Inside the container, all simulation, formal, synthesis, and git operations
 work normally. Your host system needs nothing installed except Docker.
 
+You can start either AI coding agent from the same shell:
+
+```bash
+claude   # Claude Code
+codex    # OpenAI Codex CLI
+```
+
+Use only one coding agent at a time. A safe workflow is:
+
+1. start a clean git branch
+2. run one agent
+3. give it a narrow task
+4. inspect `git diff`
+5. run the rung/regression checks
+6. commit only after the result is understood
+
 ### Codespaces
 
 The repo includes `.devcontainer/devcontainer.json` for GitHub Codespaces
-support. The same Docker image is used. Set `ANTHROPIC_API_KEY` as a
-personal Codespaces secret before opening a Codespace.
+support. The same Docker image is used. Set `ANTHROPIC_API_KEY` and/or
+`OPENAI_API_KEY` as personal Codespaces secrets if you want API-key based access
+inside Codespaces.
+
+Interactive login may also be used where supported by the tool and environment.
 
 Note: `make dev-fpga` (USB passthrough) is not available in Codespaces.
 
@@ -158,9 +196,11 @@ Note: `make dev-fpga` (USB passthrough) is not available in Codespaces.
 This project is intentionally built around a few strong rules:
 
 ### 1. Spec-first development
+
 The spec and ownership model define what each block is allowed to do before broader implementation grows around it.
 
 ### 2. Explicit ownership boundaries
+
 Modules are supposed to do one job and not quietly absorb policy that belongs elsewhere.
 
 Examples:
@@ -170,6 +210,7 @@ Examples:
 - **prefetch_queue** owns buffering and fetch-side byte delivery
 
 ### 3. Staged correctness before optimization
+
 The project is currently prioritizing:
 - correctness
 - testbench proof
@@ -183,6 +224,7 @@ before attempting:
 - performance-oriented redesign
 
 ### 4. Generated shared definitions
+
 The repo includes generated/shared include files and bootstrap microcode build outputs so that decode, dispatch, and commit definitions stay aligned.
 
 ## Repository layout
@@ -198,9 +240,11 @@ scripts/         Repo checks, codegen, smoke scripts, reporting helpers
 ## Main RTL blocks
 
 ### `rtl/core/prefetch_queue.sv`
+
 Instruction-byte buffering and fetch-side queue management.
 
 ### `rtl/core/decoder.sv`
+
 Early instruction decode. Current bring-up includes:
 - opcode classification
 - multi-byte handling for early jump bring-up
@@ -208,6 +252,7 @@ Early instruction decode. Current bring-up includes:
 - instruction-local target EIP formation for current Rung 2 scope
 
 ### `rtl/core/microsequencer.sv`
+
 Microcode dispatch and execution control. Current bring-up includes:
 - decode acceptance handshake
 - dispatch timing management
@@ -215,6 +260,7 @@ Microcode dispatch and execution control. Current bring-up includes:
 - JMP target staging for commit (Rung 2)
 
 ### `rtl/core/commit_engine.sv`
+
 Architectural commit boundary. Current bring-up includes:
 - reset-visible state ownership
 - staged EIP/target-EIP commit
@@ -222,6 +268,7 @@ Architectural commit boundary. Current bring-up includes:
 - commit-owned redirect: redirect becomes architecturally real only here
 
 ### `rtl/core/cpu_top.sv`
+
 Top-level integration of fetch, decode, microsequencer, commit, ROM, and bus interface.
 
 ## Build and simulation
@@ -250,6 +297,7 @@ make rung2-regress         # runs Rung 0 + Rung 1 + Rung 2 full baseline (author
 ```
 
 ### Run the early bring-up simulations
+
 ```bash
 make rung0-sim
 make rung1-sim
@@ -258,6 +306,7 @@ make rung3-sim
 ```
 
 ### Run regression (each rung includes all prior rungs)
+
 ```bash
 make rung0-regress
 make rung1-regress
@@ -266,6 +315,7 @@ make rung3-regress
 ```
 
 ### Run all bootstrap smoke checks
+
 ```bash
 make decode-dispatch-smoke
 make microseq-smoke
@@ -275,6 +325,7 @@ make prefetch-decode-smoke
 ```
 
 ### Clean build artifacts
+
 ```bash
 make clean
 ```
@@ -288,6 +339,15 @@ A practical workflow for contributors is:
 3. prove the behavior in simulation
 4. keep earlier rungs passing
 5. avoid widening scope unless necessary
+
+When using an AI coding agent, keep the same discipline:
+
+1. give Claude Code or Codex CLI a narrow task
+2. require it to inspect the relevant specs first
+3. require it to report files changed
+4. review `git diff`
+5. run the appropriate rung/regression target
+6. commit only after the change is understood
 
 ## What "Rung 2 complete" means here
 
@@ -334,3 +394,4 @@ Add the intended license here if and when you decide it.
 ## Notes
 
 This repository may evolve quickly while the architecture, interfaces, and bring-up ladder are still being refined. Expect early-stage iteration, especially in front-end/control-path RTL and the simulation harnesses that prove each rung.
+EOF

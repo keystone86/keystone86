@@ -8,7 +8,7 @@ help:
 	@echo ""
 	@echo "Docker targets:"
 	@echo "  make dev-build             - build the dev container image (first time + after Dockerfile changes)"
-	@echo "  make dev                   - enter dev container (sim, formal, claude)"
+	@echo "  make dev                   - enter dev container (sim, formal, claude, codex)"
 	@echo "  make dev-fpga              - enter dev container with USB passthrough (ECP5 flashing)"
 	@echo ""
 	@echo "Targets:"
@@ -54,17 +54,23 @@ help:
 dev-build:
 	docker build -t keystone86-dev -f docker/Dockerfile .
 
-# Normal dev session — sim, formal, claude, git
-# Auth: named volume persists Claude Code credentials (login once per machine)
+# Normal dev session — sim, formal, claude, codex, git
+# Auth:
+#   Claude Code credentials persist in keystone86-claude-auth:/root/.claude
+#   Codex CLI credentials persist in keystone86-codex-auth:/root/.codex
 # SSH: mounts host ~/.ssh read-only for git push to GitHub
 # Gitconfig: mounts host ~/.gitconfig read-only for git identity
-# ANTHROPIC_API_KEY passed through as fallback for Codespaces
+# API keys:
+#   ANTHROPIC_API_KEY passed through as fallback for Claude Code / Codespaces
+#   OPENAI_API_KEY passed through as fallback for Codex CLI / Codespaces
 dev:
 	docker run --rm -it \
 	  -v keystone86-claude-auth:/root/.claude \
+	  -v keystone86-codex-auth:/root/.codex \
 	  -v $(HOME)/.ssh:/root/.ssh:ro \
 	  -v $(HOME)/.gitconfig:/root/.gitconfig:ro \
 	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+	  -e OPENAI_API_KEY=$(OPENAI_API_KEY) \
 	  -e GIT_CONFIG_COUNT=1 \
 	  -e GIT_CONFIG_KEY_0=safe.directory \
 	  -e GIT_CONFIG_VALUE_0=/work \
@@ -73,13 +79,16 @@ dev:
 	  keystone86-dev
 
 # Hardware session — adds USB passthrough for ECP5 flashing
+# Includes both Claude Code and Codex CLI auth volumes.
 # Not available in Codespaces (no USB access)
 dev-fpga:
 	docker run --rm -it \
 	  -v keystone86-claude-auth:/root/.claude \
+	  -v keystone86-codex-auth:/root/.codex \
 	  -v $(HOME)/.ssh:/root/.ssh:ro \
 	  -v $(HOME)/.gitconfig:/root/.gitconfig:ro \
 	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+	  -e OPENAI_API_KEY=$(OPENAI_API_KEY) \
 	  -e GIT_CONFIG_COUNT=1 \
 	  -e GIT_CONFIG_KEY_0=safe.directory \
 	  -e GIT_CONFIG_VALUE_0=/work \
