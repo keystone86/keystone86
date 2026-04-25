@@ -93,11 +93,10 @@ dev-build:
 # Runtime user:
 #   HOST_UID/HOST_GID are passed into the entrypoint so files created under
 #   /work are owned by the host user, not root.
-# Auth:
-#   Persistent agent auth directories are intentionally NOT mounted.
-#   OPENAI_API_KEY and ANTHROPIC_API_KEY are passed from the host shell at
-#   container startup when present. This avoids persistent .codex/.claude auth
-#   volumes inside a broad-access agent container.
+# Auth/session persistence:
+#   Agent auth/config/session directories persist only in project-scoped Docker
+#   named volumes. These volumes are convenience state only and are not project
+#   authority. Do not mount native host ~/.codex or ~/.claude.
 # SSH:
 #   Mounts host ~/.ssh read-only for git push to GitHub.
 # Gitconfig:
@@ -108,11 +107,11 @@ dev:
 	  -e HOST_GID=$(HOST_GID) \
 	  -e HOME=/home/dev \
 	  -e KEYSTONE86_CONTAINER=1 \
-	  -e ANTHROPIC_API_KEY="$${ANTHROPIC_API_KEY}" \
-	  -e OPENAI_API_KEY="$${OPENAI_API_KEY}" \
 	  -e GIT_CONFIG_COUNT=1 \
 	  -e GIT_CONFIG_KEY_0=safe.directory \
 	  -e GIT_CONFIG_VALUE_0=/work \
+	  -v keystone86-claude-auth:/home/dev/.claude \
+	  -v keystone86-codex-auth:/home/dev/.codex \
 	  -v $(HOME)/.ssh:/home/dev/.ssh:ro \
 	  -v $(HOME)/.gitconfig:/home/dev/.gitconfig:ro \
 	  -v $(PWD):/work \
@@ -120,19 +119,20 @@ dev:
 	  keystone86-dev
 
 # Hardware session — adds USB passthrough for ECP5 flashing.
-# Persistent agent auth directories are intentionally NOT mounted.
-# Not available in Codespaces (no USB access).
+# Agent auth/config/session directories persist only in project-scoped Docker
+# named volumes. These volumes are convenience state only and are not project
+# authority. Not available in Codespaces (no USB access).
 dev-fpga:
 	docker run --rm -it \
 	  -e HOST_UID=$(HOST_UID) \
 	  -e HOST_GID=$(HOST_GID) \
 	  -e HOME=/home/dev \
 	  -e KEYSTONE86_CONTAINER=1 \
-	  -e ANTHROPIC_API_KEY="$${ANTHROPIC_API_KEY}" \
-	  -e OPENAI_API_KEY="$${OPENAI_API_KEY}" \
 	  -e GIT_CONFIG_COUNT=1 \
 	  -e GIT_CONFIG_KEY_0=safe.directory \
 	  -e GIT_CONFIG_VALUE_0=/work \
+	  -v keystone86-claude-auth:/home/dev/.claude \
+	  -v keystone86-codex-auth:/home/dev/.codex \
 	  -v $(HOME)/.ssh:/home/dev/.ssh:ro \
 	  -v $(HOME)/.gitconfig:/home/dev/.gitconfig:ro \
 	  -v $(PWD):/work \

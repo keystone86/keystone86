@@ -101,8 +101,9 @@ RUN mkdir -p /etc/udev/rules.d \
 
 # --------------------------------------------------------------------
 # Layer 6 — Claude Code
-# Credentials are NOT baked in and persistent Claude auth directories are not
-# mounted by default. Pass ANTHROPIC_API_KEY from the host when needed.
+# Credentials are NOT baked in. Runtime auth/config persistence is handled
+# by a project-scoped Docker named volume mounted at /home/dev/.claude.
+# That persistent state is convenience state only, not project authority.
 # --------------------------------------------------------------------
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:${PATH}"
@@ -115,8 +116,9 @@ ENV PATH="/root/.local/bin:${PATH}"
 #   claude   # Claude Code
 #   codex    # OpenAI Codex CLI
 #
-# Credentials are NOT baked in and persistent Codex auth directories are not
-# mounted by default. Pass OPENAI_API_KEY from the host when needed.
+# Credentials are NOT baked in. Runtime auth/config/session persistence is
+# handled by a project-scoped Docker named volume mounted at /home/dev/.codex.
+# That persistent state is convenience state only, not project authority.
 # --------------------------------------------------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get update \

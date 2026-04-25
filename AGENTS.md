@@ -10,6 +10,31 @@ Codex must follow the repository authority chain exactly.
 Do not rely on chat memory, resume context, prior summaries, or inferred intent as
 authority. Always read the relevant repository documents before making changes.
 
+## Operational model
+
+Keystone86 uses the dev container as the AI-agent execution boundary.
+
+Codex and Claude may run with broad permissions inside the dev container, but
+project authority always comes from repository files and Git history.
+
+Project-scoped Docker named volumes may persist agent login, config, cache, and
+session-resume state across container runs. That persistent state is convenience
+state only. It must never be treated as project authority.
+
+The intended model is:
+
+- **Execution boundary:** Keystone86 dev container.
+- **Persistent convenience state:** project-scoped Docker named volumes for
+  `/home/dev/.codex` and `/home/dev/.claude`.
+- **Project authority:** `AGENTS.md`, frozen specs, active rung files,
+  source-of-truth docs, process/acceptance docs, verification docs, and Git
+  history.
+- **Non-authority:** chat memory, resume context, prior summaries, hidden
+  scratchpad, local agent memory, and persisted agent session history.
+
+After any restart, reset, or resume, Codex must re-read repository authority
+before acting.
+
 ## Authority chain
 
 Use this order of authority:
@@ -130,6 +155,29 @@ Before making changes for a rung, read the relevant files in this order:
 After reading, restate the current rung scope and planned-change classification
 before making edits.
 
+## Durable work state
+
+Do not rely on hidden scratchpad, resume context, prior chat history, local agent
+memory, or temporary working files as the only record of important project
+decisions.
+
+Important decisions, scope classifications, verification results, and acceptance
+evidence must be recorded in repository files or reported to the user before the
+session ends.
+
+For long-running work, periodically report:
+
+- current objective,
+- files changed so far,
+- decisions made,
+- commands run,
+- remaining blockers.
+
+If the session is interrupted, reset, or resumed, re-read `AGENTS.md`, the active
+rung file, relevant frozen specs, and current `git status` before continuing.
+
+Repo files and Git history are authoritative. Agent memory is not.
+
 ## Architectural ownership
 
 Preserve the intended ownership model unless the active rung file or frozen specs
@@ -228,32 +276,49 @@ the guard. Stop and report that the dev container must be entered with
 Codex must not fake, export, or override the container marker used by the
 Makefile to bypass this boundary.
 
-## Container credential boundary
+## Container credential and persistence boundary
 
 The dev container is the execution boundary for AI coding agents.
 
-Do not mount persistent AI-agent authentication directories into the container by
-default. In particular, do not add persistent mounts for:
+Project-scoped Docker named volumes may be used to persist agent login, config,
+cache, and session-resume state across container runs:
 
-- `/home/dev/.codex`
-- `/home/dev/.claude`
+- `keystone86-codex-auth` mounted at `/home/dev/.codex`
+- `keystone86-claude-auth` mounted at `/home/dev/.claude`
 
-Credentials must not be baked into the Docker image.
+This persistent agent state is convenience state only. It is not project
+authority.
 
-When agent credentials are needed, they should be supplied from the native host at
-container startup through the minimum available mechanism, such as:
+Persistent agent state must not override or replace:
 
-- `OPENAI_API_KEY` for Codex,
-- `ANTHROPIC_API_KEY` for Claude Code.
+- `AGENTS.md`,
+- frozen specifications,
+- active rung files,
+- source-of-truth documents,
+- process and acceptance documents,
+- verification documents,
+- Git history.
 
-Do not print, inspect, persist, or copy credential values unless the user
-explicitly asks for credential debugging.
+Do not mount native host authentication directories into the container. In
+particular, do not mount:
+
+- `$HOME/.codex`
+- `$HOME/.claude`
+
+Credentials must not be baked into the Docker image or committed to the repo.
+
+Do not print, inspect, persist elsewhere, copy, or dump credential values unless
+the user explicitly asks for credential debugging.
 
 Do not add commands that recursively dump `$HOME`, environment variables, auth
 directories, or secret files.
 
-If a task appears to require persistent credential storage inside the container,
-stop and report the proposed credential flow instead of implementing it.
+If a session is resumed, reset, or restarted, re-read `AGENTS.md`, the active
+rung file, relevant frozen specs, and current `git status` before continuing.
+Do not rely on persisted session memory as authority.
+
+If a task appears to require changing the credential or persistence flow, stop
+and report the proposed change instead of implementing it.
 
 ## Generated artifacts
 
