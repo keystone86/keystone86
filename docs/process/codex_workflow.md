@@ -18,6 +18,9 @@ Project-scoped Docker volumes = persistent auth/session convenience
 Codex may run with broad permissions inside the container, but it must always
 re-anchor itself to the repository authority before doing work.
 
+Do not let Codex infer which rung is active. The user must explicitly name the
+active rung and, whenever possible, the exact active rung directive file.
+
 ---
 
 ## 1. Session setup
@@ -76,21 +79,28 @@ For new work, start fresh.
 
 First prompt should never be "implement feature" or "explain this codebase."
 
+The user must explicitly identify the active rung. Do not ask Codex to determine
+the active rung from repo state, prior session memory, or inference.
+
 Use this bounded review prompt:
 
 ```text
 Read AGENTS.md first and follow it exactly.
 
-Then read the active rung file, relevant frozen specs, source-of-truth docs, process docs, and current verification docs.
+The active rung for this session is Rung<N>.
+The active rung directive is:
+docs/implementation/bringup/rung<N>.md
+
+Then read the active rung directive, relevant frozen specs, source-of-truth docs, process docs, and current verification docs.
 
 Do not rely on resume context or prior session memory as authority.
 
 Task:
-Review the current state for the active rung only.
+Review Rung<N> only.
 
 Before editing anything:
 1. Report which authority files you read.
-2. Summarize what the active rung explicitly requires.
+2. Summarize what Rung<N> explicitly requires.
 3. Classify suspected issues as:
    - Required blocker,
    - Required acceptance cleanup,
@@ -98,7 +108,8 @@ Before editing anything:
 4. State which files you plan to edit.
 
 Do not edit files yet.
-Do not start the next rung.
+Do not start Rung<N+1>.
+Do not expand Rung<N> by inference.
 ```
 
 This saves usage because Codex does not immediately explore the whole repo or
@@ -117,12 +128,13 @@ Use this refinement prompt:
 ```text
 Before editing anything, refine the blocker classification.
 
-For each suspected Required blocker, quote or cite the exact section from AGENTS.md, the active rung file, or frozen specs that makes it required now.
+For each suspected Required blocker, quote or cite the exact section from AGENTS.md, the active Rung<N> directive, or frozen specs that makes it required now.
 
-If a suspected issue is not explicitly required by the active rung file or frozen specs, reclassify it as Required acceptance cleanup or Out of scope.
+If a suspected issue is not explicitly required by the active Rung<N> directive or frozen specs, reclassify it as Required acceptance cleanup or Out of scope.
 
 Do not edit files yet.
-Do not start the next rung.
+Do not start Rung<N+1>.
+Do not expand Rung<N> by inference.
 ```
 
 This step separates real rung blockers from reasonable-but-out-of-scope
@@ -135,24 +147,24 @@ architecture work.
 Only after classification is clean, authorize implementation with a narrow scope:
 
 ```text
-Proceed with only the items classified as Required blockers.
+Proceed with only the items classified as Required blockers for Rung<N>.
 
 You are authorized to edit implementation, tests, generated artifacts, and non-protected verification documentation needed to resolve those blockers.
 
 Do not implement Out-of-scope items.
 Do not edit protected authority files unless I explicitly authorize the exact file and exact intended change.
 Do not create deviation specs, exception files, deferred-compliance records, or alternate acceptance criteria.
-Do not start the next rung.
+Do not start Rung<N+1>.
 
 Before changing files, state the planned implementation approach for each blocker and the files expected to change.
 
 After changes:
 1. run required generation commands,
-2. run required regression commands,
+2. run required Rung<N> regression commands,
 3. report changed files,
 4. report commands run and results,
 5. report unresolved blockers,
-6. report whether the next rung remains blocked.
+6. report whether Rung<N+1> remains blocked.
 ```
 
 This keeps Codex from turning one issue into a subsystem rewrite.
@@ -170,11 +182,11 @@ Stop implementation work.
 
 Do not edit files yet.
 
-Review the current dirty diff against AGENTS.md, the active rung file, and frozen specs.
+Review the current dirty diff against AGENTS.md, the active Rung<N> directive, and frozen specs.
 
-Focus on whether the implementation stayed bounded to the active rung:
+Focus on whether the implementation stayed bounded to Rung<N>:
 1. no broad subsystem expansion,
-2. no next-rung implementation,
+2. no Rung<N+1> implementation,
 3. no protected authority files edited,
 4. generated artifacts status,
 5. verification claims match actual tests.
@@ -195,18 +207,18 @@ Use a tightening prompt like:
 ```text
 Tighten the current dirty implementation before commit.
 
-Do not broaden the active rung.
+Do not broaden Rung<N>.
 
-Limit successful behavior to the verified active-rung slice.
+Limit successful behavior to the verified Rung<N> slice.
 For unsupported or unverified forms, fail safely through the existing mechanism.
 
 Do not add broad infrastructure.
 Do not edit protected authority files.
-Do not start the next rung.
+Do not start Rung<N+1>.
 
-After tightening, rerun the required generation and regression commands.
+After tightening, rerun the required generation and Rung<N> regression commands.
 
-Report changed files, results, and whether the implementation is now bounded to the verified slice.
+Report changed files, results, and whether the implementation is now bounded to the verified Rung<N> slice.
 ```
 
 This produces higher-quality code because unsupported behavior is explicit instead
@@ -227,17 +239,19 @@ git status --short
 
 git add <implementation files> <test files> <verification doc if updated>
 
-git commit -m "rungN: implement bounded active-rung behavior"
+git commit -m "rung<N>: implement bounded active-rung behavior"
 ```
 
-Then run clean verification from the committed state:
+Then run clean verification from the committed state.
+
+Example:
 
 ```sh
-make codegen && make ucode && make rung2-regress && make rung3-regress
+make codegen && make ucode && make rung<N-1>-regress && make rung<N>-regress
 ```
 
-For a future rung, replace the regression target with the active rung's required
-regression target.
+Use the actual required commands from the active rung directive and process docs.
+Do not assume these exact target names for every rung.
 
 ---
 
@@ -249,7 +263,7 @@ verification doc:
 ```text
 Read AGENTS.md first and follow it exactly.
 
-Update only the active rung verification document to record the clean committed verification run.
+Update only the Rung<N> verification document to record the clean committed verification run.
 
 Use this committed implementation hash:
 <hash>
@@ -263,14 +277,14 @@ Results:
 Record that this was run after committing the implementation.
 Check git status before and after.
 Do not edit protected files.
-Do not start the next rung.
+Do not start Rung<N+1>.
 ```
 
 Then commit manually:
 
 ```sh
 git add docs/implementation/<rung>_verification.md
-git commit -m "docs: record committed rung verification"
+git commit -m "docs: record committed rung<N> verification"
 ```
 
 This keeps implementation and verification evidence separate.
@@ -286,18 +300,20 @@ First ask Codex to review only:
 ```text
 Read AGENTS.md first and follow it exactly.
 
+Rung<N> implementation and clean committed verification are now complete.
+
 Task:
-Review only the protected acceptance/source-of-truth docs that may be stale after the committed rung verification.
+Review only the protected acceptance/source-of-truth docs that may be stale after the committed Rung<N> verification.
 
 Do not edit yet.
 
 For each file:
 1. Quote or cite the stale text.
-2. Explain why it conflicts with the committed verification state.
+2. Explain why it conflicts with the committed Rung<N> verification state.
 3. Propose the exact replacement text.
 4. Classify the change as Required acceptance cleanup or Out of scope.
 
-Do not start the next rung.
+Do not start Rung<N+1>.
 Do not change RTL, tests, generated artifacts, verification docs, or unlisted docs.
 ```
 
@@ -313,20 +329,20 @@ You are authorized to edit only:
 
 Do not edit any unlisted file.
 Do not edit RTL, tests, generated artifacts, AGENTS.md, frozen specs, or rung files.
-Do not start the next rung.
+Do not start Rung<N+1>.
 
 After edits:
 1. Run git status --short.
 2. Run git diff --stat.
 3. Run git diff for the edited files.
-4. Report whether the edits only align docs with the committed verification state.
+4. Report whether the edits only align docs with the committed Rung<N> verification state.
 ```
 
 Then commit manually:
 
 ```sh
 git add <authorized protected docs>
-git commit -m "docs: align process docs with accepted rung baseline"
+git commit -m "docs: align process docs with accepted rung<N> baseline"
 ```
 
 ---
@@ -368,6 +384,8 @@ Implement feature
 Fix everything
 Continue
 Make it complete
+Determine the active rung
+Figure out what rung is next
 ```
 
 These cause Codex to read too much, infer too much, and burn tokens.
@@ -382,6 +400,8 @@ Quote exact requirement.
 Edit only these files.
 Run only these commands.
 Do not start next rung.
+The active rung is Rung<N>.
+The active rung directive is docs/implementation/bringup/rung<N>.md.
 ```
 
 ---
@@ -391,7 +411,7 @@ Do not start next rung.
 For normal work, prefer:
 
 ```text
-rungN-codex branch
+rung<N>-codex branch
 review
 commit
 verify
@@ -408,10 +428,10 @@ git fetch origin
 git checkout main
 git pull origin main
 
-git branch backup-main-before-rungN-overwrite
-git push origin backup-main-before-rungN-overwrite
+git branch backup-main-before-rung<N>-overwrite
+git push origin backup-main-before-rung<N>-overwrite
 
-git reset --hard origin/rungN-codex
+git reset --hard origin/rung<N>-codex
 git push --force-with-lease origin main
 ```
 
@@ -419,11 +439,14 @@ Then verify:
 
 ```sh
 git rev-parse main
-git rev-parse origin/rungN-codex
+git rev-parse origin/rung<N>-codex
 git status --short
 ```
 
 Hashes should match and status should be clean.
+
+Use this overwrite workflow only when intentionally correcting drift and when the
+rung branch is explicitly declared the final authority.
 
 ---
 
@@ -443,22 +466,27 @@ Then use:
 ```text
 Read AGENTS.md first and follow it exactly.
 
+The active rung for this session is Rung<N>.
+The active rung directive is:
+docs/implementation/bringup/rung<N>.md
+
 Then read the active rung directive, relevant frozen specs, source-of-truth docs, process docs, and current verification docs.
 
 Do not rely on resume context or prior session memory as authority.
 
 Task:
-Review the active rung only.
+Review Rung<N> only.
 
 Before editing anything:
 1. Report which authority files you read.
-2. Summarize what the active rung explicitly requires.
+2. Summarize what Rung<N> explicitly requires.
 3. Classify required work as Required blocker, Required acceptance cleanup, or Out of scope.
 4. State which files you plan to edit.
 
 Do not edit files yet.
-Do not expand the active rung by inference.
+Do not expand Rung<N> by inference.
 Do not modify protected authority files unless I explicitly authorize the exact file and exact intended change.
+Do not start Rung<N+1>.
 ```
 
 ---
@@ -466,6 +494,8 @@ Do not modify protected authority files unless I explicitly authorize the exact 
 ## 14. Workflow summary
 
 ```text
+Name the active rung explicitly.
+Name the active rung directive file explicitly.
 Read authority.
 Classify first.
 Refine blockers.
@@ -478,6 +508,7 @@ Commit verification docs separately.
 Review protected docs separately.
 Commit protected-doc cleanup separately.
 Start fresh sessions between phases.
+Never let Codex infer the active rung.
 ```
 
 This workflow is slower than "just code," but it prevents drift, keeps token usage
