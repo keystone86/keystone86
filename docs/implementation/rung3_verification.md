@@ -36,17 +36,22 @@ make ucode && make rung3-sim
 
 ---
 
-## Local verification run
+## Clean committed verification run
 
 ```
-Date:        2026-04-25T21:19:52Z
+Date:        2026-04-25
 Branch:      rung3-codex
-HEAD:        f8d870796ddce6ebe05e21044491837b207d5090
-Tree state:  dirty before and after the run; Rung 3 blocker fixes were uncommitted
+Commit:      de68b1d
+Tree state:  implementation committed before the run
 Commands:    make codegen
              make ucode
              make rung2-regress
              make rung3-regress
+Results:     make codegen passed
+             make ucode passed
+             make rung2-regress passed
+             make rung3-regress passed
+             Rung 3 testbench: 46 passed, 0 failed
 ```
 
 The Rung 3 stack memory path is exercised through `bus_interface` EU
@@ -54,10 +59,6 @@ transactions on the main bus. FF /2 register targets and the direct disp32
 memory target are exercised through the bounded Rung 3 operand service path;
 unsupported FF /2 memory forms fail safely without committing a CALL redirect
 or stack effect. There is no dedicated `cpu_top` indirect-call target sideband.
-
-This is not a clean committed acceptance baseline. A final acceptance record
-still requires committing the implementation and rerunning the required
-regression commands against that exact committed state.
 
 ### Rung 0 + Rung 1 regression
 
