@@ -12,6 +12,7 @@ RUN apt-get update \
     ca-certificates \
     git \
     openssh-client \
+    gosu \
     build-essential \
     make \
     cmake \
@@ -99,7 +100,7 @@ RUN mkdir -p /etc/udev/rules.d \
 # --------------------------------------------------------------------
 # Layer 6 — Claude Code
 # Credentials are NOT baked in. Auth is handled per-developer via:
-#   Local:      named Docker volume keystone86-claude-auth:/root/.claude
+#   Local:      named Docker volume mounted at /home/dev/.claude
 #   Codespaces: ANTHROPIC_API_KEY personal secret
 # --------------------------------------------------------------------
 RUN curl -fsSL https://claude.ai/install.sh | bash
@@ -114,10 +115,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 #   codex    # OpenAI Codex CLI
 #
 # Credentials are NOT baked in. Auth should be handled per-developer via:
-#   Local:      named Docker volume keystone86-codex-auth:/root/.codex
+#   Local:      named Docker volume mounted at /home/dev/.codex
 #   Codespaces: OPENAI_API_KEY personal secret, or interactive Codex login
-#
-# The Makefile/devcontainer are responsible for mounting /root/.codex.
 # --------------------------------------------------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get update \
@@ -126,13 +125,31 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && npm cache clean --force \
  && rm -rf /var/lib/apt/lists/*
 
-# Color console — placed last to preserve build cache for heavy layers above
+# --------------------------------------------------------------------
+# Runtime user/home preparation
+#
+# The container starts as root, then docker/entrypoint.sh creates or adjusts
+# the dev user to match HOST_UID/HOST_GID and drops privileges before entering
+# the shell. This prevents generated repo files and .git objects from becoming
+# root-owned on the host.
+# --------------------------------------------------------------------
+RUN groupadd -g 1000 dev \
+ && useradd -m -u 1000 -g 1000 -s /bin/bash dev \
+ && mkdir -p /home/dev/.claude /home/dev/.codex /home/dev/.cache /home/dev/.npm \
+ && chown -R dev:dev /home/dev
+
+# Color console — placed late to preserve build cache for heavy layers above
 ENV TERM=xterm-256color
-RUN echo 'export PS1="\[\033[01;32m\]\u@keystone86-dev\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "' >> /root/.bashrc \
- && echo 'alias ls="ls --color=auto"' >> /root/.bashrc \
- && echo 'alias grep="grep --color=auto"' >> /root/.bashrc \
- && echo 'force_color_prompt=yes' >> /root/.bashrc \
- && git config --global --add safe.directory /work
+RUN echo 'export PS1="\[\033[01;32m\]\u@keystone86-dev\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "' >> /etc/bash.bashrc \
+ && echo 'alias ls="ls --color=auto"' >> /etc/bash.bashrc \
+ && echo 'alias grep="grep --color=auto"' >> /etc/bash.bashrc \
+ && git config --system --add safe.directory /work
+
+# --------------------------------------------------------------------
+# Entrypoint
+# --------------------------------------------------------------------
+COPY docker/entrypoint.sh /usr/local/bin/keystone86-entrypoint
+RUN chmod +x /usr/local/bin/keystone86-entrypoint
 
 # --------------------------------------------------------------------
 # Working directory
@@ -140,4 +157,5 @@ RUN echo 'export PS1="\[\033[01;32m\]\u@keystone86-dev\[\033[00m\]:\[\033[01;34m
 # --------------------------------------------------------------------
 WORKDIR /work
 
+ENTRYPOINT ["/usr/local/bin/keystone86-entrypoint"]
 CMD ["/bin/bash"]

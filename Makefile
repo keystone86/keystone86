@@ -1,5 +1,8 @@
 SHELL := /bin/bash
 
+HOST_UID := $(shell id -u)
+HOST_GID := $(shell id -g)
+
 .PHONY: help tree spec-check lint ucode ucode-clean sim-smoke regress formal clean bootstrap-info \
         dev dev-build dev-fpga
 
@@ -55,9 +58,12 @@ dev-build:
 	docker build -t keystone86-dev -f docker/Dockerfile .
 
 # Normal dev session — sim, formal, claude, codex, git
+# Runtime user:
+#   HOST_UID/HOST_GID are passed into the entrypoint so files created under
+#   /work are owned by the host user, not root.
 # Auth:
-#   Claude Code credentials persist in keystone86-claude-auth:/root/.claude
-#   Codex CLI credentials persist in keystone86-codex-auth:/root/.codex
+#   Claude Code credentials persist in keystone86-claude-auth:/home/dev/.claude
+#   Codex CLI credentials persist in keystone86-codex-auth:/home/dev/.codex
 # SSH: mounts host ~/.ssh read-only for git push to GitHub
 # Gitconfig: mounts host ~/.gitconfig read-only for git identity
 # API keys:
@@ -65,10 +71,13 @@ dev-build:
 #   OPENAI_API_KEY passed through as fallback for Codex CLI / Codespaces
 dev:
 	docker run --rm -it \
-	  -v keystone86-claude-auth:/root/.claude \
-	  -v keystone86-codex-auth:/root/.codex \
-	  -v $(HOME)/.ssh:/root/.ssh:ro \
-	  -v $(HOME)/.gitconfig:/root/.gitconfig:ro \
+	  -e HOST_UID=$(HOST_UID) \
+	  -e HOST_GID=$(HOST_GID) \
+	  -e HOME=/home/dev \
+	  -v keystone86-claude-auth:/home/dev/.claude \
+	  -v keystone86-codex-auth:/home/dev/.codex \
+	  -v $(HOME)/.ssh:/home/dev/.ssh:ro \
+	  -v $(HOME)/.gitconfig:/home/dev/.gitconfig:ro \
 	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
 	  -e OPENAI_API_KEY=$(OPENAI_API_KEY) \
 	  -e GIT_CONFIG_COUNT=1 \
@@ -83,10 +92,13 @@ dev:
 # Not available in Codespaces (no USB access)
 dev-fpga:
 	docker run --rm -it \
-	  -v keystone86-claude-auth:/root/.claude \
-	  -v keystone86-codex-auth:/root/.codex \
-	  -v $(HOME)/.ssh:/root/.ssh:ro \
-	  -v $(HOME)/.gitconfig:/root/.gitconfig:ro \
+	  -e HOST_UID=$(HOST_UID) \
+	  -e HOST_GID=$(HOST_GID) \
+	  -e HOME=/home/dev \
+	  -v keystone86-claude-auth:/home/dev/.claude \
+	  -v keystone86-codex-auth:/home/dev/.codex \
+	  -v $(HOME)/.ssh:/home/dev/.ssh:ro \
+	  -v $(HOME)/.gitconfig:/home/dev/.gitconfig:ro \
 	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
 	  -e OPENAI_API_KEY=$(OPENAI_API_KEY) \
 	  -e GIT_CONFIG_COUNT=1 \

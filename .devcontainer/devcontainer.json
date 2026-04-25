@@ -4,14 +4,20 @@
   "workspaceFolder": "/work",
   "workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
 
+  "containerEnv": {
+    "HOST_UID": "1000",
+    "HOST_GID": "1000",
+    "HOME": "/home/dev"
+  },
+
   "remoteEnv": {
     "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
     "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}"
   },
 
   "mounts": [
-    "source=keystone86-claude-auth,target=/root/.claude,type=volume",
-    "source=keystone86-codex-auth,target=/root/.codex,type=volume"
+    "source=keystone86-claude-auth,target=/home/dev/.claude,type=volume",
+    "source=keystone86-codex-auth,target=/home/dev/.codex,type=volume"
   ],
 
   "customizations": {
