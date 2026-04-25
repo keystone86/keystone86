@@ -162,6 +162,53 @@ Commit engine:
 - owns committed redirect cleanup,
 - owns committed stack/register/memory visibility as defined by the current rung.
 
+## Code comments and documentation
+
+Code must be understandable to a human maintainer.
+
+Do not produce clever, opaque, or unexplained RTL, microcode, scripts, or
+testbench logic. If behavior is non-obvious, add concise comments explaining
+the intent.
+
+Comment the reason for behavior, not obvious syntax.
+
+Add or update comments when changing:
+
+- architectural ownership boundaries,
+- microcode-controlled instruction behavior,
+- service-call handshakes,
+- pending versus committed architectural state,
+- ENDI/commit visibility timing,
+- stack, redirect, or control-flow sequencing,
+- decode metadata assumptions,
+- testbench scenario intent and expected architectural results,
+- generated-artifact assumptions,
+- workaround logic,
+- temporary bootstrap behavior,
+- intentionally bounded or deferred behavior.
+
+Comments must stay accurate. When code changes, update nearby comments that no
+longer describe the actual behavior.
+
+Do not use comments to justify scope creep. If behavior is not required by the
+active rung file or frozen specifications, classify it as out of scope instead
+of implementing and commenting it.
+
+Documentation must be updated when a change affects an authoritative source
+relationship, ownership boundary, generated artifact flow, verification claim,
+or rung acceptance status.
+
+When adding new shared fields, enums, service IDs, metadata, ownership rules, or
+authoritative-source relationships, update the appropriate documentation first
+or stop and report that the change touches protected authority docs.
+
+Do not claim behavior in README, process docs, source-of-truth docs, verification
+docs, comments, or handoff text unless the behavior is implemented and verified.
+
+Comments and documentation are part of the deliverable. A change is not complete
+if the implementation passes but the surrounding comments or documentation leave
+the behavior unclear or misleading.
+
 ## Generated artifacts
 
 If a task changes sources that feed generated RTL, packages, ROMs, microcode, or
