@@ -1,15 +1,16 @@
 // Keystone86 / Aegis
 // rtl/core/bus_interface.sv
-// Rung 0: Minimal instruction fetch bus interface
+// Rung 0/3: Minimal shared bus interface
 //
 // Ownership (Appendix B):
 //   This module owns: external bus signal generation, aligned fetch
-//   transactions, ready handshake.
+//   transactions, EU memory transactions, ready handshake, and arbitration.
 //   This module must NOT: know instruction meaning, contain policy logic,
 //   know anything about the CPU instruction stream beyond addresses.
 //
-// Rung 0 scope: instruction fetch read path only.
-// Write path is stubbed for interface completeness.
+// Current bounded scope:
+//   - instruction byte fetches for the prefetch queue
+//   - aligned 32-bit EU stack reads/writes for the Rung 3 CALL/RET path
 //
 // Shared constants: none used in this module.
 // This module operates on plain logic signals only and requires no
@@ -24,6 +25,15 @@ module bus_interface (
     input  logic [31:0] fetch_addr,         // fetch physical address
     output logic        fetch_done,         // data ready
     output logic [7:0]  fetch_data,         // fetched byte
+
+    // --- EU memory request (from services / commit staging) ---
+    input  logic        eu_req,
+    input  logic        eu_wr,
+    input  logic [31:0] eu_addr,
+    input  logic [3:0]  eu_byteen,
+    input  logic [31:0] eu_wdata,
+    output logic        eu_done,
+    output logic [31:0] eu_rdata,
 
     // --- External bus ---
     output logic [31:0] bus_addr,
@@ -40,7 +50,7 @@ module bus_interface (
     // ----------------------------------------------------------------
     typedef enum logic [1:0] {
         S_IDLE   = 2'b00,
-        S_FETCH  = 2'b01,
+        S_BUS    = 2'b01,
         S_DONE   = 2'b10
     } bus_state_t;
 
@@ -49,12 +59,10 @@ module bus_interface (
     // Latch incoming request
     logic [31:0] addr_latch;
     logic [31:0] data_latch;
-
-    // ----------------------------------------------------------------
-    // Stub outputs (write path not used in Rung 0)
-    // ----------------------------------------------------------------
-    assign bus_wr   = 1'b0;
-    assign bus_dout = 32'h0;
+    logic [3:0]  byteen_latch;
+    logic [31:0] wdata_latch;
+    logic        wr_latch;
+    logic        eu_latch;
 
     // ----------------------------------------------------------------
     // State register
@@ -64,11 +72,26 @@ module bus_interface (
             state      <= S_IDLE;
             addr_latch <= 32'h0;
             data_latch <= 32'h0;
+            byteen_latch <= 4'h0;
+            wdata_latch  <= 32'h0;
+            wr_latch     <= 1'b0;
+            eu_latch     <= 1'b0;
         end else begin
             state <= state_next;
-            if (state == S_IDLE && fetch_req)
-                addr_latch <= fetch_addr;
-            if (state == S_FETCH && bus_ready)
+            if (state == S_IDLE && eu_req) begin
+                addr_latch   <= eu_addr;
+                byteen_latch <= eu_byteen;
+                wdata_latch  <= eu_wdata;
+                wr_latch     <= eu_wr;
+                eu_latch     <= 1'b1;
+            end else if (state == S_IDLE && fetch_req) begin
+                addr_latch   <= fetch_addr;
+                byteen_latch <= 4'b0001;
+                wdata_latch  <= 32'h0;
+                wr_latch     <= 1'b0;
+                eu_latch     <= 1'b0;
+            end
+            if (state == S_BUS && bus_ready)
                 data_latch <= bus_din;
         end
     end
@@ -79,8 +102,8 @@ module bus_interface (
     always_comb begin
         state_next = state;
         case (state)
-            S_IDLE:  if (fetch_req)               state_next = S_FETCH;
-            S_FETCH: if (bus_ready)                state_next = S_DONE;
+            S_IDLE:  if (eu_req || fetch_req)      state_next = S_BUS;
+            S_BUS:   if (bus_ready)                state_next = S_DONE;
             S_DONE:                                state_next = S_IDLE;
             default:                               state_next = S_IDLE;
         endcase
@@ -97,19 +120,30 @@ module bus_interface (
     always_comb begin
         bus_addr    = 32'h0;
         bus_rd      = 1'b0;
-        bus_byteen  = 4'b0001;   // byte fetch for instruction stream
+        bus_wr      = 1'b0;
+        bus_byteen  = 4'b0001;
+        bus_dout    = 32'h0;
         fetch_done  = 1'b0;
         fetch_data  = 8'h0;
+        eu_done     = 1'b0;
+        eu_rdata    = 32'h0;
 
         case (state)
-            S_FETCH: begin
+            S_BUS: begin
                 bus_addr   = addr_latch;
-                bus_rd     = 1'b1;
-                bus_byteen = 4'b0001;
+                bus_rd     = !wr_latch;
+                bus_wr     = wr_latch;
+                bus_byteen = byteen_latch;
+                bus_dout   = wdata_latch;
             end
             S_DONE: begin
-                fetch_done = 1'b1;
-                fetch_data = data_latch_byte;
+                if (eu_latch) begin
+                    eu_done  = 1'b1;
+                    eu_rdata = data_latch;
+                end else begin
+                    fetch_done = 1'b1;
+                    fetch_data = data_latch_byte;
+                end
             end
             default: ;
         endcase

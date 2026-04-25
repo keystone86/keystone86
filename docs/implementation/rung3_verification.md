@@ -25,7 +25,7 @@ make ucode && make rung3-sim
 
 | Test | Instruction(s) | Proof point |
 |------|---------------|-------------|
-| A    | E8 / C3       | Direct CALL pushes correct return address; ESP decrements by 4; RET restores EIP and ESP exactly |
+| A    | E8 / C3       | Direct CALL pushes correct return address through the shared bus path; ESP decrements by 4; RET restores EIP and ESP exactly |
 | B    | E8 / C2       | RET imm16 applies post-pop stack adjustment; ESP = pre-CALL ESP + 8 |
 | C    | E8 / C3 (×3)  | Nested CALL/RET depth 4: all frames unwind to correct EIP; ESP fully restored |
 | D    | FF /2 / C3    | Indirect CALL (register form): correct target EIP, correct return address pushed, RET unwinds correctly |
@@ -37,19 +37,37 @@ make ucode && make rung3-sim
 ## Passing baseline
 
 ```
-Date:        2026-04-18
-Commit:      (working tree — no git history in this environment)
-Commands:    make codegen && make ucode && make rung3-regress
+Date:        2026-04-25
+Branch:      rung3-codex
+Commit:      working tree
+Commands:    make codegen
+             make ucode
+             make rung3-regress
 ```
+
+The Rung 3 stack memory path is exercised through `bus_interface` EU
+transactions on the main bus. There is no dedicated `cpu_top` stack sideband
+port in the passing baseline.
 
 ### Rung 0 + Rung 1 regression
 
 ```
+Keystone86 / Aegis — Rung 1 Regression
+Root: /work
+
 Running: rung0_reset_loop
+  Rung 0 baseline: reset, ENTRY_NULL, RAISE FC_UD, ENDI, FETCH_DECODE
   RESULT: PASS
 
 Running: rung1_nop_loop
+  Rung 1: NOP classification, dispatch, EIP+1, 10 NOPs, 100 NOPs, no faults
   RESULT: PASS
+
+================================================
+Rung 1 Regression Summary
+  Passed: 2
+  Failed: 0
+  Total:  2
 
 RESULT: ALL RUNG 1 TESTS PASSED
 ```
@@ -57,8 +75,15 @@ RESULT: ALL RUNG 1 TESTS PASSED
 ### Rung 2 regression
 
 ```
-RESULTS: 21 passed, 0 failed
-ALL TESTS PASSED — Rung 2 acceptance criteria met.
+Rung 2 Regression Summary
+  [x] Rung 0 baseline still passes
+  [x] Rung 1 baseline still passes
+  [x] No fault during bounded direct JMP loop
+  [x] Committed JMP retires observed: 2
+  [x] Committed redirect flushes observed: 3
+  [x] Active decoded entry remains ENTRY_JMP_NEAR
+
+RESULT: ALL RUNG 2 TESTS PASSED
 ```
 
 ### Rung 3 testbench

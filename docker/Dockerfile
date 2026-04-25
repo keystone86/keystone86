@@ -22,6 +22,7 @@ RUN apt-get update \
     unzip \
     dos2unix \
     entr \
+    bubblewrap \
     ripgrep \
     jq \
     tree \

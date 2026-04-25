@@ -5,12 +5,10 @@
 // All tests are self-checking — pass/fail by assertion.
 //
 // Memory model:
-//   Two separate address spaces handled by bus_ready/bus_din logic:
+//   Two address spaces handled through the shared bus:
 //     Code space: mem_code[addr[7:0]]  — instruction bytes at 0xFFFFFFxx
 //     Stack space: a flat 256-word DWORD array at 0x000FFFxx
 //       (matches RESET_ESP = 0x000FFFF0; stack grows downward)
-//   Stack bus (stk_wr_en / stk_rd_req) is served by the same logic but
-//   via dedicated stk_* ports on cpu_top (no bus arbitration needed).
 //
 // Tests:
 //
@@ -81,14 +79,6 @@ module tb_rung3_call_ret;
     logic [31:0] bus_dout, bus_din;
     logic        bus_ready;
 
-    // Stack bus
-    logic        stk_wr_en;
-    logic [31:0] stk_wr_addr, stk_wr_data;
-    logic        stk_rd_req;
-    logic [31:0] stk_rd_addr;
-    logic [31:0] stk_rd_data;
-    logic        stk_rd_ready;
-
     // Indirect CALL target
     logic [31:0] indirect_call_target;
     logic        indirect_call_target_valid;
@@ -116,13 +106,6 @@ module tb_rung3_call_ret;
         .bus_dout                   (bus_dout),
         .bus_din                    (bus_din),
         .bus_ready                  (bus_ready),
-        .stk_wr_en                  (stk_wr_en),
-        .stk_wr_addr                (stk_wr_addr),
-        .stk_wr_data                (stk_wr_data),
-        .stk_rd_req                 (stk_rd_req),
-        .stk_rd_addr                (stk_rd_addr),
-        .stk_rd_data                (stk_rd_data),
-        .stk_rd_ready               (stk_rd_ready),
         .indirect_call_target       (indirect_call_target),
         .indirect_call_target_valid (indirect_call_target_valid),
         .dbg_eip                    (dbg_eip),
@@ -139,57 +122,54 @@ module tb_rung3_call_ret;
     );
 
     // ----------------------------------------------------------------
-    // Code memory model  (bus_rd interface — 0xFFFFFFxx range)
-    // mem_code[N] = byte at address where addr[7:0]==N
+    // Shared bus memory model
+    //   Code reads: mem_code[N] = byte at address where addr[7:0]==N
+    //   Stack R/W:  stack_mem[addr[9:2]] at 0x000FFFxx
     // ----------------------------------------------------------------
     logic [7:0]  mem_code [0:255];
-    logic        rd_pending;
+    logic [31:0] stack_mem [0:255];
+    logic        bus_pending;
+    logic        bus_wr_pending;
+    logic [31:0] bus_addr_pending;
+    logic [31:0] bus_dout_pending;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            bus_ready  <= 1'b0;
-            bus_din    <= 32'h0;
-            rd_pending <= 1'b0;
+            bus_ready        <= 1'b0;
+            bus_din          <= 32'h0;
+            bus_pending      <= 1'b0;
+            bus_wr_pending   <= 1'b0;
+            bus_addr_pending <= 32'h0;
+            bus_dout_pending <= 32'h0;
         end else begin
             bus_ready <= 1'b0;
-            if (bus_rd && !rd_pending)
-                rd_pending <= 1'b1;
-            if (rd_pending) begin
-                bus_din    <= {24'h0, mem_code[bus_addr[7:0]]};
-                bus_ready  <= 1'b1;
-                rd_pending <= 1'b0;
+            if ((bus_rd || bus_wr) && !bus_pending) begin
+                bus_pending      <= 1'b1;
+                bus_wr_pending   <= bus_wr;
+                bus_addr_pending <= bus_addr;
+                bus_dout_pending <= bus_dout;
+            end
+            if (bus_pending) begin
+                if (bus_wr_pending) begin
+                    stack_mem[bus_addr_pending[9:2]] <= bus_dout_pending;
+                    bus_din <= 32'h0;
+                end else if (bus_addr_pending[31:8] == 24'hFFFFFF) begin
+                    bus_din <= {24'h0, mem_code[bus_addr_pending[7:0]]};
+                end else begin
+                    bus_din <= stack_mem[bus_addr_pending[9:2]];
+                end
+                bus_ready   <= 1'b1;
+                bus_pending <= 1'b0;
             end
         end
     end
 
     // ----------------------------------------------------------------
-    // Stack memory model  (stk_wr / stk_rd interface)
-    // 256 DWORDs at 0x000FFFxx (word-addressed by addr[9:2])
+    // Stack backing storage is initialized here and accessed above by bus.
     // ----------------------------------------------------------------
-    logic [31:0] stack_mem [0:255];
-    logic        stk_rd_pending;
-
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            stk_rd_ready   <= 1'b0;
-            stk_rd_data    <= 32'h0;
-            stk_rd_pending <= 1'b0;
             for (int i = 0; i < 256; i++) stack_mem[i] = 32'h0;
-        end else begin
-            stk_rd_ready <= 1'b0;
-
-            // Write port (synchronous, one cycle)
-            if (stk_wr_en)
-                stack_mem[stk_wr_addr[9:2]] <= stk_wr_data;
-
-            // Read port (one-cycle latency)
-            if (stk_rd_req && !stk_rd_pending)
-                stk_rd_pending <= 1'b1;
-            if (stk_rd_pending) begin
-                stk_rd_data    <= stack_mem[stk_rd_addr[9:2]];
-                stk_rd_ready   <= 1'b1;
-                stk_rd_pending <= 1'b0;
-            end
         end
     end
 
@@ -216,6 +196,7 @@ module tb_rung3_call_ret;
         timed_out = 0;
         limit = 0;
         begin : wloop
+            while (dbg_endi_pulse) @(posedge clk);
             forever begin
                 if (dbg_endi_pulse) begin
                     @(posedge clk);
@@ -232,11 +213,26 @@ module tb_rung3_call_ret;
     endtask
 
     task wait_n_endi(input int n, output logic timed_out);
+        int limit;
+        int seen;
+        logic prev_endi;
         timed_out = 0;
+        limit = 0;
+        seen = 0;
+        prev_endi = dbg_endi_pulse;
         begin : wait_n_loop
-            for (int i = 0; i < n; i++) begin
-                wait_endi(timed_out);
-                if (timed_out) disable wait_n_loop;
+            forever begin
+                @(posedge clk);
+                if (dbg_endi_pulse && !prev_endi)
+                    seen++;
+                prev_endi = dbg_endi_pulse;
+                if (seen >= n)
+                    disable wait_n_loop;
+                limit++;
+                if (limit > TIMEOUT) begin
+                    timed_out = 1;
+                    disable wait_n_loop;
+                end
             end
         end
     endtask

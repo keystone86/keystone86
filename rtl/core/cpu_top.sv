@@ -1,8 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 2 top-level with service-based JMP path, while preserving the
-// pre-existing top-level compatibility ports expected by earlier testbenches.
+// Rung 2/3 top-level with service-based control-transfer paths.
 
 import keystone86_pkg::*;
 
@@ -19,14 +18,7 @@ module cpu_top (
     input  logic [31:0] bus_din,
     input  logic        bus_ready,
 
-    // --- Compatibility ports expected by earlier rung testbenches ---
-    output logic        stk_wr_en,
-    output logic [31:0] stk_wr_addr,
-    output logic [31:0] stk_wr_data,
-    output logic        stk_rd_req,
-    output logic [31:0] stk_rd_addr,
-    input  logic [31:0] stk_rd_data,
-    input  logic        stk_rd_ready,
+    // --- Rung 3 register-form indirect CALL operand source ---
     input  logic [31:0] indirect_call_target,
     input  logic        indirect_call_target_valid,
 
@@ -51,6 +43,16 @@ module cpu_top (
     logic [31:0] fetch_addr_internal;
     logic        fetch_done;
     logic [7:0]  fetch_data;
+    logic        eu_req;
+    logic        eu_wr;
+    logic [31:0] eu_addr;
+    logic [3:0]  eu_byteen;
+    logic [31:0] eu_wdata;
+    logic        eu_done;
+    logic [31:0] eu_rdata;
+    logic        commit_stack_wr_pending;
+    logic [31:0] commit_stack_wr_addr_r;
+    logic [31:0] commit_stack_wr_data_r;
 
     logic [7:0]  q_data;
     logic        q_valid;
@@ -71,6 +73,17 @@ module cpu_top (
     logic        decode_done;
     logic [7:0]  entry_id;
     logic [31:0] next_eip;
+    logic [31:0] dec_target_eip;
+    logic        dec_has_target;
+    logic        dec_is_call;
+    logic        dec_is_call_indirect;
+    logic        dec_is_ret;
+    logic        dec_has_ret_imm;
+    logic [15:0] dec_ret_imm;
+    logic [7:0]  dec_modrm_byte;
+    logic        dec_payload16_valid;
+    logic        dec_payload16_signed;
+    logic [15:0] dec_payload16;
     logic        dec_ack;
 
     // ------------------------------------------------------------
@@ -95,6 +108,9 @@ module cpu_top (
     logic [31:0] pc_eip_val;
     logic        pc_target_en;
     logic [31:0] pc_target_val;
+    logic        pc_stack_adj_en;
+    logic [31:0] pc_stack_adj_val;
+    logic [31:0] stack_push_data;
 
     logic        mode_prot;
     logic        cs_d_bit;
@@ -129,6 +145,34 @@ module cpu_top (
     logic        fc_t2_wr_en;
     logic [31:0] fc_t2_wr_data;
 
+    // operand_engine side
+    logic [7:0]  op_svc_id;
+    logic        op_svc_req;
+    logic        op_svc_done;
+    logic [1:0]  op_svc_sr;
+    logic        op_t2_wr_en;
+    logic [31:0] op_t2_wr_data;
+
+    // stack_engine side
+    logic [7:0]  se_svc_id;
+    logic        se_svc_req;
+    logic        se_svc_done;
+    logic [1:0]  se_svc_sr;
+    logic        se_t2_wr_en;
+    logic [31:0] se_t2_wr_data;
+    logic        se_stk_rd_req;
+    logic [31:0] se_stk_rd_addr;
+    logic        se_stk_rd_ready;
+    logic [31:0] se_stk_rd_data;
+    logic        pc_stack_en;
+    logic        pc_stack_write_en;
+    logic [31:0] pc_stack_addr;
+    logic [31:0] pc_stack_data;
+    logic [31:0] pc_stack_esp_val;
+    logic        commit_stk_wr_en;
+    logic [31:0] commit_stk_wr_addr;
+    logic [31:0] commit_stk_wr_data;
+
     // scratch/state registers used by current rung2 path
     logic [31:0] t2_r;
     logic [31:0] t4_r;
@@ -151,6 +195,31 @@ module cpu_top (
     assign dbg_decode_done   = decode_done;
     assign dbg_fetch_addr    = fetch_addr_internal;
 
+    assign eu_req     = commit_stack_wr_pending || se_stk_rd_req;
+    assign eu_wr      = commit_stack_wr_pending;
+    assign eu_addr    = commit_stack_wr_pending ? commit_stack_wr_addr_r : se_stk_rd_addr;
+    assign eu_byteen  = commit_stack_wr_pending ? 4'b1111 : 4'b1111;
+    assign eu_wdata   = commit_stack_wr_pending ? commit_stack_wr_data_r : 32'h0;
+
+    assign se_stk_rd_ready = (!commit_stack_wr_pending) && eu_done;
+    assign se_stk_rd_data  = eu_rdata;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            commit_stack_wr_pending <= 1'b0;
+            commit_stack_wr_addr_r  <= 32'h0;
+            commit_stack_wr_data_r  <= 32'h0;
+        end else begin
+            if (commit_stack_wr_pending && eu_done) begin
+                commit_stack_wr_pending <= 1'b0;
+            end else if (commit_stk_wr_en && !commit_stack_wr_pending) begin
+                commit_stack_wr_pending <= 1'b1;
+                commit_stack_wr_addr_r  <= commit_stk_wr_addr;
+                commit_stack_wr_data_r  <= commit_stk_wr_data;
+            end
+        end
+    end
+
     // ------------------------------------------------------------
     // Simple T2/T4 storage for current service path
     // ------------------------------------------------------------
@@ -160,7 +229,15 @@ module cpu_top (
             t4_r <= 32'h0;
         end else begin
             if (fe_t4_wr_en) t4_r <= fe_t4_wr_data;
+            if (dec_ack && dec_payload16_valid) begin
+                if (dec_payload16_signed)
+                    t4_r <= {{16{dec_payload16[15]}}, dec_payload16};
+                else
+                    t4_r <= {16'h0, dec_payload16};
+            end
             if (fc_t2_wr_en) t2_r <= fc_t2_wr_data;
+            if (op_t2_wr_en) t2_r <= op_t2_wr_data;
+            if (se_t2_wr_en) t2_r <= se_t2_wr_data;
         end
     end
 
@@ -174,6 +251,13 @@ module cpu_top (
         .fetch_addr (fetch_addr_internal),
         .fetch_done (fetch_done),
         .fetch_data (fetch_data),
+        .eu_req     (eu_req),
+        .eu_wr      (eu_wr),
+        .eu_addr    (eu_addr),
+        .eu_byteen  (eu_byteen),
+        .eu_wdata   (eu_wdata),
+        .eu_done    (eu_done),
+        .eu_rdata   (eu_rdata),
         .bus_addr   (bus_addr),
         .bus_rd     (bus_rd),
         .bus_wr     (bus_wr),
@@ -214,6 +298,17 @@ module cpu_top (
         .decode_done  (decode_done),
         .entry_id     (entry_id),
         .next_eip     (next_eip),
+        .target_eip   (dec_target_eip),
+        .has_target   (dec_has_target),
+        .is_call      (dec_is_call),
+        .is_call_indirect (dec_is_call_indirect),
+        .is_ret       (dec_is_ret),
+        .has_ret_imm  (dec_has_ret_imm),
+        .ret_imm      (dec_ret_imm),
+        .modrm_byte   (dec_modrm_byte),
+        .payload16_valid (dec_payload16_valid),
+        .payload16_signed(dec_payload16_signed),
+        .payload16    (dec_payload16),
         .dec_ack      (dec_ack),
         .q_fetch_eip  (q_fetch_eip)
     );
@@ -227,6 +322,10 @@ module cpu_top (
         .decode_done     (decode_done),
         .entry_id_in     (entry_id),
         .next_eip_in     (next_eip),
+        .dec_is_call     (dec_is_call),
+        .dec_is_call_indirect (dec_is_call_indirect),
+        .dec_is_ret      (dec_is_ret),
+        .dec_has_ret_imm (dec_has_ret_imm),
         .dec_ack         (dec_ack),
         .squash          (squash),
         .upc             (upc),
@@ -245,6 +344,9 @@ module cpu_top (
         .pc_eip_val      (pc_eip_val),
         .pc_target_en    (pc_target_en),
         .pc_target_val   (pc_target_val),
+        .pc_stack_adj_en (pc_stack_adj_en),
+        .pc_stack_adj_val(pc_stack_adj_val),
+        .stack_push_data (stack_push_data),
 
         .svc_id_out      (svc_id_out),
         .svc_req_out     (svc_req_out),
@@ -252,6 +354,7 @@ module cpu_top (
         .svc_sr_in       (svc_sr_in),
 
         .t2_data         (t2_r),
+        .t4_data         (t4_r),
         .meta_next_eip   (meta_next_eip),
 
         .dbg_state       (dbg_mseq_state_w),
@@ -284,7 +387,17 @@ module cpu_top (
         .fc_svc_id   (fc_svc_id),
         .fc_svc_req  (fc_svc_req),
         .fc_svc_done (fc_svc_done),
-        .fc_svc_sr   (fc_svc_sr)
+        .fc_svc_sr   (fc_svc_sr),
+
+        .op_svc_id   (op_svc_id),
+        .op_svc_req  (op_svc_req),
+        .op_svc_done (op_svc_done),
+        .op_svc_sr   (op_svc_sr),
+
+        .se_svc_id   (se_svc_id),
+        .se_svc_req  (se_svc_req),
+        .se_svc_done (se_svc_done),
+        .se_svc_sr   (se_svc_sr)
     );
 
     fetch_engine u_fetch_eng (
@@ -320,6 +433,41 @@ module cpu_top (
         .fault_fc      ()
     );
 
+    operand_engine u_operand (
+        .clk                        (clk),
+        .reset_n                    (reset_n),
+        .svc_id                     (op_svc_id),
+        .svc_req                    (op_svc_req),
+        .svc_done                   (op_svc_done),
+        .svc_sr                     (op_svc_sr),
+        .indirect_call_target       (indirect_call_target),
+        .indirect_call_target_valid (indirect_call_target_valid),
+        .t2_wr_en                   (op_t2_wr_en),
+        .t2_wr_data                 (op_t2_wr_data)
+    );
+
+    stack_engine u_stack (
+        .clk              (clk),
+        .reset_n          (reset_n),
+        .svc_id           (se_svc_id),
+        .svc_req          (se_svc_req),
+        .svc_done         (se_svc_done),
+        .svc_sr           (se_svc_sr),
+        .esp_in           (esp),
+        .push_data        (stack_push_data),
+        .stk_rd_req       (se_stk_rd_req),
+        .stk_rd_addr      (se_stk_rd_addr),
+        .stk_rd_data      (se_stk_rd_data),
+        .stk_rd_ready     (se_stk_rd_ready),
+        .t2_wr_en         (se_t2_wr_en),
+        .t2_wr_data       (se_t2_wr_data),
+        .pc_stack_en      (pc_stack_en),
+        .pc_stack_write_en(pc_stack_write_en),
+        .pc_stack_addr    (pc_stack_addr),
+        .pc_stack_data    (pc_stack_data),
+        .pc_stack_esp_val (pc_stack_esp_val)
+    );
+
     // ------------------------------------------------------------
     // Commit / architectural visibility
     // ------------------------------------------------------------
@@ -342,13 +490,13 @@ module cpu_top (
         .pc_target_en               (pc_target_en),
         .pc_target_val              (pc_target_val),
 
-        .pc_ret_addr_en             (1'b0),
-        .pc_ret_addr_val            (32'h0),
-        .pc_ret_imm_en              (1'b0),
-        .pc_ret_imm_val             (16'h0),
-
-        .indirect_call_target       (indirect_call_target),
-        .indirect_call_target_valid (indirect_call_target_valid),
+        .pc_stack_en                (pc_stack_en),
+        .pc_stack_write_en          (pc_stack_write_en),
+        .pc_stack_addr              (pc_stack_addr),
+        .pc_stack_data              (pc_stack_data),
+        .pc_stack_esp_val           (pc_stack_esp_val),
+        .pc_stack_adj_en            (pc_stack_adj_en),
+        .pc_stack_adj_val           (pc_stack_adj_val),
 
         .eip                        (eip),
         .esp                        (esp),
@@ -358,13 +506,10 @@ module cpu_top (
         .flush_req                  (flush_req),
         .flush_addr                 (flush_addr),
 
-        .stk_wr_en                  (stk_wr_en),
-        .stk_wr_addr                (stk_wr_addr),
-        .stk_wr_data                (stk_wr_data),
-        .stk_rd_req                 (stk_rd_req),
-        .stk_rd_addr                (stk_rd_addr),
-        .stk_rd_data                (stk_rd_data),
-        .stk_rd_ready               (stk_rd_ready),
+        .stk_wr_en                  (commit_stk_wr_en),
+        .stk_wr_addr                (commit_stk_wr_addr),
+        .stk_wr_data                (commit_stk_wr_data),
+        .stk_wr_done                (commit_stack_wr_pending && eu_done),
 
         .fault_pending              (fault_pending),
         .fault_class                (fault_class),

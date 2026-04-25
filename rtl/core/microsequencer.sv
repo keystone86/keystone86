@@ -1,12 +1,14 @@
 // Keystone86 / Aegis
 // rtl/core/microsequencer.sv
 //
-// Rung 2 service-capable microsequencer.
+// Rung 3 service-capable microsequencer.
 //
-// Rung 2 intent:
+// Rung 3 intent:
 //   - Decoder hands off only decode-owned metadata.
-//   - Services fetch displacement and compute/validate the target.
-//   - ENDI in commit_engine is the architectural redirect boundary.
+//   - Services fetch displacement/immediate payloads and compute/validate
+//     control-transfer targets.
+//   - CALL return-address and RET immediate handoffs are staged explicitly
+//     into commit_engine and become architectural only at ENDI.
 //
 // Control-transfer cleanup rule for this rung:
 //   - Do NOT squash on JMP dispatch. fetch_engine still needs fall-through
@@ -30,6 +32,10 @@ module microsequencer (
     input  logic        decode_done,
     input  logic [7:0]  entry_id_in,
     input  logic [31:0] next_eip_in,
+    input  logic        dec_is_call,
+    input  logic        dec_is_call_indirect,
+    input  logic        dec_is_ret,
+    input  logic        dec_has_ret_imm,
     output logic        dec_ack,
 
     // --- Squash output ---
@@ -49,11 +55,16 @@ module microsequencer (
     output logic [31:0] raise_fe,
     input  logic        endi_done,
 
-    // --- EIP staging ---
+    // --- Commit staging ---
     output logic        pc_eip_en,
     output logic [31:0] pc_eip_val,
     output logic        pc_target_en,
     output logic [31:0] pc_target_val,
+    output logic        pc_stack_adj_en,
+    output logic [31:0] pc_stack_adj_val,
+
+    // --- Service metadata inputs ---
+    output logic [31:0] stack_push_data,
 
     // --- Service dispatch interface ---
     output logic [7:0]  svc_id_out,
@@ -63,6 +74,7 @@ module microsequencer (
 
     // --- T2 read (computed target from flow_control) ---
     input  logic [31:0] t2_data,
+    input  logic [31:0] t4_data,
 
     // --- Metadata latch outputs (to services) ---
     output logic [31:0] meta_next_eip,
@@ -85,6 +97,10 @@ module microsequencer (
     logic [7:0]  entry_id_r;
     logic [31:0] next_eip_r;
     logic        is_jmp_r;
+    logic        is_call_r;
+    logic        is_call_indirect_r;
+    logic        is_ret_r;
+    logic        has_ret_imm_r;
 
     logic        dispatch_rom_pending;
     logic        dispatch_pending;
@@ -115,6 +131,8 @@ module microsequencer (
     assign uop_imm10  = uinst[9:0];
 
     logic br_taken;
+    logic [7:0] current_svc_id;
+    logic       skip_current_svc;
 
     logic retire_ctrl_xfer_pulse;
     always_comb begin
@@ -137,6 +155,13 @@ module microsequencer (
                                     endi_done;
 
     assign squash = retire_ctrl_xfer_pulse;
+    assign current_svc_id = ext_pending_r ? uinst[7:0] : {2'b00, uop_target};
+    assign skip_current_svc =
+        (is_call_indirect_r &&
+         (current_svc_id == COMPUTE_REL_TARGET)) ||
+        (is_call_r && !is_call_indirect_r &&
+         ((current_svc_id == LOAD_RM16) ||
+          (current_svc_id == LOAD_RM32)));
 
     // ----------------------------------------------------------------
     // State register
@@ -148,6 +173,10 @@ module microsequencer (
             entry_id_r            <= ENTRY_RESET;
             next_eip_r            <= 32'h0;
             is_jmp_r              <= 1'b0;
+            is_call_r             <= 1'b0;
+            is_call_indirect_r    <= 1'b0;
+            is_ret_r              <= 1'b0;
+            has_ret_imm_r         <= 1'b0;
             dispatch_rom_pending  <= 1'b0;
             dispatch_pending      <= 1'b0;
             dispatch_entry_latch  <= 8'h00;
@@ -172,6 +201,10 @@ module microsequencer (
                         entry_id_r           <= entry_id_in;
                         next_eip_r           <= next_eip_in;
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
+                        is_call_r            <= dec_is_call;
+                        is_call_indirect_r   <= dec_is_call_indirect;
+                        is_ret_r             <= dec_is_ret;
+                        has_ret_imm_r        <= dec_has_ret_imm;
                         dispatch_entry_latch <= entry_id_in;
                         dispatch_rom_pending <= 1'b1;
                     end
@@ -186,7 +219,7 @@ module microsequencer (
                         execute_fetch_pending <= 1'b1;
 
                         // Keep the queue alive through displacement fetches.
-                        if (entry_id_r == ENTRY_JMP_NEAR)
+                        if ((entry_id_r == ENTRY_JMP_NEAR) || is_call_r || is_ret_r)
                             ctrl_transfer_pending <= 1'b1;
                     end
                 end
@@ -208,6 +241,10 @@ module microsequencer (
                                     ext_pending_r <= 1'b0;
                                 end else begin
                                     svc_id_r <= {2'b00, uop_target};
+                                end
+
+                                if (skip_current_svc) begin
+                                    execute_fetch_pending <= 1'b1;
                                 end
                             end
 
@@ -260,6 +297,9 @@ module microsequencer (
         pc_eip_val      = 32'h0;
         pc_target_en    = 1'b0;
         pc_target_val   = 32'h0;
+        pc_stack_adj_en = 1'b0;
+        pc_stack_adj_val= 32'h0;
+        stack_push_data = next_eip_r;
 
         // Keep selected service visible while waiting.
         svc_id_out      = svc_id_r;
@@ -300,9 +340,18 @@ module microsequencer (
                         end
 
                         UOP_SVCW: begin
-                            svc_id_out  = ext_pending_r ? uinst[7:0] : {2'b00, uop_target};
-                            svc_req_out = 1'b1;
-                            state_next  = MSEQ_WAIT_SERVICE;
+                            svc_id_out = current_svc_id;
+
+                            // Metadata-selected no-ops keep one shared
+                            // microcode entry for direct/indirect CALL and
+                            // RET/RET imm16 while avoiding payload fetches
+                            // that do not belong to the active form.
+                            if (skip_current_svc) begin
+                                upc_next = upc_r + 12'h1;
+                            end else begin
+                                svc_req_out = 1'b1;
+                                state_next  = MSEQ_WAIT_SERVICE;
+                            end
                         end
 
                         UOP_RAISE: begin
@@ -318,9 +367,14 @@ module microsequencer (
                             // in flight. Once commit reports endi_done, do not
                             // re-present the same target on the retire-complete
                             // cycle or commit_engine will stage it again.
-                            if (is_jmp_r && !endi_done) begin
+                            if (((is_jmp_r || is_call_r || is_ret_r) && !endi_done)) begin
                                 pc_target_en  = 1'b1;
                                 pc_target_val = t2_data;
+                            end
+
+                            if (is_ret_r && has_ret_imm_r && !endi_done) begin
+                                pc_stack_adj_en  = 1'b1;
+                                pc_stack_adj_val = {16'h0, t4_data[15:0]};
                             end
 
                             endi_req  = 1'b1;

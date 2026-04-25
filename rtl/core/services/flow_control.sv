@@ -76,9 +76,14 @@ module flow_control (
                     end
 
                     VALIDATE_NEAR_TRANSFER: begin
-                        // Current phase: accept already-computed near target.
-                        complete_pending_r   <= 1'b1;
-                        complete_sr_r        <= SR_OK;
+                        complete_pending_r <= 1'b1;
+                        if (mode_prot && (t2_in > 32'h0000FFFF)) begin
+                            complete_sr_r        <= SR_FAULT;
+                            complete_fault_req_r <= 1'b1;
+                            complete_fault_fc_r  <= FC_GP;
+                        end else begin
+                            complete_sr_r <= SR_OK;
+                        end
                     end
 
                     CONDITION_EVAL: begin

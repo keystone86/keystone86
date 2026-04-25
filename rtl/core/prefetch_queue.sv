@@ -60,6 +60,7 @@ module prefetch_queue #(
 
     logic [31:0] fetch_ptr;
     logic        fetch_inflight;
+    logic        drop_fetch_done;
     logic        queue_ready;
 
     logic [PTR_W:0] count;
@@ -71,9 +72,10 @@ module prefetch_queue #(
     logic queue_full;
     assign queue_full = (count == DEPTH[PTR_W:0]);
 
-    // Fetch only when ready, not full, no inflight, not flushing/killing
-    assign fetch_req  = queue_ready && !queue_full && !fetch_inflight
-                        && !flush && !kill;
+    // Level request: bus_interface latches requests only while idle, so keep
+    // the request visible while the queue has capacity. fetch_inflight remains
+    // local bookkeeping for accepting fetch_done.
+    assign fetch_req  = queue_ready && !queue_full && !flush && !kill;
     assign fetch_addr = fetch_ptr;
 
     always_ff @(posedge clk or negedge reset_n) begin
@@ -82,6 +84,7 @@ module prefetch_queue #(
             tail           <= '0;
             fetch_ptr      <= 32'h0;
             fetch_inflight <= 1'b0;
+            drop_fetch_done <= 1'b0;
             queue_ready    <= 1'b0;
         end else if (flush) begin
             // Authoritative redirect from commit_engine.
@@ -89,22 +92,30 @@ module prefetch_queue #(
             head           <= '0;
             tail           <= '0;
             fetch_ptr      <= flush_addr;
+            drop_fetch_done <= fetch_inflight && !fetch_done;
             fetch_inflight <= 1'b0;
             queue_ready    <= 1'b1;
         end else if (kill) begin
-            // Squash from microsequencer on control-transfer acceptance.
-            // Clears queue contents and inflight; pauses until flush arrives.
-            // fetch_ptr is NOT updated — commit_engine owns that via flush.
+            // Squash from microsequencer at committed redirect cleanup.
+            // Clears queue contents and inflight, then leaves the queue able
+            // to fetch from the current fetch_ptr. In the active control
+            // transfer path, a same-cycle or prior flush has already installed
+            // that authoritative fetch_ptr.
+            // fetch_ptr is NOT updated here — commit_engine owns that via
+            // flush.
             head           <= '0;
             tail           <= '0;
+            drop_fetch_done <= fetch_inflight && !fetch_done;
             fetch_inflight <= 1'b0;
-            queue_ready    <= 1'b0;   // pause: wait for commit_engine flush
+            queue_ready    <= 1'b1;
         end else begin
             // Normal operation
             if (fetch_req && !fetch_inflight)
                 fetch_inflight <= 1'b1;
 
-            if (fetch_inflight && fetch_done) begin
+            if (drop_fetch_done && fetch_done) begin
+                drop_fetch_done <= 1'b0;
+            end else if (fetch_inflight && fetch_done) begin
                 fetch_inflight <= 1'b0;
                 mem    [tail[PTR_W-1:0]] <= fetch_data;
                 eip_mem[tail[PTR_W-1:0]] <= fetch_ptr;

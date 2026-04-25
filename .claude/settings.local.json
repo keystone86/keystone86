@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(iverilog *)",
+      "Bash(make codegen *)",
+      "Bash(make ucode *)",
+      "Bash(make rung3-regress *)",
+      "Bash(vvp build/sim/rung3/tb_rung3_call_ret.vvp)"
+    ]
+  }
+}

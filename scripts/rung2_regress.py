@@ -25,6 +25,8 @@ RTL_SOURCES_COMMON = [
     "rtl/core/commit_engine.sv",
     "rtl/core/services/fetch_engine.sv",
     "rtl/core/services/flow_control.sv",
+    "rtl/core/services/operand_engine.sv",
+    "rtl/core/services/stack_engine.sv",
     "rtl/core/services/service_dispatch.sv",
     "rtl/core/cpu_top.sv",
 ]

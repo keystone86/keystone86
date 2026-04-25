@@ -7,7 +7,7 @@ Establish the first clean **service-oriented near CALL/RET path** as the foundat
 Rung 3 proves that near CALL and near RET can move end-to-end through the intended staged architecture:
 
 1. `decoder` classifies the in-scope CALL/RET forms and emits decode-owned metadata
-2. the active fetch/service path acquires any displacement or immediate payload required by the active slice
+2. `decoder` consumes all instruction bytes required for stable `M_NEXT_EIP`, including E8 disp16 and C2 imm16, and exposes that payload only as decode metadata
 3. the active stack/service path performs the minimum push/pop work required by the active slice
 4. `microsequencer` sequences those services and waits correctly
 5. `commit_engine` makes the control transfer and stack-visible architectural result real only at ENDI
@@ -70,8 +70,8 @@ Rung 3 is where the project must prove the first clean **stack-touching control-
 
 The intended ownership is:
 
-- **decoder**: classification and decode-owned metadata only
-- **fetch/service path**: displacement / immediate acquisition required by the active CALL/RET slice
+- **decoder**: classification, instruction-byte consumption through the end of the active CALL/RET form, and decode-owned metadata only
+- **payload handoff**: E8 disp16 and C2 imm16 are carried as decode metadata because Appendix D requires `M_NEXT_EIP` to be valid before `decode_done`
 - **stack/service path**: minimum push/pop behavior required by the active CALL/RET slice
 - **microsequencer**: service issue, wait behavior, and microcode control flow
 - **commit_engine**: architectural EIP / ESP visibility, committed redirect, and commit-visible stack result at ENDI
@@ -121,17 +121,20 @@ Do not replace this model with broad combinational reach-through or same-cycle s
 
 ### Decoder
 - classify only the exact Rung 3 near CALL/RET forms required by `docs/spec/frozen/appendix_d_bringup_ladder.md`
-- provide only decode-owned metadata
+- consume all bytes in the active CALL/RET instruction before asserting `decode_done`
+- provide only decode-owned metadata, including stable `M_NEXT_EIP` and the bounded E8/C2 16-bit payload needed by microcode/services
 - do **not** compute the redirect target
 - do **not** make architectural stack effects real
 - do **not** absorb microcode/service policy just because CALL/RET touches both control flow and stack state
 
-### Active fetch/service path
-Implement only the displacement / immediate-fetch behavior required by the active Rung 3 CALL/RET slice.
+### Active payload path
+For Rung 3 CALL/RET, follow Appendix D's `M_NEXT_EIP` rule: E8 disp16 and
+C2 imm16 are consumed by `decoder` before `decode_done`, then carried as
+decode metadata into the active microcode/service path.
 
 Required active-path services are only the services explicitly required for Rung 3 by `docs/spec/frozen/appendix_d_bringup_ladder.md`.
 
-Do not add broader fetch framework beyond what the bounded Rung 3 path genuinely needs.
+Do not add broader fetch or payload framework beyond what the bounded Rung 3 path genuinely needs.
 
 ### Active stack/service path
 Implement only the push/pop behavior required by the active Rung 3 path.

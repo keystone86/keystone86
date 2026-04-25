@@ -23,20 +23,38 @@ module service_dispatch (
     output logic [7:0] fc_svc_id,
     output logic       fc_svc_req,
     input  logic       fc_svc_done,
-    input  logic [1:0] fc_svc_sr
+    input  logic [1:0] fc_svc_sr,
+
+    output logic [7:0] op_svc_id,
+    output logic       op_svc_req,
+    input  logic       op_svc_done,
+    input  logic [1:0] op_svc_sr,
+
+    output logic [7:0] se_svc_id,
+    output logic       se_svc_req,
+    input  logic       se_svc_done,
+    input  logic [1:0] se_svc_sr
 );
 
     logic use_fetch;
     logic use_flow;
+    logic use_operand;
+    logic use_stack;
 
     always_comb begin
         fe_svc_id  = svc_id;
         fe_svc_req = 1'b0;
         fc_svc_id  = svc_id;
         fc_svc_req = 1'b0;
+        op_svc_id  = svc_id;
+        op_svc_req = 1'b0;
+        se_svc_id  = svc_id;
+        se_svc_req = 1'b0;
 
-        use_fetch = 1'b0;
-        use_flow  = 1'b0;
+        use_fetch  = 1'b0;
+        use_flow   = 1'b0;
+        use_operand= 1'b0;
+        use_stack  = 1'b0;
 
         unique case (svc_id)
             FETCH_DISP8,
@@ -51,9 +69,23 @@ module service_dispatch (
                 use_flow = 1'b1;
             end
 
+            LOAD_RM16,
+            LOAD_RM32: begin
+                use_operand = 1'b1;
+            end
+
+            PUSH16,
+            PUSH32,
+            POP16,
+            POP32: begin
+                use_stack = 1'b1;
+            end
+
             default: begin
-                use_fetch = 1'b0;
-                use_flow  = 1'b0;
+                use_fetch   = 1'b0;
+                use_flow    = 1'b0;
+                use_operand = 1'b0;
+                use_stack   = 1'b0;
             end
         endcase
 
@@ -62,6 +94,10 @@ module service_dispatch (
                 fe_svc_req = 1'b1;
             else if (use_flow)
                 fc_svc_req = 1'b1;
+            else if (use_operand)
+                op_svc_req = 1'b1;
+            else if (use_stack)
+                se_svc_req = 1'b1;
         end
 
         if (use_fetch) begin
@@ -70,6 +106,12 @@ module service_dispatch (
         end else if (use_flow) begin
             svc_done = fc_svc_done;
             svc_sr   = fc_svc_sr;
+        end else if (use_operand) begin
+            svc_done = op_svc_done;
+            svc_sr   = op_svc_sr;
+        end else if (use_stack) begin
+            svc_done = se_svc_done;
+            svc_sr   = se_svc_sr;
         end else begin
             svc_done = 1'b1;
             svc_sr   = SR_FAULT;

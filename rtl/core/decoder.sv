@@ -1,13 +1,13 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Rung 2 decoder role:
-//   - Classify in-scope JMP forms and produce decode-owned metadata.
-//   - Consume only the opcode byte for the active direct-JMP path.
-//   - Leave displacement fetch to fetch_engine services.
+// Decoder role through Rung 3:
+//   - Classify in-scope control-transfer forms and produce decode-owned
+//     metadata only.
+//   - Consume every byte that belongs to the instruction before decode_done,
+//     including E8 disp16 and C2 imm16, so M_NEXT_EIP is stable at handoff.
+//   - Leave target computation and stack effects to services/microcode.
 //   - Hold decode results stable until dec_ack or committed-boundary squash.
-//   - Retained later-rung outputs stay present for compatibility, but the
-//     active Rung 2 JMP path must not eat displacement bytes in decode.
 
 import keystone86_pkg::*;
 
@@ -31,13 +31,17 @@ module decoder (
     output logic        decode_done,
     output logic [7:0]  entry_id,
     output logic [31:0] next_eip,
-    output logic [31:0] target_eip,     // direct-call target only
+    output logic [31:0] target_eip,     // retained compatibility output; not used for Rung 3 target policy
     output logic        has_target,
     output logic        is_call,
+    output logic        is_call_indirect,
     output logic        is_ret,
     output logic        has_ret_imm,
     output logic [15:0] ret_imm,
     output logic [7:0]  modrm_byte,
+    output logic        payload16_valid,
+    output logic        payload16_signed,
+    output logic [15:0] payload16,
     input  logic        dec_ack,
 
     // --- Fetch EIP tracking ---
@@ -47,7 +51,7 @@ module decoder (
     typedef enum logic [3:0] {
         DEC_IDLE    = 4'h0,
         DEC_CONSUME = 4'h1,
-        DEC_DISP16  = 4'h2,   // used for E8 disp16 and C2 imm16
+        DEC_DISP16  = 4'h2,   // E8 disp16 and C2 imm16 payload acquisition
         DEC_MODRM   = 4'h3,   // used for FF forms
         DEC_DONE    = 4'h4
     } dec_state_t;
@@ -178,10 +182,7 @@ module decoder (
         case (state)
             DEC_IDLE: begin
                 if (q_valid) begin
-                    // Rung 2: JMP forms consume opcode only.
-                    if (q_data == 8'hEB || q_data == 8'hE9)
-                        state_next = DEC_CONSUME;
-                    else if (q_data == 8'hE8 || q_data == 8'hC2)
+                    if (q_data == 8'hE8 || q_data == 8'hC2)
                         state_next = DEC_DISP16;
                     else if (q_data == 8'hFF)
                         state_next = DEC_MODRM;
@@ -258,14 +259,20 @@ module decoder (
         else
             next_eip = opcode_eip_latch + 32'h1;
 
-        // Only direct CALL target is still formed here.
+        // Rung 3 target computation remains service-owned. Compatibility
+        // target outputs stay inactive so decode cannot become a hidden
+        // execution path.
         target_eip   = 32'h0;
         has_target   = 1'b0;
         is_call      = 1'b0;
+        is_call_indirect = 1'b0;
         is_ret       = 1'b0;
         has_ret_imm  = 1'b0;
         ret_imm      = 16'h0;
         modrm_byte   = modrm_latch;
+        payload16_valid  = 1'b0;
+        payload16_signed = 1'b0;
+        payload16        = {aux_hi, aux_lo};
 
         case (state)
             DEC_CONSUME: begin
@@ -297,20 +304,22 @@ module decoder (
                 decode_done = 1'b1;
                 entry_id    = classify_opcode(opcode_byte_latch, ff_is_call_near);
 
-                if (is_call_direct && aux_lo_valid && aux_hi_valid) begin
-                    target_eip = opcode_eip_latch + 32'h3 + disp16_sext;
-                    has_target = 1'b1;
-                    is_call    = 1'b1;
+                if (is_call_direct) begin
+                    is_call          = 1'b1;
+                    payload16_valid  = 1'b1;
+                    payload16_signed = 1'b1;
                 end else if (is_call_ff) begin
-                    is_call    = ff_is_call_near;
-                    has_target = 1'b0;
+                    is_call          = ff_is_call_near;
+                    is_call_indirect = ff_is_call_near;
                 end else if (is_ret_near) begin
                     is_ret      = 1'b1;
                     has_ret_imm = 1'b0;
                 end else if (is_ret_imm16) begin
-                    is_ret      = 1'b1;
-                    has_ret_imm = 1'b1;
-                    ret_imm     = {aux_hi, aux_lo};
+                    is_ret           = 1'b1;
+                    has_ret_imm      = 1'b1;
+                    ret_imm          = {aux_hi, aux_lo};
+                    payload16_valid  = 1'b1;
+                    payload16_signed = 1'b0;
                 end
             end
 

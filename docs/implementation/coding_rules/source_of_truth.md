@@ -93,22 +93,27 @@ The `.uasm` files are the intended future canonical source for microcode content
 
 **Authoritative source:** `rtl/core/` — the live implementation files.
 
-The files in `rtl/core/frontend/`, `rtl/core/microcode/`, `rtl/core/services/`,
-and `rtl/core/bus/` are structural scaffold placeholders for future phases.
+The files in `rtl/core/frontend/`, `rtl/core/microcode/`, and `rtl/core/bus/`
+are structural scaffold placeholders for future phases. Some bounded
+`rtl/core/services/` modules are live for the active Rung 3 service path.
 The live files currently used in simulation are:
 
 | File | Status |
 |---|---|
 | `rtl/core/cpu_top.sv` | Live — top-level integration |
-| `rtl/core/prefetch_queue.sv` | Live — Rung 0/1/2 |
-| `rtl/core/decoder.sv` | Live — Rung 0/1/2 |
-| `rtl/core/microsequencer.sv` | Live — Rung 0/1/2 |
-| `rtl/core/microcode_rom.sv` | Live — Rung 0/1/2 |
-| `rtl/core/commit_engine.sv` | Live — Rung 0/1/2 |
-| `rtl/core/bus_interface.sv` | Live — Rung 0/1/2 |
+| `rtl/core/prefetch_queue.sv` | Live — Rung 0/1/2/3 |
+| `rtl/core/decoder.sv` | Live — Rung 0/1/2/3 |
+| `rtl/core/microsequencer.sv` | Live — Rung 0/1/2/3 |
+| `rtl/core/microcode_rom.sv` | Live — Rung 0/1/2/3 |
+| `rtl/core/commit_engine.sv` | Live — Rung 0/1/2/3 |
+| `rtl/core/bus_interface.sv` | Live — Rung 0/1/2/3 |
+| `rtl/core/services/service_dispatch.sv` | Live — bounded Rung 3 service routing |
+| `rtl/core/services/flow_control.sv` | Live — bounded Rung 2/3 control validation |
+| `rtl/core/services/operand_engine.sv` | Live — bounded Rung 3 operand service |
+| `rtl/core/services/stack_engine.sv` | Live — bounded Rung 3 stack service |
 | `rtl/core/frontend/*.sv` | Scaffold — future front-end refactor |
 | `rtl/core/microcode/*.sv` | Scaffold — future microcode refactor |
-| `rtl/core/services/*.sv` | Scaffold — future service implementation |
+| other `rtl/core/services/*.sv` | Scaffold — future service implementation |
 | `rtl/core/bus/*.sv` | Scaffold — future bus refactor |
 
 ---
