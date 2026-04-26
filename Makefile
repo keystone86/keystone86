@@ -13,6 +13,7 @@ HOST_GID := $(shell id -g)
         rung1-sim rung1-regress rung1-clean \
         rung2-sim rung2-regress rung2-clean \
         rung3-sim rung3-regress rung3-clean \
+        rung4-sim rung4-regress rung4-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -80,6 +81,9 @@ help:
 	@echo "  make rung3-sim             - compile and run Rung 3 RTL simulation"
 	@echo "  make rung3-regress         - run Rung 3 regression (includes Rung 0 + Rung 1 + Rung 2)"
 	@echo "  make rung3-clean           - remove Rung 3 simulation artifacts"
+	@echo "  make rung4-sim             - compile and run Rung 4 RTL simulation"
+	@echo "  make rung4-regress         - run Rung 4 regression (includes Rung 0 + Rung 1 + Rung 2 + Rung 3)"
+	@echo "  make rung4-clean           - remove Rung 4 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -373,6 +377,39 @@ rung3-regress: require-container ucode
 rung3-clean: require-container
 	@rm -rf build/sim/rung3
 	@echo "Rung 3 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 4 — Short Jcc
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG4 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/models/bootstrap_mem.sv \
+  sim/tb/tb_rung4_jcc.sv
+
+rung4-sim: require-container ucode
+	@echo "--- Rung 4: compiling RTL ---"
+	@mkdir -p build/sim/rung4
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung4/tb_rung4_jcc.vvp \
+		$(IVERILOG_SOURCES_RUNG4)
+	@echo "--- Rung 4: running simulation ---"
+	vvp build/sim/rung4/tb_rung4_jcc.vvp
+
+rung4-regress: require-container ucode
+	@echo "--- Rung 4 regression (includes Rung 0 + Rung 1 + Rung 2 + Rung 3 baseline checks) ---"
+	$(MAKE) rung3-regress
+	@mkdir -p build/sim/rung4
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung4/tb_rung4_jcc.vvp \
+		$(IVERILOG_SOURCES_RUNG4)
+	vvp build/sim/rung4/tb_rung4_jcc.vvp
+
+rung4-clean: require-container
+	@rm -rf build/sim/rung4
+	@echo "Rung 4 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

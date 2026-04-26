@@ -1,12 +1,15 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through Rung 3:
+// Decoder role through Rung 4:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
 //     including E8 disp16 and C2 imm16, so M_NEXT_EIP is stable at handoff.
-//   - Leave target computation and stack effects to services/microcode.
+//   - For short Jcc, emit only ENTRY_JCC and M_COND_CODE. Condition
+//     evaluation and taken-target computation remain service/microcode owned.
+//   - Leave target computation, condition evaluation, and stack effects to
+//     services/microcode.
 //   - Hold decode results stable until dec_ack or committed-boundary squash.
 
 import keystone86_pkg::*;
@@ -47,6 +50,7 @@ module decoder (
     output logic        payload16_valid,
     output logic        payload16_signed,
     output logic [15:0] payload16,
+    output logic [3:0]  cond_code,
     input  logic        dec_ack,
 
     // --- Fetch EIP tracking ---
@@ -83,6 +87,7 @@ module decoder (
     logic        is_call_ff;
     logic        is_ret_near;
     logic        is_ret_imm16;
+    logic        is_jcc_short;
 
     logic        opcode_consumed;
     logic [7:0]  modrm_latch;
@@ -112,6 +117,7 @@ module decoder (
             is_call_ff        <= 1'b0;
             is_ret_near       <= 1'b0;
             is_ret_imm16      <= 1'b0;
+            is_jcc_short      <= 1'b0;
             opcode_consumed   <= 1'b0;
             modrm_latch       <= 8'h0;
         end else if (squash) begin
@@ -132,6 +138,7 @@ module decoder (
             is_call_ff        <= 1'b0;
             is_ret_near       <= 1'b0;
             is_ret_imm16      <= 1'b0;
+            is_jcc_short      <= 1'b0;
             opcode_consumed   <= 1'b0;
             modrm_latch       <= 8'h0;
         end else begin
@@ -148,6 +155,7 @@ module decoder (
                         is_call_ff        <= (q_data == 8'hFF);
                         is_ret_near       <= (q_data == 8'hC3);
                         is_ret_imm16      <= (q_data == 8'hC2);
+                        is_jcc_short      <= (q_data[7:4] == 4'h7);
                         aux_lo_valid      <= 1'b0;
                         aux_hi_valid      <= 1'b0;
                         sib_latch         <= 8'h0;
@@ -344,6 +352,11 @@ module decoder (
         case (op)
             8'h90:            return ENTRY_NOP_XCHG_AX;
             8'hEB, 8'hE9:     return ENTRY_JMP_NEAR;
+            8'h70, 8'h71, 8'h72, 8'h73,
+            8'h74, 8'h75, 8'h76, 8'h77,
+            8'h78, 8'h79, 8'h7A, 8'h7B,
+            8'h7C, 8'h7D, 8'h7E, 8'h7F:
+                              return ENTRY_JCC;
             8'hE8:            return ENTRY_CALL_NEAR;
             8'hFF:            return ff2 ? ENTRY_CALL_NEAR : ENTRY_NULL;
             8'hC3, 8'hC2:     return ENTRY_RET_NEAR;
@@ -367,7 +380,7 @@ module decoder (
         entry_id     = ENTRY_NULL;
 
         // Architectural M_NEXT_EIP
-        if (is_jmp_short)
+        if (is_jmp_short || is_jcc_short)
             next_eip = opcode_eip_latch + 32'h2;
         else if (is_jmp_near || is_call_direct || is_ret_imm16)
             next_eip = opcode_eip_latch + 32'h3;
@@ -401,6 +414,7 @@ module decoder (
         payload16_valid  = 1'b0;
         payload16_signed = 1'b0;
         payload16        = {aux_hi, aux_lo};
+        cond_code        = opcode_byte_latch[3:0];
 
         case (state)
             DEC_CONSUME: begin

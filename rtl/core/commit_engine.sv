@@ -2,8 +2,9 @@
 // rtl/core/commit_engine.sv
 //
 // Current active role:
-//   Commit behavior required by the delivered Rung 2 direct-JMP path and
-//   the Rung 3 near CALL/RET stack-visible path.
+//   Commit behavior required by the delivered Rung 2 direct-JMP path, the
+//   Rung 3 near CALL/RET stack-visible path, and the Rung 4 Jcc architectural
+//   flag/EIP visibility path.
 //
 // Active commit contract:
 //   - Redirect becomes architecturally visible only at ENDI.
@@ -13,11 +14,14 @@
 //     records at ENDI.
 //   - ENDI launch must be able to consume LIVE pending EIP/target inputs
 //     in the same cycle, not only staged *_r copies.
+//   - EFLAGS are exposed as committed architectural state for Rung 4
+//     CONDITION_EVAL; the condition service reads them but does not modify them.
 //
 // Scope note:
 //   This file may contain structural surfaces that later rungs can build on.
 //   Current verification claims only the bounded Rung 2 direct-JMP behavior
-//   and bounded Rung 3 near CALL/RET behavior proven by the active regression.
+//   the bounded Rung 3 near CALL/RET behavior, and the bounded Rung 4 Jcc
+//   EIP/redirect visibility behavior proven by the active regression.
 
 module commit_engine (
     input  logic        clk,
@@ -58,6 +62,7 @@ module commit_engine (
     // --- Architectural state outputs ---
     output logic [31:0] eip,
     output logic [31:0] esp,
+    output logic [31:0] eflags,
     output logic        mode_prot,
     output logic        cs_d_bit,
 
@@ -83,6 +88,7 @@ module commit_engine (
     // Architectural registers
     logic [31:0] eip_r;
     logic [31:0] esp_r;
+    logic [31:0] eflags_r;
     logic        fault_pending_r;
     logic [3:0]  fault_class_r;
     logic [31:0] fault_error_r;
@@ -123,6 +129,7 @@ module commit_engine (
 
     assign eip           = eip_r;
     assign esp           = esp_r;
+    assign eflags        = eflags_r;
     assign mode_prot     = 1'b0;
     assign cs_d_bit      = 1'b0;
     assign fault_pending = fault_pending_r;
@@ -145,6 +152,7 @@ module commit_engine (
         if (!reset_n) begin
             eip_r             <= RESET_FETCH_ADDR;
             esp_r             <= RESET_ESP;
+            eflags_r          <= 32'h00000002;
             fault_pending_r   <= 1'b0;
             fault_class_r     <= 4'h0;
             fault_error_r     <= 32'h0;

@@ -25,6 +25,9 @@ for i in range(256):
     elif i == 0x0B:
         val = 0x070       # Rung 3 placeholder
         meaning = "ENTRY_RET_NEAR"
+    elif i == 0x0D:
+        val = 0x080       # Rung 4: ENTRY_JCC
+        meaning = "ENTRY_JCC"
     elif i == 0x12:
         val = 0x030
         meaning = "ENTRY_PREFIX_ONLY"
@@ -67,6 +70,7 @@ PUSH32                 = 0x41
 POP32                  = 0x43
 COMPUTE_REL_TARGET     = 0x46
 VALIDATE_NEAR_TRANSFER = 0x44
+CONDITION_EVAL         = 0x47
 STAGE_STACK_ADJ        = 0x06
 REG_T4                 = 0x4
 REG_SPECIAL            = 0xF
@@ -75,6 +79,7 @@ C_ALWAYS = 0x0
 C_OK     = 0x1
 C_WAIT   = 0x2
 C_FAULT  = 0x3
+C_T3Z    = 0xC
 
 def endi(mask: int) -> str:
     return f"{0xE0000000 | (mask & 0x3FF):08X}"
@@ -175,10 +180,33 @@ rom[0x075] = br(C_FAULT, rel10(0x075, 0x000))
 rom[0x076] = stage(STAGE_STACK_ADJ, REG_T4)
 rom[0x077] = endi(CM_RET)
 
+# --------------------------------------------------------------------
+# Rung 4: ENTRY_JCC at 0x080
+#
+# Short Jcc keeps condition evaluation in flow_control and the taken/not-taken
+# decision in microcode. The not-taken path commits only the decoder-staged
+# fall-through EIP; the taken path computes and validates the target before
+# ENDI commits the redirect and flush.
+# --------------------------------------------------------------------
+rom[0x080] = svcw_small(FETCH_DISP8)
+rom[0x081] = br(C_FAULT, rel10(0x081, 0x000))
+rom[0x082] = ext_word()
+rom[0x083] = svcw_ext(CONDITION_EVAL)
+rom[0x084] = br(C_FAULT, rel10(0x084, 0x000))
+rom[0x085] = br(C_T3Z, rel10(0x085, 0x08D))
+rom[0x086] = ext_word()
+rom[0x087] = svcw_ext(COMPUTE_REL_TARGET)
+rom[0x088] = br(C_FAULT, rel10(0x088, 0x000))
+rom[0x089] = ext_word()
+rom[0x08A] = svcw_ext(VALIDATE_NEAR_TRANSFER)
+rom[0x08B] = br(C_FAULT, rel10(0x08B, 0x000))
+rom[0x08C] = endi(CM_JMP)
+rom[0x08D] = endi(CM_NOP_EIP)
+
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
 listing = f"""; Keystone86 / Aegis bootstrap microcode listing
-; Rung 2 service-based JMP and Rung 3 service-based CALL/RET
+; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, and Rung 4 Jcc
 address  encoding     source
 0x000    {endi(CM_FAULT_END)}   SUB_FAULT_HANDLER: ENDI CM_FAULT_END
 0x010    {raise_fc(0x6)}   ENTRY_NULL: RAISE FC_UD
@@ -215,6 +243,20 @@ address  encoding     source
 0x075    {br(C_FAULT, rel10(0x075, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
 0x076    {stage(STAGE_STACK_ADJ, REG_T4)}   STAGE STACK_ADJ, T4
 0x077    {endi(CM_RET)}   ENDI CM_RET (0x{CM_RET:03X})
+0x080    {svcw_small(FETCH_DISP8)}   ENTRY_JCC: SVCW FETCH_DISP8
+0x081    {br(C_FAULT, rel10(0x081, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x082    {ext_word()}   EXT
+0x083    {svcw_ext(CONDITION_EVAL)}   SVCW CONDITION_EVAL
+0x084    {br(C_FAULT, rel10(0x084, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x085    {br(C_T3Z, rel10(0x085, 0x08D))}   BR C_T3Z, jcc_not_taken
+0x086    {ext_word()}   EXT
+0x087    {svcw_ext(COMPUTE_REL_TARGET)}   SVCW COMPUTE_REL_TARGET
+0x088    {br(C_FAULT, rel10(0x088, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x089    {ext_word()}   EXT
+0x08A    {svcw_ext(VALIDATE_NEAR_TRANSFER)}   SVCW VALIDATE_NEAR_TRANSFER
+0x08B    {br(C_FAULT, rel10(0x08B, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x08C    {endi(CM_JMP)}   ENDI CM_JMP (taken, 0x{CM_JMP:03X})
+0x08D    {endi(CM_NOP_EIP)}   jcc_not_taken: ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
@@ -224,3 +266,4 @@ print(f"  CM_CALL = 0x{CM_CALL:03X}")
 print(f"  CM_RET  = 0x{CM_RET:03X}")
 print(f"  ENTRY_CALL_NEAR at dispatch[0x09] -> uPC 0x060")
 print(f"  ENTRY_RET_NEAR  at dispatch[0x0B] -> uPC 0x070")
+print(f"  ENTRY_JCC       at dispatch[0x0D] -> uPC 0x080")

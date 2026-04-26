@@ -1,14 +1,16 @@
 // Keystone86 / Aegis
 // rtl/core/microsequencer.sv
 //
-// Rung 3 service-capable microsequencer.
+// Rung 4 service-capable microsequencer.
 //
-// Rung 3 intent:
+// Active intent:
 //   - Decoder hands off only decode-owned metadata.
 //   - Services fetch displacement/immediate payloads and compute/validate
 //     control-transfer targets.
 //   - CALL return-address and RET immediate handoffs are staged explicitly
 //     into commit_engine and become architectural only at ENDI.
+//   - Jcc condition metadata is latched as decode-owned metadata and carried
+//     to flow_control; the sequencer branches only on the registered T3 result.
 //
 // Control-transfer cleanup rule for this rung:
 //   - Do NOT squash on JMP dispatch. fetch_engine still needs fall-through
@@ -32,6 +34,7 @@ module microsequencer (
     input  logic        decode_done,
     input  logic [7:0]  entry_id_in,
     input  logic [31:0] next_eip_in,
+    input  logic [3:0]  cond_code_in,
     input  logic        dec_is_call,
     input  logic        dec_is_ret,
     output logic        dec_ack,
@@ -73,9 +76,11 @@ module microsequencer (
     // --- T2 read (computed target from flow_control) ---
     input  logic [31:0] t2_data,
     input  logic [31:0] t4_data,
+    input  logic [31:0] t3_data,
 
     // --- Metadata latch outputs (to services) ---
     output logic [31:0] meta_next_eip,
+    output logic [3:0]  meta_cond_code,
 
     // --- Observability ---
     output logic [1:0]  dbg_state,
@@ -96,6 +101,7 @@ module microsequencer (
     logic [7:0]  entry_id_r;
     logic [31:0] next_eip_r;
     logic        is_jmp_r;
+    logic        is_jcc_r;
     logic        is_call_r;
     logic        is_ret_r;
 
@@ -109,6 +115,7 @@ module microsequencer (
     logic        ext_pending_r;
     logic [7:0]  svc_id_r;
     logic [1:0]  sr_r;
+    logic [3:0]  cond_code_r;
 
     assign upc            = upc_r;
     assign dispatch_entry = dispatch_entry_latch;
@@ -116,6 +123,7 @@ module microsequencer (
     assign dbg_upc        = upc_r;
     assign dbg_entry_id   = entry_id_r;
     assign meta_next_eip  = next_eip_r;
+    assign meta_cond_code = cond_code_r;
 
     logic [3:0] uop_class;
     logic [5:0] uop_target;
@@ -129,7 +137,6 @@ module microsequencer (
 
     logic br_taken;
     logic [7:0] current_svc_id;
-
     logic retire_ctrl_xfer_pulse;
     always_comb begin
         case (uop_cond)
@@ -137,6 +144,8 @@ module microsequencer (
             C_OK:     br_taken = (sr_r == SR_OK);
             C_FAULT:  br_taken = (sr_r == SR_FAULT);
             C_WAIT:   br_taken = (sr_r == SR_WAIT);
+            C_T3Z:    br_taken = (t3_data == 32'h0);
+            C_T3NZ:   br_taken = (t3_data != 32'h0);
             default:  br_taken = 1'b0;
         endcase
     end
@@ -161,7 +170,9 @@ module microsequencer (
             upc_r                 <= 12'h000;
             entry_id_r            <= ENTRY_RESET;
             next_eip_r            <= 32'h0;
+            cond_code_r           <= 4'h0;
             is_jmp_r              <= 1'b0;
+            is_jcc_r              <= 1'b0;
             is_call_r             <= 1'b0;
             is_ret_r              <= 1'b0;
             dispatch_rom_pending  <= 1'b0;
@@ -187,7 +198,9 @@ module microsequencer (
                         && !ctrl_transfer_pending) begin
                         entry_id_r           <= entry_id_in;
                         next_eip_r           <= next_eip_in;
+                        cond_code_r          <= cond_code_in;
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
+                        is_jcc_r             <= (entry_id_in == ENTRY_JCC);
                         is_call_r            <= dec_is_call;
                         is_ret_r             <= dec_is_ret;
                         dispatch_entry_latch <= entry_id_in;
@@ -204,7 +217,8 @@ module microsequencer (
                         execute_fetch_pending <= 1'b1;
 
                         // Keep the queue alive through displacement fetches.
-                        if ((entry_id_r == ENTRY_JMP_NEAR) || is_call_r || is_ret_r)
+                        if ((entry_id_r == ENTRY_JMP_NEAR) || (entry_id_r == ENTRY_JCC)
+                            || is_call_r || is_ret_r)
                             ctrl_transfer_pending <= 1'b1;
                     end
                 end
@@ -352,7 +366,8 @@ module microsequencer (
                             // in flight. Once commit reports endi_done, do not
                             // re-present the same target on the retire-complete
                             // cycle or commit_engine will stage it again.
-                            if (((is_jmp_r || is_call_r || is_ret_r) && !endi_done)) begin
+                            if (((is_jmp_r || is_call_r || is_ret_r ||
+                                  (is_jcc_r && (t3_data != 32'h0))) && !endi_done)) begin
                                 pc_target_en  = 1'b1;
                                 pc_target_val = t2_data;
                             end

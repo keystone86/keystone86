@@ -84,6 +84,7 @@ module cpu_top (
     logic        dec_payload16_valid;
     logic        dec_payload16_signed;
     logic [15:0] dec_payload16;
+    logic [3:0]  dec_cond_code;
     logic        dec_ack;
 
     // ------------------------------------------------------------
@@ -116,6 +117,7 @@ module cpu_top (
     logic        cs_d_bit;
     logic [31:0] eip;
     logic [31:0] esp;
+    logic [31:0] eflags;
 
     logic        fault_pending;
     logic [3:0]  fault_class;
@@ -144,6 +146,8 @@ module cpu_top (
     logic [1:0]  fc_svc_sr;
     logic        fc_t2_wr_en;
     logic [31:0] fc_t2_wr_data;
+    logic        fc_t3_wr_en;
+    logic [31:0] fc_t3_wr_data;
 
     // operand_engine side
     logic [7:0]  op_svc_id;
@@ -179,8 +183,10 @@ module cpu_top (
 
     // scratch/state registers used by current rung2 path
     logic [31:0] t2_r;
+    logic [31:0] t3_r;
     logic [31:0] t4_r;
     logic [31:0] meta_next_eip;
+    logic [3:0]  meta_cond_code;
     logic        meta_modrm_present_r;
     logic [7:0]  meta_modrm_byte_r;
     logic [7:0]  meta_sib_byte_r;
@@ -238,6 +244,7 @@ module cpu_top (
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             t2_r <= 32'h0;
+            t3_r <= 32'h0;
             t4_r <= 32'h0;
             meta_modrm_present_r <= 1'b0;
             meta_modrm_byte_r    <= 8'h0;
@@ -262,6 +269,7 @@ module cpu_top (
                 t4_r <= 32'h0;
             end
             if (fc_t2_wr_en) t2_r <= fc_t2_wr_data;
+            if (fc_t3_wr_en) t3_r <= fc_t3_wr_data;
             if (op_t2_wr_en) t2_r <= op_t2_wr_data;
             if (se_t2_wr_en) t2_r <= se_t2_wr_data;
         end
@@ -340,6 +348,7 @@ module cpu_top (
         .payload16_valid (dec_payload16_valid),
         .payload16_signed(dec_payload16_signed),
         .payload16    (dec_payload16),
+        .cond_code    (dec_cond_code),
         .dec_ack      (dec_ack),
         .q_fetch_eip  (q_fetch_eip)
     );
@@ -353,6 +362,7 @@ module cpu_top (
         .decode_done     (decode_done),
         .entry_id_in     (entry_id),
         .next_eip_in     (next_eip),
+        .cond_code_in    (dec_cond_code),
         .dec_is_call     (dec_is_call),
         .dec_is_ret      (dec_is_ret),
         .dec_ack         (dec_ack),
@@ -384,7 +394,9 @@ module cpu_top (
 
         .t2_data         (t2_r),
         .t4_data         (t4_r),
+        .t3_data         (t3_r),
         .meta_next_eip   (meta_next_eip),
+        .meta_cond_code  (meta_cond_code),
 
         .dbg_state       (dbg_mseq_state_w),
         .dbg_upc         (dbg_upc_w),
@@ -456,7 +468,11 @@ module cpu_top (
         .t4_in         (t4_r),
         .t2_wr_en      (fc_t2_wr_en),
         .t2_wr_data    (fc_t2_wr_data),
+        .t3_wr_en      (fc_t3_wr_en),
+        .t3_wr_data    (fc_t3_wr_data),
         .m_next_eip    (meta_next_eip),
+        .m_cond_code   (meta_cond_code),
+        .eflags_in     (eflags),
         .mode_prot     (mode_prot),
         .fault_req     (),
         .fault_fc      ()
@@ -537,6 +553,7 @@ module cpu_top (
 
         .eip                        (eip),
         .esp                        (esp),
+        .eflags                     (eflags),
         .mode_prot                  (mode_prot),
         .cs_d_bit                   (cs_d_bit),
 
