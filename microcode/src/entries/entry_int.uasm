@@ -1,0 +1,11 @@
+.entry ENTRY_INT, 0x0E
+
+; Rung 5 Pass 1 skeleton.
+; CD imm8 is dispatchable and FETCH_IMM8 captures the vector in T4.
+; INT_ENTER, IVT lookup, stack frame writes, IF clear, and CS:IP commit are
+; intentionally deferred to later Rung 5 passes.
+ENTRY_INT:
+    SVCW FETCH_IMM8
+    BR C_FAULT, SUB_FAULT_HANDLER
+    RAISE FC_INT
+    ENDI CM_FAULT_END

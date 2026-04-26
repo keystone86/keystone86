@@ -28,6 +28,12 @@ for i in range(256):
     elif i == 0x0D:
         val = 0x080       # Rung 4: ENTRY_JCC
         meaning = "ENTRY_JCC"
+    elif i == 0x0E:
+        val = 0x090       # Rung 5 Pass 1: ENTRY_INT skeleton
+        meaning = "ENTRY_INT"
+    elif i == 0x0F:
+        val = 0x0A0       # Rung 5 Pass 1: ENTRY_IRET skeleton
+        meaning = "ENTRY_IRET"
     elif i == 0x12:
         val = 0x030
         meaning = "ENTRY_PREFIX_ONLY"
@@ -63,6 +69,7 @@ CM_STACK     = 0x010
 CM_CALL      = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 CM_RET       = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 
+FETCH_IMM8             = 0x01
 FETCH_DISP8            = 0x04
 FETCH_DISP16           = 0x05
 LOAD_RM32              = 0x22
@@ -74,6 +81,7 @@ CONDITION_EVAL         = 0x47
 STAGE_STACK_ADJ        = 0x06
 REG_T4                 = 0x4
 REG_SPECIAL            = 0xF
+FC_INT                 = 0xA
 
 C_ALWAYS = 0x0
 C_OK     = 0x1
@@ -203,10 +211,29 @@ rom[0x08B] = br(C_FAULT, rel10(0x08B, 0x000))
 rom[0x08C] = endi(CM_JMP)
 rom[0x08D] = endi(CM_NOP_EIP)
 
+# --------------------------------------------------------------------
+# Rung 5 Pass 1: ENTRY_INT and ENTRY_IRET dispatch skeletons.
+#
+# ENTRY_INT proves the CD imm8 path can dispatch and invoke FETCH_IMM8 to place
+# the zero-extended vector in T4. Full INT_ENTER behavior is intentionally not
+# implemented in this pass, so the skeleton fails safely with FC_INT afterward.
+#
+# ENTRY_IRET is dispatchable but intentionally incomplete until IRET_FLOW is
+# implemented in a later Rung 5 pass.
+# --------------------------------------------------------------------
+rom[0x090] = svcw_small(FETCH_IMM8)
+rom[0x091] = br(C_FAULT, rel10(0x091, 0x000))
+rom[0x092] = raise_fc(FC_INT)
+rom[0x093] = endi(CM_FAULT_END)
+
+rom[0x0A0] = raise_fc(FC_INT)
+rom[0x0A1] = endi(CM_FAULT_END)
+
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
 listing = f"""; Keystone86 / Aegis bootstrap microcode listing
-; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, and Rung 4 Jcc
+; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, Rung 4 Jcc,
+; and Rung 5 Pass 1 INT/IRET dispatch skeletons
 address  encoding     source
 0x000    {endi(CM_FAULT_END)}   SUB_FAULT_HANDLER: ENDI CM_FAULT_END
 0x010    {raise_fc(0x6)}   ENTRY_NULL: RAISE FC_UD
@@ -257,6 +284,12 @@ address  encoding     source
 0x08B    {br(C_FAULT, rel10(0x08B, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
 0x08C    {endi(CM_JMP)}   ENDI CM_JMP (taken, 0x{CM_JMP:03X})
 0x08D    {endi(CM_NOP_EIP)}   jcc_not_taken: ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
+0x090    {svcw_small(FETCH_IMM8)}   ENTRY_INT: SVCW FETCH_IMM8
+0x091    {br(C_FAULT, rel10(0x091, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x092    {raise_fc(FC_INT)}   RAISE FC_INT ; INT_ENTER not implemented in Pass 1
+0x093    {endi(CM_FAULT_END)}   ENDI CM_FAULT_END
+0x0A0    {raise_fc(FC_INT)}   ENTRY_IRET: RAISE FC_INT ; IRET_FLOW not implemented in Pass 1
+0x0A1    {endi(CM_FAULT_END)}   ENDI CM_FAULT_END
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
@@ -267,3 +300,5 @@ print(f"  CM_RET  = 0x{CM_RET:03X}")
 print(f"  ENTRY_CALL_NEAR at dispatch[0x09] -> uPC 0x060")
 print(f"  ENTRY_RET_NEAR  at dispatch[0x0B] -> uPC 0x070")
 print(f"  ENTRY_JCC       at dispatch[0x0D] -> uPC 0x080")
+print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 1 skeleton)")
+print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 1 skeleton)")

@@ -57,6 +57,7 @@ module service_dispatch (
         use_stack  = 1'b0;
 
         unique case (svc_id)
+            FETCH_IMM8,
             FETCH_DISP8,
             FETCH_DISP16,
             FETCH_DISP32: begin

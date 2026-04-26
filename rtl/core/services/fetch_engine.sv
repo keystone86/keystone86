@@ -2,6 +2,7 @@
 // rtl/core/services/fetch_engine.sv
 //
 // Current phase support:
+//   FETCH_IMM8
 //   FETCH_DISP8
 //   FETCH_DISP16
 //   FETCH_DISP32
@@ -11,8 +12,8 @@
 //   when q_valid is already present. The previous version waited until a later
 //   cycle and ended up consuming the next opcode byte instead.
 //
-// Result is written to T4 as a sign-extended displacement for DISP8/DISP16,
-// or raw 32-bit value for DISP32.
+// Result is written to T4. FETCH_IMM8 is zero-extended for the Rung 5
+// interrupt vector path; DISP8/DISP16 remain sign-extended displacements.
 
 import keystone86_pkg::*;
 
@@ -47,6 +48,7 @@ module fetch_engine (
 
     function automatic logic [2:0] bytes_for_service(input logic [7:0] sid);
         case (sid)
+            FETCH_IMM8:  return 3'd1;
             FETCH_DISP8:  return 3'd1;
             FETCH_DISP16: return 3'd2;
             FETCH_DISP32: return 3'd4;
@@ -80,6 +82,7 @@ module fetch_engine (
         case (sid)
             FETCH_DISP8:  return {{24{accum_next[7]}},  accum_next[7:0]};
             FETCH_DISP16: return {{16{accum_next[15]}}, accum_next[15:0]};
+            FETCH_IMM8:   return {24'h0, accum_next[7:0]};
             default:      return accum_next;
         endcase
     endfunction
@@ -127,7 +130,9 @@ module fetch_engine (
             if (start_valid) begin
                 if (start_with_byte) begin
                     if (start_last_byte) begin
-                        // 1-byte displacement completed immediately on start cycle
+                        // 1-byte fetch completed immediately on start cycle.
+                        // FETCH_IMM8 is only a vector byte handoff here; INT
+                        // entry policy remains in microcode/interrupt service.
                         active_r           <= 1'b0;
                         svc_id_r           <= 8'h00;
                         accum_r            <= 32'h0;

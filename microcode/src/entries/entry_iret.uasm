@@ -1,0 +1,8 @@
+.entry ENTRY_IRET, 0x0F
+
+; Rung 5 Pass 1 skeleton.
+; CF is dispatchable, but IRET_FLOW and architectural return effects are
+; intentionally deferred to later Rung 5 passes.
+ENTRY_IRET:
+    RAISE FC_INT
+    ENDI CM_FAULT_END

@@ -12,5 +12,7 @@
 .include "entries/entry_null.uasm"
 .include "entries/entry_nop_xchg_ax.uasm"
 .include "entries/entry_prefix_only.uasm"
+.include "entries/entry_int.uasm"
+.include "entries/entry_iret.uasm"
 
 .end
