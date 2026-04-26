@@ -17,6 +17,7 @@ HOST_GID := $(shell id -g)
         rung5-pass2-sim rung5-pass2-clean \
         rung5-pass3-sim rung5-pass3-clean \
         rung5-pass4-sim rung5-pass4-clean \
+        rung5-pass5-sim rung5-pass5-clean rung5-regress \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -93,6 +94,9 @@ help:
 	@echo "  make rung5-pass3-clean     - remove Rung 5 Pass 3 simulation artifacts"
 	@echo "  make rung5-pass4-sim       - compile and run bounded Rung 5 Pass 4 #UD delivery simulation"
 	@echo "  make rung5-pass4-clean     - remove Rung 5 Pass 4 simulation artifacts"
+	@echo "  make rung5-pass5-sim       - compile and run bounded Rung 5 Pass 5 INT/IRET round-trip simulation"
+	@echo "  make rung5-pass5-clean     - remove Rung 5 Pass 5 simulation artifacts"
+	@echo "  make rung5-regress         - run Rung 4 regression plus Rung 5 Pass 2/3/4/5 simulations"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -486,6 +490,36 @@ rung5-pass4-sim: require-container ucode
 rung5-pass4-clean: require-container
 	@rm -rf build/sim/rung5_pass4
 	@echo "Rung 5 Pass 4 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 5 Pass 5 — integrated INT imm8 -> handler IRET round trip
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG5_PASS5 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung5_int_iret_roundtrip.sv
+
+rung5-pass5-sim: require-container ucode
+	@echo "--- Rung 5 Pass 5: compiling bounded INT/IRET round-trip RTL simulation ---"
+	@mkdir -p build/sim/rung5_pass5
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung5_pass5/tb_rung5_int_iret_roundtrip.vvp \
+		$(IVERILOG_SOURCES_RUNG5_PASS5)
+	@echo "--- Rung 5 Pass 5: running bounded INT/IRET round-trip simulation ---"
+	vvp build/sim/rung5_pass5/tb_rung5_int_iret_roundtrip.vvp
+
+rung5-pass5-clean: require-container
+	@rm -rf build/sim/rung5_pass5
+	@echo "Rung 5 Pass 5 build artifacts removed."
+
+rung5-regress: require-container ucode
+	@echo "--- Rung 5 regression (includes Rung 0 + Rung 1 + Rung 2 + Rung 3 + Rung 4 baseline checks) ---"
+	$(MAKE) rung4-regress
+	$(MAKE) rung5-pass2-sim
+	$(MAKE) rung5-pass3-sim
+	$(MAKE) rung5-pass4-sim
+	$(MAKE) rung5-pass5-sim
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

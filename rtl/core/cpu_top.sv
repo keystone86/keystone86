@@ -344,7 +344,11 @@ module cpu_top (
         .reset_n     (reset_n),
         .flush       (flush_req),
         .flush_addr  (flush_addr),
-        .kill        (squash),
+        // Commit flush is the authoritative prefetch redirect/cleanup path.
+        // The microsequencer squash clears stale decoder state at delayed ENDI
+        // completion; feeding that late pulse into the queue would discard
+        // already-fetched handler bytes for the Rung 5 INT/IRET path.
+        .kill        (1'b0),
         .q_data      (q_data),
         .q_valid     (q_valid),
         .q_consume   (q_consume),
