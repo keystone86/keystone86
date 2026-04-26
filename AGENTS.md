@@ -210,6 +210,27 @@ Commit engine:
 - owns committed redirect cleanup,
 - owns committed stack/register/memory visibility as defined by the current rung.
 
+## Timing and pipeline discipline
+
+Keystone86 prioritizes high Fmax, clear ownership, and verifiable sequencing over
+early IPC optimization.
+
+Strict registered boundaries, settle cycles, wait states, and explicit bubbles
+are intentional design tools. Do not remove, collapse, bypass, or optimize them
+away unless the active rung explicitly requires that change and verification
+proves the new behavior.
+
+Decoder, microsequencer, service, and commit boundaries must remain registered
+and observable where the current implementation uses them to preserve timing,
+ownership, or verification clarity.
+
+Do not create long combinational paths between decode, service computation,
+microcode sequencing, and architectural commit in order to reduce cycle count.
+
+If a change appears to improve IPC but weakens Fmax discipline, ownership
+boundaries, or verification clarity, classify it as out of scope and report it
+before editing files.
+
 ## Code comments and documentation
 
 Code must be understandable to a human maintainer.
