@@ -105,6 +105,7 @@ module microsequencer (
     logic        is_call_r;
     logic        is_ret_r;
     logic        is_int_r;
+    logic        is_iret_r;
 
     logic        dispatch_rom_pending;
     logic        dispatch_pending;
@@ -177,6 +178,7 @@ module microsequencer (
             is_call_r             <= 1'b0;
             is_ret_r              <= 1'b0;
             is_int_r              <= 1'b0;
+            is_iret_r             <= 1'b0;
             dispatch_rom_pending  <= 1'b0;
             dispatch_pending      <= 1'b0;
             dispatch_entry_latch  <= 8'h00;
@@ -206,6 +208,7 @@ module microsequencer (
                         is_call_r            <= dec_is_call;
                         is_ret_r             <= dec_is_ret;
                         is_int_r             <= (entry_id_in == ENTRY_INT);
+                        is_iret_r            <= (entry_id_in == ENTRY_IRET);
                         dispatch_entry_latch <= entry_id_in;
                         dispatch_rom_pending <= 1'b1;
                     end
@@ -221,7 +224,7 @@ module microsequencer (
 
                         // Keep the queue alive through displacement fetches.
                         if ((entry_id_r == ENTRY_JMP_NEAR) || (entry_id_r == ENTRY_JCC)
-                            || is_call_r || is_ret_r || is_int_r)
+                            || is_call_r || is_ret_r || is_int_r || is_iret_r)
                             ctrl_transfer_pending <= 1'b1;
                     end
                 end

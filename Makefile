@@ -15,6 +15,7 @@ HOST_GID := $(shell id -g)
         rung3-sim rung3-regress rung3-clean \
         rung4-sim rung4-regress rung4-clean \
         rung5-pass2-sim rung5-pass2-clean \
+        rung5-pass3-sim rung5-pass3-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -87,6 +88,8 @@ help:
 	@echo "  make rung4-clean           - remove Rung 4 simulation artifacts"
 	@echo "  make rung5-pass2-sim       - compile and run bounded Rung 5 Pass 2 INT_ENTER simulation"
 	@echo "  make rung5-pass2-clean     - remove Rung 5 Pass 2 simulation artifacts"
+	@echo "  make rung5-pass3-sim       - compile and run bounded Rung 5 Pass 3 IRET_FLOW simulation"
+	@echo "  make rung5-pass3-clean     - remove Rung 5 Pass 3 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -436,6 +439,28 @@ rung5-pass2-sim: require-container ucode
 rung5-pass2-clean: require-container
 	@rm -rf build/sim/rung5_pass2
 	@echo "Rung 5 Pass 2 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 5 Pass 3 — bounded IRET_FLOW smoke
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG5_PASS3 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung5_iret_flow.sv
+
+rung5-pass3-sim: require-container ucode
+	@echo "--- Rung 5 Pass 3: compiling bounded IRET_FLOW RTL simulation ---"
+	@mkdir -p build/sim/rung5_pass3
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung5_pass3/tb_rung5_iret_flow.vvp \
+		$(IVERILOG_SOURCES_RUNG5_PASS3)
+	@echo "--- Rung 5 Pass 3: running bounded IRET_FLOW simulation ---"
+	vvp build/sim/rung5_pass3/tb_rung5_iret_flow.vvp
+
+rung5-pass3-clean: require-container
+	@rm -rf build/sim/rung5_pass3
+	@echo "Rung 5 Pass 3 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

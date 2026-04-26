@@ -18,7 +18,9 @@
 //     CONDITION_EVAL; the condition service reads them but does not modify them.
 //   - Rung 5 Pass 2 INT_ENTER stages a bounded real-mode interrupt-entry
 //     record. CM_INT applies the staged EIP/CS/FLAGS/ESP values and serializes
-//     the 16-bit IP/CS/FLAGS frame bytes at ENDI.
+//     the 16-bit IP/CS/FLAGS frame bytes at ENDI. Rung 5 Pass 3 IRET_FLOW uses
+//     the same bounded interrupt-control record without a frame write, applying
+//     the popped EIP/CS/FLAGS/ESP only at ENDI/CM_IRET.
 //
 // Scope note:
 //   This file may contain structural surfaces that later rungs can build on.
@@ -62,12 +64,13 @@ module commit_engine (
     input  logic        pc_stack_adj_en,
     input  logic [31:0] pc_stack_adj_val,
 
-    // --- Pending bounded interrupt-entry record staged by INT_ENTER ---
+    // --- Pending bounded interrupt-control record staged by interrupt_engine ---
     input  logic        pc_int_en,
     input  logic [31:0] pc_int_eip,
     input  logic [15:0] pc_int_cs,
     input  logic [31:0] pc_int_eflags,
     input  logic [31:0] pc_int_esp,
+    input  logic        pc_int_frame_write_en,
     input  logic [31:0] pc_int_frame_addr,
     input  logic [47:0] pc_int_frame_bytes,
 
@@ -126,6 +129,7 @@ module commit_engine (
     logic [15:0] pc_int_cs_r;
     logic [31:0] pc_int_eflags_r;
     logic [31:0] pc_int_esp_r;
+    logic        pc_int_frame_write_en_r;
     logic [31:0] pc_int_frame_addr_r;
     logic [47:0] pc_int_frame_bytes_r;
 
@@ -155,6 +159,7 @@ module commit_engine (
     logic [15:0] eff_pc_int_cs;
     logic [31:0] eff_pc_int_eflags;
     logic [31:0] eff_pc_int_esp;
+    logic        eff_pc_int_frame_write_en;
     logic [31:0] eff_pc_int_frame_addr;
     logic [47:0] eff_pc_int_frame_bytes;
 
@@ -184,6 +189,8 @@ module commit_engine (
     assign eff_pc_int_cs          = pc_int_en ? pc_int_cs : pc_int_cs_r;
     assign eff_pc_int_eflags      = pc_int_en ? pc_int_eflags : pc_int_eflags_r;
     assign eff_pc_int_esp         = pc_int_en ? pc_int_esp : pc_int_esp_r;
+    assign eff_pc_int_frame_write_en = pc_int_en ? pc_int_frame_write_en :
+                                       pc_int_frame_write_en_r;
     assign eff_pc_int_frame_addr  = pc_int_en ? pc_int_frame_addr : pc_int_frame_addr_r;
     assign eff_pc_int_frame_bytes = pc_int_en ? pc_int_frame_bytes : pc_int_frame_bytes_r;
 
@@ -228,6 +235,7 @@ module commit_engine (
             pc_int_cs_r          <= 16'h0;
             pc_int_eflags_r      <= 32'h0;
             pc_int_esp_r         <= 32'h0;
+            pc_int_frame_write_en_r <= 1'b0;
             pc_int_frame_addr_r  <= 32'h0;
             pc_int_frame_bytes_r <= 48'h0;
 
@@ -297,6 +305,7 @@ module commit_engine (
                 pc_int_cs_r          <= pc_int_cs;
                 pc_int_eflags_r      <= pc_int_eflags;
                 pc_int_esp_r         <= pc_int_esp;
+                pc_int_frame_write_en_r <= pc_int_frame_write_en;
                 pc_int_frame_addr_r  <= pc_int_frame_addr;
                 pc_int_frame_bytes_r <= pc_int_frame_bytes;
             end
@@ -320,6 +329,7 @@ module commit_engine (
                         pc_int_cs_r       <= 16'h0;
                         pc_int_eflags_r   <= 32'h0;
                         pc_int_esp_r      <= 32'h0;
+                        pc_int_frame_write_en_r <= 1'b0;
                         pc_int_frame_addr_r  <= 32'h0;
                         pc_int_frame_bytes_r <= 48'h0;
                         endi_done         <= 1'b1;
@@ -328,10 +338,10 @@ module commit_engine (
             end
             // ENDI launch edge only
             else if (endi_req && !endi_req_d) begin
-                // Bounded Rung 5 INT-enter commit. The service stages a
-                // generic interrupt-entry record; this block only applies
-                // fields selected by CM_INT and serializes the six frame
-                // bytes at the ENDI boundary.
+                // Bounded Rung 5 interrupt-control commit. The service stages
+                // a generic record; this block only applies fields selected by
+                // CM_INT/CM_IRET. INT_ENTER also requests six frame-byte writes,
+                // while IRET_FLOW commits only the popped state.
                 if (endi_mask[4] && endi_mask[3] && endi_mask[2] &&
                     endi_mask[1] && eff_pc_int_en && !fault_pending_r) begin
                     eip_r        <= eff_pc_int_eip;
@@ -346,16 +356,29 @@ module commit_engine (
                     pc_int_cs_r          <= eff_pc_int_cs;
                     pc_int_eflags_r      <= eff_pc_int_eflags;
                     pc_int_esp_r         <= eff_pc_int_esp;
+                    pc_int_frame_write_en_r <= eff_pc_int_frame_write_en;
                     pc_int_frame_addr_r  <= eff_pc_int_frame_addr;
                     pc_int_frame_bytes_r <= eff_pc_int_frame_bytes;
 
-                    stk_wr_en       <= 1'b1;
-                    stk_wr_addr     <= eff_pc_int_frame_addr;
-                    stk_wr_data     <= {24'h0, frame_byte(eff_pc_int_frame_bytes, 3'd0)};
-                    stk_wr_byteen   <= 4'b0001;
-                    stk_wr_wait_r   <= 1'b1;
-                    int_frame_write_r <= 1'b1;
-                    int_frame_idx_r <= 3'd0;
+                    if (eff_pc_int_frame_write_en) begin
+                        stk_wr_en       <= 1'b1;
+                        stk_wr_addr     <= eff_pc_int_frame_addr;
+                        stk_wr_data     <= {24'h0, frame_byte(eff_pc_int_frame_bytes, 3'd0)};
+                        stk_wr_byteen   <= 4'b0001;
+                        stk_wr_wait_r   <= 1'b1;
+                        int_frame_write_r <= 1'b1;
+                        int_frame_idx_r <= 3'd0;
+                    end else begin
+                        pc_int_en_r       <= 1'b0;
+                        pc_int_eip_r      <= 32'h0;
+                        pc_int_cs_r       <= 16'h0;
+                        pc_int_eflags_r   <= 32'h0;
+                        pc_int_esp_r      <= 32'h0;
+                        pc_int_frame_write_en_r <= 1'b0;
+                        pc_int_frame_addr_r  <= 32'h0;
+                        pc_int_frame_bytes_r <= 48'h0;
+                        endi_done         <= 1'b1;
+                    end
 
                     pc_eip_en_r       <= 1'b0;
                     pc_eip_val_r      <= 32'h0;

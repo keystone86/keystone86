@@ -1,8 +1,9 @@
 .entry ENTRY_IRET, 0x0F
 
-; Rung 5 Pass 1 skeleton.
-; CF is dispatchable, but IRET_FLOW and architectural return effects are
-; intentionally deferred to later Rung 5 passes.
+; Rung 5 Pass 3 bounded real-mode IRET path.
+; IRET_FLOW reads the 16-bit IP/CS/FLAGS frame and stages EIP/CS/FLAGS/ESP.
+; ENDI CM_IRET is the only architectural visibility point for the popped state.
 ENTRY_IRET:
-    RAISE FC_INT
-    ENDI CM_FAULT_END
+    SVCW IRET_FLOW
+    BR C_FAULT, SUB_FAULT_HANDLER
+    ENDI CM_IRET

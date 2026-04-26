@@ -91,7 +91,8 @@ module service_dispatch (
                 use_stack = 1'b1;
             end
 
-            INT_ENTER: begin
+            INT_ENTER,
+            IRET_FLOW: begin
                 use_interrupt = 1'b1;
             end
 

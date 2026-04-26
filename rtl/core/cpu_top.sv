@@ -198,6 +198,7 @@ module cpu_top (
     logic [15:0] pc_int_cs;
     logic [31:0] pc_int_eflags;
     logic [31:0] pc_int_esp;
+    logic        pc_int_frame_write_en;
     logic [31:0] pc_int_frame_addr;
     logic [47:0] pc_int_frame_bytes;
 
@@ -581,6 +582,7 @@ module cpu_top (
         .pc_int_cs          (pc_int_cs),
         .pc_int_eflags      (pc_int_eflags),
         .pc_int_esp         (pc_int_esp),
+        .pc_int_frame_write_en(pc_int_frame_write_en),
         .pc_int_frame_addr  (pc_int_frame_addr),
         .pc_int_frame_bytes (pc_int_frame_bytes)
     );
@@ -620,6 +622,7 @@ module cpu_top (
         .pc_int_cs                  (pc_int_cs),
         .pc_int_eflags              (pc_int_eflags),
         .pc_int_esp                 (pc_int_esp),
+        .pc_int_frame_write_en      (pc_int_frame_write_en),
         .pc_int_frame_addr          (pc_int_frame_addr),
         .pc_int_frame_bytes         (pc_int_frame_bytes),
 
