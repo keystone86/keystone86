@@ -28,55 +28,51 @@ The testbench initializes committed EFLAGS directly because flag-producing
 instructions are later-rung work. It does not implement or claim ALU/flag
 producer behavior.
 
-## Local Verification Run
+## Clean Committed Verification Run
 
 Date: 2026-04-26
 
-Base commit before local changes:
+Committed implementation hash:
 
 ```text
-a7d5d1b New rung4 directives
+02f5808
 ```
 
 Tree state:
 
 ```text
-Working tree was dirty with local Rung 4 implementation and verification changes.
-This is not a clean committed acceptance baseline.
+Verification was run after committing the implementation at 02f5808.
+The pre-run git status check was clean.
+The post-run generated-artifact state was clean before this documentation update.
 ```
 
 Commands run from `/work`:
 
 ```bash
+git status --short
 make codegen
 make ucode
-make rung3-regress
-make rung4-sim
 make rung4-regress
 ```
 
 Observed results:
 
 ```text
+git status --short: clean
 make codegen: pass
 make ucode: pass
-make rung3-regress: pass
+
+make rung4-regress: pass
   - Rung 0 baseline: pass
   - Rung 1 baseline: pass
   - Rung 2 regression: RESULT: ALL RUNG 2 TESTS PASSED
   - Rung 3 testbench: 46 passed, 0 failed
-
-make rung4-sim: pass
+  - Rung 3 result: ALL TESTS PASSED -- Rung 3 acceptance criteria met
   - Rung 4 testbench: 204 passed, 0 failed
-  - RESULT: ALL RUNG 4 TESTS PASSED
-
-make rung4-regress: pass
-  - includes make rung3-regress prior-rung baseline chain
-  - Rung 4 testbench: 204 passed, 0 failed
-  - RESULT: ALL RUNG 4 TESTS PASSED
+  - Rung 4 result: RESULT: ALL RUNG 4 TESTS PASSED
 ```
 
-The Icarus Verilog compile emitted existing warning/sorry diagnostics for
+The Icarus Verilog compile emitted non-fatal warning/sorry diagnostics for
 missing explicit time units, ignored `unique` case qualities, and constant
 select sensitivity in `always_*` processes. The commands exited successfully.
 
@@ -87,10 +83,8 @@ select sensitivity in `always_*` processes. The commands exited successfully.
 - near or long Jcc forms beyond short `70h` through `7Fh`
 - ALU or flag-producing instruction behavior
 - generalized branch prediction or broader control-flow framework behavior
-- a clean committed acceptance baseline
 
 ## Acceptance Note
 
-This run proves the local delivered state, but the process still requires a
-clean committed verification run before recording a final accepted Rung 4
-baseline commit.
+This record documents the clean committed Rung 4 verification run for
+implementation commit `02f5808`.
