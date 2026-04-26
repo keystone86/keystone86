@@ -29,7 +29,13 @@ Rungs are not advisory. A rung is either passing or it is not.
 | Rung 1 | NOP classification, EIP advance | **Passing** | `sim/tb/tb_rung1_nop_loop.sv` |
 | Rung 2 | JMP SHORT control transfer | **Passing** | `sim/tb/tb_rung2_jmp.sv` |
 | Rung 3 | Near CALL and RET | **Passing** | `sim/tb/tb_rung3_call_ret.sv` |
-| Rung 4+ | Future bring-up rungs | Not started | — |
+| Rung 4 | Short Jcc | **Verified/documented** | `sim/tb/tb_rung4_jcc.sv` |
+| Rung 5 | INT / IRET / fault delivery | **Verified/documented** | `sim/tb/tb_rung5_*.sv` |
+| Rung 6+ | Future bring-up rungs | Blocked until Rung 5 is explicitly accepted | — |
+
+Rung 5 verification is recorded in `docs/implementation/rung5_verification.md`.
+That record documents committed-state verification, but it does not by itself
+record human acceptance.
 
 ---
 
@@ -40,18 +46,18 @@ From repo root, with `iverilog` installed:
 ```bash
 make codegen
 make ucode
-make rung2-regress
-make rung3-regress
+make rung5-regress
 ```
 
 To run the full regression chain (each level includes all prior rungs):
 
 ```bash
-make rung3-regress
+make rung5-regress
 ```
 
-`rung3-regress` is the current full regression chain for the accepted baseline.
-The passing baseline is Rung 0 + Rung 1 + Rung 2 + Rung 3 all green.
+`rung5-regress` is the current full regression chain for the verified/documented
+baseline. The verified/documented baseline is Rung 0 through Rung 5 all green;
+Rung 5 still requires explicit acceptance before Rung 6 can begin.
 
 ---
 
@@ -76,6 +82,8 @@ Each rung regression includes all prior rungs. Specifically:
 - `make rung1-regress` runs Rung 0 baseline then Rung 1.
 - `make rung2-regress` runs Rung 0 + Rung 1 baseline then Rung 2.
 - `make rung3-regress` runs Rung 0 + Rung 1 + Rung 2 baseline checks before running Rung 3.
+- `make rung4-regress` runs Rung 0 + Rung 1 + Rung 2 + Rung 3 baseline checks before running Rung 4.
+- `make rung5-regress` runs Rung 4 regression before running the Rung 5 Pass 2/3/4/5 simulations.
 
 A new rung implementation that breaks a prior rung is not acceptable. Restore the prior rung before claiming the new rung is complete.
 

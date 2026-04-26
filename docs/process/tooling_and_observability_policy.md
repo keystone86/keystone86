@@ -79,14 +79,13 @@ make codegen
 make ucode
 make namespace-check
 make ucode-bootstrap-check
-make rung2-regress
-make rung3-regress
+make rung5-regress
 ```
 
-`rung3-regress` is the comprehensive current gate. The committed Rung 3
-acceptance run also records `make rung2-regress` explicitly before
-`make rung3-regress`; both must pass before a Rung 3 handoff is considered
-valid.
+`rung5-regress` is the comprehensive current verified/documented gate. It invokes
+the accepted Rung 4 regression path before the Rung 5 Pass 2/3/4/5 simulations.
+Rung 5 verification is recorded in `docs/implementation/rung5_verification.md`;
+that record does not by itself record human acceptance.
 
 ### Abbreviated baseline check
 
@@ -146,6 +145,13 @@ This is acceptable for targeted verification but does not replace the full regre
 | `make rung2-regress` | Run Rung 2 + Rung 1 + Rung 0 baseline |
 | `make rung3-sim` | Compile and run Rung 3 testbench |
 | `make rung3-regress` | Run Rung 3 + Rung 2 + Rung 1 + Rung 0 baseline |
+| `make rung4-sim` | Compile and run Rung 4 testbench |
+| `make rung4-regress` | Run Rung 4 + Rung 3 + Rung 2 + Rung 1 + Rung 0 baseline |
+| `make rung5-pass2-sim` | Compile and run bounded Rung 5 Pass 2 INT_ENTER simulation |
+| `make rung5-pass3-sim` | Compile and run bounded Rung 5 Pass 3 IRET_FLOW simulation |
+| `make rung5-pass4-sim` | Compile and run bounded Rung 5 Pass 4 #UD delivery simulation |
+| `make rung5-pass5-sim` | Compile and run bounded Rung 5 Pass 5 INT/IRET round-trip simulation |
+| `make rung5-regress` | Run Rung 4 regression plus Rung 5 Pass 2/3/4/5 simulations |
 
 ### Cleanup
 
@@ -155,6 +161,11 @@ This is acceptable for targeted verification but does not replace the full regre
 | `make rung1-clean` | Remove Rung 1 build artifacts |
 | `make rung2-clean` | Remove Rung 2 build artifacts |
 | `make rung3-clean` | Remove Rung 3 build artifacts |
+| `make rung4-clean` | Remove Rung 4 build artifacts |
+| `make rung5-pass2-clean` | Remove Rung 5 Pass 2 build artifacts |
+| `make rung5-pass3-clean` | Remove Rung 5 Pass 3 build artifacts |
+| `make rung5-pass4-clean` | Remove Rung 5 Pass 4 build artifacts |
+| `make rung5-pass5-clean` | Remove Rung 5 Pass 5 build artifacts |
 | `make clean` | Remove all generated files (ucode + all rung builds) |
 
 ---
@@ -182,7 +193,8 @@ the active `IVERILOG_SOURCES*` variables. Any RTL change to a file in these
 lists requires re-running the affected rung's simulation before claiming the
 baseline is still passing.
 
-Current source list for the accepted Rung 3 baseline includes:
+The Makefile is authoritative for current `IVERILOG_SOURCES*` source lists.
+The current common RTL source list includes:
 
 ```
 rtl/include/keystone86_pkg.sv
@@ -196,6 +208,7 @@ rtl/core/services/fetch_engine.sv
 rtl/core/services/flow_control.sv
 rtl/core/services/operand_engine.sv
 rtl/core/services/stack_engine.sv
+rtl/core/services/interrupt_engine.sv
 rtl/core/services/service_dispatch.sv
 rtl/core/cpu_top.sv
 sim/models/bootstrap_mem.sv      (Rung 0 only)
@@ -229,7 +242,9 @@ These are permanent observability ports. Do not remove them. They are the mechan
 
 Verbose cycle-by-cycle trace logging is not currently active. If detailed pipeline tracing is needed during development, add it inside `synthesis translate_off` / `synthesis translate_on` guards and remove it before handing off.
 
-Do not leave temporary instrumentation in committed RTL. See `docs/process/post_rung2_cleanup_plan.md` item 8 for the classification criteria.
+Do not leave temporary instrumentation in committed RTL. Treat debug
+instrumentation cleanup as part of the normal review checklist and handoff
+discipline before committing RTL changes.
 
 ### Testbench timeout behavior
 

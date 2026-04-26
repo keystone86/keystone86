@@ -254,8 +254,7 @@ make codegen
 make ucode
 make namespace-check
 make ucode-bootstrap-check
-make rung2-regress
-make rung3-regress
+make rung5-regress
 ```
 
 Only commit after reviewing the diff and understanding the change.
@@ -269,13 +268,14 @@ make codegen
 make ucode
 make namespace-check
 make ucode-bootstrap-check
-make rung2-regress
-make rung3-regress
+make rung5-regress
 ```
 
-`rung3-regress` is the current authoritative passing baseline. Rung 3 was
-accepted from committed verification: implementation commit `de68b1d`,
-verification record commit `f05a5b5`.
+`make rung5-regress` is the current verified/documented baseline entry point.
+Rung 5 verification is recorded in `docs/implementation/rung5_verification.md`.
+That verification record does not by itself record human acceptance; Rung 6
+remains blocked until Rung 5 is explicitly accepted and Rung 6 is started under
+the proven workflow.
 
 ## GitHub authentication notes
 

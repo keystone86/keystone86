@@ -14,6 +14,8 @@ Before starting work, the developer must read the process files referenced below
 
 Read these files before starting:
 
+- For Codex-based rung work, read `AGENTS.md` first and follow
+  `docs/process/codex_workflow.md`.
 - `docs/process/developer_handoff_contract.md`
 - `docs/process/rung_execution_and_acceptance.md`
 - `docs/process/tooling_and_observability_policy.md`
