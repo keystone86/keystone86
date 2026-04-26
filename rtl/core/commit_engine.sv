@@ -16,6 +16,9 @@
 //     in the same cycle, not only staged *_r copies.
 //   - EFLAGS are exposed as committed architectural state for Rung 4
 //     CONDITION_EVAL; the condition service reads them but does not modify them.
+//   - Rung 5 Pass 2 INT_ENTER stages a bounded real-mode interrupt-entry
+//     record. CM_INT applies the staged EIP/CS/FLAGS/ESP values and serializes
+//     the 16-bit IP/CS/FLAGS frame bytes at ENDI.
 //
 // Scope note:
 //   This file may contain structural surfaces that later rungs can build on.
@@ -59,10 +62,20 @@ module commit_engine (
     input  logic        pc_stack_adj_en,
     input  logic [31:0] pc_stack_adj_val,
 
+    // --- Pending bounded interrupt-entry record staged by INT_ENTER ---
+    input  logic        pc_int_en,
+    input  logic [31:0] pc_int_eip,
+    input  logic [15:0] pc_int_cs,
+    input  logic [31:0] pc_int_eflags,
+    input  logic [31:0] pc_int_esp,
+    input  logic [31:0] pc_int_frame_addr,
+    input  logic [47:0] pc_int_frame_bytes,
+
     // --- Architectural state outputs ---
     output logic [31:0] eip,
     output logic [31:0] esp,
     output logic [31:0] eflags,
+    output logic [15:0] cs,
     output logic        mode_prot,
     output logic        cs_d_bit,
 
@@ -74,6 +87,7 @@ module commit_engine (
     output logic        stk_wr_en,
     output logic [31:0] stk_wr_addr,
     output logic [31:0] stk_wr_data,
+    output logic [3:0]  stk_wr_byteen,
     input  logic        stk_wr_done,
 
     // --- Fault state export ---
@@ -89,6 +103,7 @@ module commit_engine (
     logic [31:0] eip_r;
     logic [31:0] esp_r;
     logic [31:0] eflags_r;
+    logic [15:0] cs_r;
     logic        fault_pending_r;
     logic [3:0]  fault_class_r;
     logic [31:0] fault_error_r;
@@ -106,11 +121,20 @@ module commit_engine (
     logic [31:0] pc_stack_esp_val_r;
     logic        pc_stack_adj_en_r;
     logic [31:0] pc_stack_adj_val_r;
+    logic        pc_int_en_r;
+    logic [31:0] pc_int_eip_r;
+    logic [15:0] pc_int_cs_r;
+    logic [31:0] pc_int_eflags_r;
+    logic [31:0] pc_int_esp_r;
+    logic [31:0] pc_int_frame_addr_r;
+    logic [47:0] pc_int_frame_bytes_r;
 
     // ENDI rising-edge detection
     logic        endi_req_d;
     logic        reset_flush_done;
     logic        stk_wr_wait_r;
+    logic        int_frame_write_r;
+    logic [2:0]  int_frame_idx_r;
 
     // Effective live-or-staged values for ENDI launch. This lets the
     // commit boundary consume the active redirect handoff even if the
@@ -126,10 +150,18 @@ module commit_engine (
     logic [31:0] eff_pc_stack_esp_val;
     logic        eff_pc_stack_adj_en;
     logic [31:0] eff_pc_stack_adj_val;
+    logic        eff_pc_int_en;
+    logic [31:0] eff_pc_int_eip;
+    logic [15:0] eff_pc_int_cs;
+    logic [31:0] eff_pc_int_eflags;
+    logic [31:0] eff_pc_int_esp;
+    logic [31:0] eff_pc_int_frame_addr;
+    logic [47:0] eff_pc_int_frame_bytes;
 
     assign eip           = eip_r;
     assign esp           = esp_r;
     assign eflags        = eflags_r;
+    assign cs            = cs_r;
     assign mode_prot     = 1'b0;
     assign cs_d_bit      = 1'b0;
     assign fault_pending = fault_pending_r;
@@ -147,12 +179,35 @@ module commit_engine (
     assign eff_pc_stack_esp_val  = pc_stack_en ? pc_stack_esp_val : pc_stack_esp_val_r;
     assign eff_pc_stack_adj_en   = pc_stack_adj_en | pc_stack_adj_en_r;
     assign eff_pc_stack_adj_val  = pc_stack_adj_en ? pc_stack_adj_val : pc_stack_adj_val_r;
+    assign eff_pc_int_en          = pc_int_en | pc_int_en_r;
+    assign eff_pc_int_eip         = pc_int_en ? pc_int_eip : pc_int_eip_r;
+    assign eff_pc_int_cs          = pc_int_en ? pc_int_cs : pc_int_cs_r;
+    assign eff_pc_int_eflags      = pc_int_en ? pc_int_eflags : pc_int_eflags_r;
+    assign eff_pc_int_esp         = pc_int_en ? pc_int_esp : pc_int_esp_r;
+    assign eff_pc_int_frame_addr  = pc_int_en ? pc_int_frame_addr : pc_int_frame_addr_r;
+    assign eff_pc_int_frame_bytes = pc_int_en ? pc_int_frame_bytes : pc_int_frame_bytes_r;
+
+    function automatic logic [7:0] frame_byte(
+        input logic [47:0] frame,
+        input logic [2:0]  idx
+    );
+        case (idx)
+            3'd0: return frame[7:0];
+            3'd1: return frame[15:8];
+            3'd2: return frame[23:16];
+            3'd3: return frame[31:24];
+            3'd4: return frame[39:32];
+            3'd5: return frame[47:40];
+            default: return 8'h0;
+        endcase
+    endfunction
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             eip_r             <= RESET_FETCH_ADDR;
             esp_r             <= RESET_ESP;
             eflags_r          <= 32'h00000002;
+            cs_r              <= 16'h0000;
             fault_pending_r   <= 1'b0;
             fault_class_r     <= 4'h0;
             fault_error_r     <= 32'h0;
@@ -168,10 +223,19 @@ module commit_engine (
             pc_stack_esp_val_r  <= 32'h0;
             pc_stack_adj_en_r   <= 1'b0;
             pc_stack_adj_val_r  <= 32'h0;
+            pc_int_en_r          <= 1'b0;
+            pc_int_eip_r         <= 32'h0;
+            pc_int_cs_r          <= 16'h0;
+            pc_int_eflags_r      <= 32'h0;
+            pc_int_esp_r         <= 32'h0;
+            pc_int_frame_addr_r  <= 32'h0;
+            pc_int_frame_bytes_r <= 48'h0;
 
             endi_req_d        <= 1'b0;
             reset_flush_done  <= 1'b0;
             stk_wr_wait_r     <= 1'b0;
+            int_frame_write_r  <= 1'b0;
+            int_frame_idx_r    <= 3'h0;
 
             flush_req         <= 1'b0;
             flush_addr        <= RESET_FETCH_ADDR;
@@ -180,11 +244,13 @@ module commit_engine (
             stk_wr_en         <= 1'b0;
             stk_wr_addr       <= 32'h0;
             stk_wr_data       <= 32'h0;
+            stk_wr_byteen     <= 4'b0000;
         end else begin
             // Default pulse clears
             flush_req  <= 1'b0;
             endi_done  <= 1'b0;
             stk_wr_en  <= 1'b0;
+            stk_wr_byteen <= 4'b0000;
 
             endi_req_d <= endi_req;
 
@@ -225,22 +291,99 @@ module commit_engine (
                 pc_stack_adj_val_r <= pc_stack_adj_val;
             end
 
+            if (pc_int_en) begin
+                pc_int_en_r          <= 1'b1;
+                pc_int_eip_r         <= pc_int_eip;
+                pc_int_cs_r          <= pc_int_cs;
+                pc_int_eflags_r      <= pc_int_eflags;
+                pc_int_esp_r         <= pc_int_esp;
+                pc_int_frame_addr_r  <= pc_int_frame_addr;
+                pc_int_frame_bytes_r <= pc_int_frame_bytes;
+            end
+
             if (stk_wr_wait_r) begin
                 if (stk_wr_done) begin
-                    stk_wr_wait_r <= 1'b0;
-                    endi_done     <= 1'b1;
+                    if (int_frame_write_r && (int_frame_idx_r != 3'd5)) begin
+                        int_frame_idx_r <= int_frame_idx_r + 3'd1;
+                        stk_wr_en       <= 1'b1;
+                        stk_wr_addr     <= pc_int_frame_addr_r +
+                                           {29'h0, int_frame_idx_r + 3'd1};
+                        stk_wr_data     <= {24'h0, frame_byte(pc_int_frame_bytes_r,
+                                                              int_frame_idx_r + 3'd1)};
+                        stk_wr_byteen   <= 4'b0001;
+                    end else begin
+                        stk_wr_wait_r     <= 1'b0;
+                        int_frame_write_r <= 1'b0;
+                        int_frame_idx_r   <= 3'h0;
+                        pc_int_en_r       <= 1'b0;
+                        pc_int_eip_r      <= 32'h0;
+                        pc_int_cs_r       <= 16'h0;
+                        pc_int_eflags_r   <= 32'h0;
+                        pc_int_esp_r      <= 32'h0;
+                        pc_int_frame_addr_r  <= 32'h0;
+                        pc_int_frame_bytes_r <= 48'h0;
+                        endi_done         <= 1'b1;
+                    end
                 end
             end
             // ENDI launch edge only
             else if (endi_req && !endi_req_d) begin
+                // Bounded Rung 5 INT-enter commit. The service stages a
+                // generic interrupt-entry record; this block only applies
+                // fields selected by CM_INT and serializes the six frame
+                // bytes at the ENDI boundary.
+                if (endi_mask[4] && endi_mask[3] && endi_mask[2] &&
+                    endi_mask[1] && eff_pc_int_en && !fault_pending_r) begin
+                    eip_r        <= eff_pc_int_eip;
+                    cs_r         <= eff_pc_int_cs;
+                    eflags_r     <= eff_pc_int_eflags;
+                    esp_r        <= eff_pc_int_esp;
+                    flush_req    <= 1'b1;
+                    flush_addr   <= eff_pc_int_eip;
+
+                    pc_int_en_r          <= 1'b1;
+                    pc_int_eip_r         <= eff_pc_int_eip;
+                    pc_int_cs_r          <= eff_pc_int_cs;
+                    pc_int_eflags_r      <= eff_pc_int_eflags;
+                    pc_int_esp_r         <= eff_pc_int_esp;
+                    pc_int_frame_addr_r  <= eff_pc_int_frame_addr;
+                    pc_int_frame_bytes_r <= eff_pc_int_frame_bytes;
+
+                    stk_wr_en       <= 1'b1;
+                    stk_wr_addr     <= eff_pc_int_frame_addr;
+                    stk_wr_data     <= {24'h0, frame_byte(eff_pc_int_frame_bytes, 3'd0)};
+                    stk_wr_byteen   <= 4'b0001;
+                    stk_wr_wait_r   <= 1'b1;
+                    int_frame_write_r <= 1'b1;
+                    int_frame_idx_r <= 3'd0;
+
+                    pc_eip_en_r       <= 1'b0;
+                    pc_eip_val_r      <= 32'h0;
+                    pc_target_en_r    <= 1'b0;
+                    pc_target_val_r   <= 32'h0;
+                    pc_stack_en_r       <= 1'b0;
+                    pc_stack_write_en_r <= 1'b0;
+                    pc_stack_addr_r     <= 32'h0;
+                    pc_stack_data_r     <= 32'h0;
+                    pc_stack_esp_val_r  <= 32'h0;
+                    pc_stack_adj_en_r   <= 1'b0;
+                    pc_stack_adj_val_r  <= 32'h0;
+
+                    if (endi_mask[8]) begin
+                        fault_pending_r <= 1'b0;
+                        fault_class_r   <= 4'h0;
+                        fault_error_r   <= 32'h0;
+                    end
+                end
                 // Active Rung 3 stack commit path. Stack services stage the
                 // pending record; commit_engine only makes it visible at ENDI.
-                if (endi_mask[4] && !fault_pending_r) begin
+                else if (endi_mask[4] && !fault_pending_r) begin
                     if (eff_pc_stack_en) begin
                         if (eff_pc_stack_write_en) begin
                             stk_wr_en   <= 1'b1;
                             stk_wr_addr <= eff_pc_stack_addr;
                             stk_wr_data <= eff_pc_stack_data;
+                            stk_wr_byteen <= 4'b1111;
                             stk_wr_wait_r <= 1'b1;
                         end
 

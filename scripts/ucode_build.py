@@ -66,8 +66,11 @@ CM_NOP       = CM_CLR03 | CM_CLR47 | CM_CLRF
 CM_NOP_EIP   = CM_NOP | CM_EIP
 CM_JMP       = CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 CM_STACK     = 0x010
+CM_SEG       = 0x008
+CM_EFLAGS    = 0x004
 CM_CALL      = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 CM_RET       = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
+CM_INT       = CM_SEG | CM_STACK | CM_EFLAGS | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 
 FETCH_IMM8             = 0x01
 FETCH_DISP8            = 0x04
@@ -78,6 +81,7 @@ POP32                  = 0x43
 COMPUTE_REL_TARGET     = 0x46
 VALIDATE_NEAR_TRANSFER = 0x44
 CONDITION_EVAL         = 0x47
+INT_ENTER              = 0x62
 STAGE_STACK_ADJ        = 0x06
 REG_T4                 = 0x4
 REG_SPECIAL            = 0xF
@@ -212,19 +216,21 @@ rom[0x08C] = endi(CM_JMP)
 rom[0x08D] = endi(CM_NOP_EIP)
 
 # --------------------------------------------------------------------
-# Rung 5 Pass 1: ENTRY_INT and ENTRY_IRET dispatch skeletons.
+# Rung 5 Pass 2: ENTRY_INT bounded real-mode INT_ENTER path.
 #
 # ENTRY_INT proves the CD imm8 path can dispatch and invoke FETCH_IMM8 to place
-# the zero-extended vector in T4. Full INT_ENTER behavior is intentionally not
-# implemented in this pass, so the skeleton fails safely with FC_INT afterward.
+# the zero-extended vector in T4, then calls INT_ENTER. INT_ENTER remains a
+# bounded service; ENDI CM_INT is the only architectural visibility point.
 #
 # ENTRY_IRET is dispatchable but intentionally incomplete until IRET_FLOW is
 # implemented in a later Rung 5 pass.
 # --------------------------------------------------------------------
 rom[0x090] = svcw_small(FETCH_IMM8)
 rom[0x091] = br(C_FAULT, rel10(0x091, 0x000))
-rom[0x092] = raise_fc(FC_INT)
-rom[0x093] = endi(CM_FAULT_END)
+rom[0x092] = ext_word()
+rom[0x093] = svcw_ext(INT_ENTER)
+rom[0x094] = br(C_FAULT, rel10(0x094, 0x000))
+rom[0x095] = endi(CM_INT)
 
 rom[0x0A0] = raise_fc(FC_INT)
 rom[0x0A1] = endi(CM_FAULT_END)
@@ -233,7 +239,7 @@ rom[0x0A1] = endi(CM_FAULT_END)
 
 listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, Rung 4 Jcc,
-; and Rung 5 Pass 1 INT/IRET dispatch skeletons
+; and Rung 5 Pass 2 INT_ENTER path plus IRET dispatch skeleton
 address  encoding     source
 0x000    {endi(CM_FAULT_END)}   SUB_FAULT_HANDLER: ENDI CM_FAULT_END
 0x010    {raise_fc(0x6)}   ENTRY_NULL: RAISE FC_UD
@@ -286,8 +292,10 @@ address  encoding     source
 0x08D    {endi(CM_NOP_EIP)}   jcc_not_taken: ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
 0x090    {svcw_small(FETCH_IMM8)}   ENTRY_INT: SVCW FETCH_IMM8
 0x091    {br(C_FAULT, rel10(0x091, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x092    {raise_fc(FC_INT)}   RAISE FC_INT ; INT_ENTER not implemented in Pass 1
-0x093    {endi(CM_FAULT_END)}   ENDI CM_FAULT_END
+0x092    {ext_word()}   EXT
+0x093    {svcw_ext(INT_ENTER)}   SVCW INT_ENTER
+0x094    {br(C_FAULT, rel10(0x094, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x095    {endi(CM_INT)}   ENDI CM_INT (0x{CM_INT:03X})
 0x0A0    {raise_fc(FC_INT)}   ENTRY_IRET: RAISE FC_INT ; IRET_FLOW not implemented in Pass 1
 0x0A1    {endi(CM_FAULT_END)}   ENDI CM_FAULT_END
 """
@@ -300,5 +308,6 @@ print(f"  CM_RET  = 0x{CM_RET:03X}")
 print(f"  ENTRY_CALL_NEAR at dispatch[0x09] -> uPC 0x060")
 print(f"  ENTRY_RET_NEAR  at dispatch[0x0B] -> uPC 0x070")
 print(f"  ENTRY_JCC       at dispatch[0x0D] -> uPC 0x080")
-print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 1 skeleton)")
+print(f"  CM_INT  = 0x{CM_INT:03X}")
+print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 2 INT_ENTER)")
 print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 1 skeleton)")

@@ -49,6 +49,7 @@ module cpu_top (
     logic        commit_stack_wr_pending;
     logic [31:0] commit_stack_wr_addr_r;
     logic [31:0] commit_stack_wr_data_r;
+    logic [3:0]  commit_stack_wr_byteen_r;
 
     logic [7:0]  q_data;
     logic        q_valid;
@@ -118,6 +119,7 @@ module cpu_top (
     logic [31:0] eip;
     logic [31:0] esp;
     logic [31:0] eflags;
+    logic [15:0] cs;
 
     logic        fault_pending;
     logic [3:0]  fault_class;
@@ -180,6 +182,24 @@ module cpu_top (
     logic        commit_stk_wr_en;
     logic [31:0] commit_stk_wr_addr;
     logic [31:0] commit_stk_wr_data;
+    logic [3:0]  commit_stk_wr_byteen;
+
+    // interrupt_engine side
+    logic [7:0]  ie_svc_id;
+    logic        ie_svc_req;
+    logic        ie_svc_done;
+    logic [1:0]  ie_svc_sr;
+    logic        ie_mem_rd_req;
+    logic [31:0] ie_mem_rd_addr;
+    logic        ie_mem_rd_ready;
+    logic [31:0] ie_mem_rd_data;
+    logic        pc_int_en;
+    logic [31:0] pc_int_eip;
+    logic [15:0] pc_int_cs;
+    logic [31:0] pc_int_eflags;
+    logic [31:0] pc_int_esp;
+    logic [31:0] pc_int_frame_addr;
+    logic [47:0] pc_int_frame_bytes;
 
     // scratch/state registers used by current rung2 path
     logic [31:0] t2_r;
@@ -210,16 +230,21 @@ module cpu_top (
     assign dbg_decode_done   = decode_done;
     assign dbg_fetch_addr    = fetch_addr_internal;
 
-    assign eu_req     = commit_stack_wr_pending || se_stk_rd_req || op_mem_rd_req;
+    assign eu_req     = commit_stack_wr_pending || ie_mem_rd_req ||
+                        se_stk_rd_req || op_mem_rd_req;
     assign eu_wr      = commit_stack_wr_pending;
     assign eu_addr    = commit_stack_wr_pending ? commit_stack_wr_addr_r :
-                        (se_stk_rd_req ? se_stk_rd_addr : op_mem_rd_addr);
-    assign eu_byteen  = commit_stack_wr_pending ? 4'b1111 : 4'b1111;
+                        (ie_mem_rd_req ? ie_mem_rd_addr :
+                        (se_stk_rd_req ? se_stk_rd_addr : op_mem_rd_addr));
+    assign eu_byteen  = commit_stack_wr_pending ? commit_stack_wr_byteen_r : 4'b1111;
     assign eu_wdata   = commit_stack_wr_pending ? commit_stack_wr_data_r : 32'h0;
 
-    assign se_stk_rd_ready = (!commit_stack_wr_pending) && eu_done;
+    assign ie_mem_rd_ready = (!commit_stack_wr_pending) && ie_mem_rd_req && eu_done;
+    assign ie_mem_rd_data  = eu_rdata;
+    assign se_stk_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) && eu_done;
     assign se_stk_rd_data  = eu_rdata;
-    assign op_mem_rd_ready = (!commit_stack_wr_pending) && (!se_stk_rd_req) && eu_done;
+    assign op_mem_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) &&
+                             (!se_stk_rd_req) && eu_done;
     assign op_mem_rd_data  = eu_rdata;
 
     always_ff @(posedge clk or negedge reset_n) begin
@@ -227,13 +252,22 @@ module cpu_top (
             commit_stack_wr_pending <= 1'b0;
             commit_stack_wr_addr_r  <= 32'h0;
             commit_stack_wr_data_r  <= 32'h0;
+            commit_stack_wr_byteen_r <= 4'h0;
         end else begin
             if (commit_stack_wr_pending && eu_done) begin
-                commit_stack_wr_pending <= 1'b0;
+                if (commit_stk_wr_en) begin
+                    commit_stack_wr_pending <= 1'b1;
+                    commit_stack_wr_addr_r  <= commit_stk_wr_addr;
+                    commit_stack_wr_data_r  <= commit_stk_wr_data;
+                    commit_stack_wr_byteen_r <= commit_stk_wr_byteen;
+                end else begin
+                    commit_stack_wr_pending <= 1'b0;
+                end
             end else if (commit_stk_wr_en && !commit_stack_wr_pending) begin
                 commit_stack_wr_pending <= 1'b1;
                 commit_stack_wr_addr_r  <= commit_stk_wr_addr;
                 commit_stack_wr_data_r  <= commit_stk_wr_data;
+                commit_stack_wr_byteen_r <= commit_stk_wr_byteen;
             end
         end
     end
@@ -438,7 +472,12 @@ module cpu_top (
         .se_svc_id   (se_svc_id),
         .se_svc_req  (se_svc_req),
         .se_svc_done (se_svc_done),
-        .se_svc_sr   (se_svc_sr)
+        .se_svc_sr   (se_svc_sr),
+
+        .ie_svc_id   (ie_svc_id),
+        .ie_svc_req  (ie_svc_req),
+        .ie_svc_done (ie_svc_done),
+        .ie_svc_sr   (ie_svc_sr)
     );
 
     fetch_engine u_fetch_eng (
@@ -521,6 +560,31 @@ module cpu_top (
         .pc_stack_esp_val (pc_stack_esp_val)
     );
 
+    interrupt_engine u_interrupt (
+        .clk                (clk),
+        .reset_n            (reset_n),
+        .svc_id             (ie_svc_id),
+        .svc_req            (ie_svc_req),
+        .svc_done           (ie_svc_done),
+        .svc_sr             (ie_svc_sr),
+        .vector_in          (t4_r),
+        .m_next_eip         (meta_next_eip),
+        .eflags_in          (eflags),
+        .esp_in             (esp),
+        .cs_in              (cs),
+        .mem_rd_req         (ie_mem_rd_req),
+        .mem_rd_addr        (ie_mem_rd_addr),
+        .mem_rd_data        (ie_mem_rd_data),
+        .mem_rd_ready       (ie_mem_rd_ready),
+        .pc_int_en          (pc_int_en),
+        .pc_int_eip         (pc_int_eip),
+        .pc_int_cs          (pc_int_cs),
+        .pc_int_eflags      (pc_int_eflags),
+        .pc_int_esp         (pc_int_esp),
+        .pc_int_frame_addr  (pc_int_frame_addr),
+        .pc_int_frame_bytes (pc_int_frame_bytes)
+    );
+
     // ------------------------------------------------------------
     // Commit / architectural visibility
     // ------------------------------------------------------------
@@ -551,9 +615,18 @@ module cpu_top (
         .pc_stack_adj_en            (pc_stack_adj_en),
         .pc_stack_adj_val           (pc_stack_adj_val),
 
+        .pc_int_en                  (pc_int_en),
+        .pc_int_eip                 (pc_int_eip),
+        .pc_int_cs                  (pc_int_cs),
+        .pc_int_eflags              (pc_int_eflags),
+        .pc_int_esp                 (pc_int_esp),
+        .pc_int_frame_addr          (pc_int_frame_addr),
+        .pc_int_frame_bytes         (pc_int_frame_bytes),
+
         .eip                        (eip),
         .esp                        (esp),
         .eflags                     (eflags),
+        .cs                         (cs),
         .mode_prot                  (mode_prot),
         .cs_d_bit                   (cs_d_bit),
 
@@ -563,6 +636,7 @@ module cpu_top (
         .stk_wr_en                  (commit_stk_wr_en),
         .stk_wr_addr                (commit_stk_wr_addr),
         .stk_wr_data                (commit_stk_wr_data),
+        .stk_wr_byteen              (commit_stk_wr_byteen),
         .stk_wr_done                (commit_stack_wr_pending && eu_done),
 
         .fault_pending              (fault_pending),

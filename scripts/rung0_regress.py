@@ -31,6 +31,7 @@ RTL_SOURCES = [
     "rtl/core/services/flow_control.sv",
     "rtl/core/services/operand_engine.sv",
     "rtl/core/services/stack_engine.sv",
+    "rtl/core/services/interrupt_engine.sv",
     "rtl/core/services/service_dispatch.sv",
     "rtl/core/cpu_top.sv",
     "sim/models/bootstrap_mem.sv",

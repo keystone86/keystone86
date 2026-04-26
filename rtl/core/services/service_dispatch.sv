@@ -33,13 +33,19 @@ module service_dispatch (
     output logic [7:0] se_svc_id,
     output logic       se_svc_req,
     input  logic       se_svc_done,
-    input  logic [1:0] se_svc_sr
+    input  logic [1:0] se_svc_sr,
+
+    output logic [7:0] ie_svc_id,
+    output logic       ie_svc_req,
+    input  logic       ie_svc_done,
+    input  logic [1:0] ie_svc_sr
 );
 
     logic use_fetch;
     logic use_flow;
     logic use_operand;
     logic use_stack;
+    logic use_interrupt;
 
     always_comb begin
         fe_svc_id  = svc_id;
@@ -50,11 +56,14 @@ module service_dispatch (
         op_svc_req = 1'b0;
         se_svc_id  = svc_id;
         se_svc_req = 1'b0;
+        ie_svc_id  = svc_id;
+        ie_svc_req = 1'b0;
 
         use_fetch  = 1'b0;
         use_flow   = 1'b0;
         use_operand= 1'b0;
         use_stack  = 1'b0;
+        use_interrupt = 1'b0;
 
         unique case (svc_id)
             FETCH_IMM8,
@@ -82,11 +91,16 @@ module service_dispatch (
                 use_stack = 1'b1;
             end
 
+            INT_ENTER: begin
+                use_interrupt = 1'b1;
+            end
+
             default: begin
-                use_fetch   = 1'b0;
-                use_flow    = 1'b0;
-                use_operand = 1'b0;
-                use_stack   = 1'b0;
+                use_fetch     = 1'b0;
+                use_flow      = 1'b0;
+                use_operand   = 1'b0;
+                use_stack     = 1'b0;
+                use_interrupt = 1'b0;
             end
         endcase
 
@@ -99,6 +113,8 @@ module service_dispatch (
                 op_svc_req = 1'b1;
             else if (use_stack)
                 se_svc_req = 1'b1;
+            else if (use_interrupt)
+                ie_svc_req = 1'b1;
         end
 
         if (use_fetch) begin
@@ -113,6 +129,9 @@ module service_dispatch (
         end else if (use_stack) begin
             svc_done = se_svc_done;
             svc_sr   = se_svc_sr;
+        end else if (use_interrupt) begin
+            svc_done = ie_svc_done;
+            svc_sr   = ie_svc_sr;
         end else begin
             svc_done = 1'b1;
             svc_sr   = SR_FAULT;
