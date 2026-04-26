@@ -16,6 +16,7 @@ HOST_GID := $(shell id -g)
         rung4-sim rung4-regress rung4-clean \
         rung5-pass2-sim rung5-pass2-clean \
         rung5-pass3-sim rung5-pass3-clean \
+        rung5-pass4-sim rung5-pass4-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -90,6 +91,8 @@ help:
 	@echo "  make rung5-pass2-clean     - remove Rung 5 Pass 2 simulation artifacts"
 	@echo "  make rung5-pass3-sim       - compile and run bounded Rung 5 Pass 3 IRET_FLOW simulation"
 	@echo "  make rung5-pass3-clean     - remove Rung 5 Pass 3 simulation artifacts"
+	@echo "  make rung5-pass4-sim       - compile and run bounded Rung 5 Pass 4 #UD delivery simulation"
+	@echo "  make rung5-pass4-clean     - remove Rung 5 Pass 4 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -461,6 +464,28 @@ rung5-pass3-sim: require-container ucode
 rung5-pass3-clean: require-container
 	@rm -rf build/sim/rung5_pass3
 	@echo "Rung 5 Pass 3 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 5 Pass 4 — bounded #UD delivery through SUB_FAULT_HANDLER
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG5_PASS4 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung5_ud_fault_delivery.sv
+
+rung5-pass4-sim: require-container ucode
+	@echo "--- Rung 5 Pass 4: compiling bounded #UD delivery RTL simulation ---"
+	@mkdir -p build/sim/rung5_pass4
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung5_pass4/tb_rung5_ud_fault_delivery.vvp \
+		$(IVERILOG_SOURCES_RUNG5_PASS4)
+	@echo "--- Rung 5 Pass 4: running bounded #UD delivery simulation ---"
+	vvp build/sim/rung5_pass4/tb_rung5_ud_fault_delivery.vvp
+
+rung5-pass4-clean: require-container
+	@rm -rf build/sim/rung5_pass4
+	@echo "Rung 5 Pass 4 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

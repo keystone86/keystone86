@@ -6,7 +6,8 @@
 //   - Deterministic byte at reset vector 0xFFFFFFF0
 //   - Byte at 0xFFFFFFF1 and beyond returns 0x00 (NOP-filler)
 //   - Configurable ready latency (default 1 cycle, parameterized)
-//   - NEVER produces unaligned accesses — byte-granular read only
+//   - Acknowledges writes so later bounded fault-delivery stack commits do not
+//     deadlock the Rung 0 bootstrap harness.
 //
 // This is a simulation-only model. It has no RTL synthesis target.
 // It is intentionally tiny and explicit.
@@ -20,6 +21,7 @@ module bootstrap_mem #(
     // Bus interface (matches bus_interface expectations)
     input  logic [31:0] addr,
     input  logic        rd,
+    input  logic        wr,
     output logic [31:0] dout,
     output logic        ready
 );
@@ -48,33 +50,37 @@ module bootstrap_mem #(
     int unsigned latency_cnt;
     logic [31:0] addr_latch;
     logic [7:0]  data_latch;
-    logic        rd_pending;
+    logic        req_pending;
+    logic        wr_pending;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             latency_cnt <= 0;
             addr_latch  <= 32'h0;
             data_latch  <= 8'h0;
-            rd_pending  <= 1'b0;
+            req_pending <= 1'b0;
+            wr_pending  <= 1'b0;
             ready       <= 1'b0;
             dout        <= 32'h0;
         end else begin
             ready <= 1'b0;
 
-            if (rd && !rd_pending) begin
+            if ((rd || wr) && !req_pending) begin
                 addr_latch   <= addr;
                 data_latch   <= mem_read(addr);
-                rd_pending   <= 1'b1;
+                req_pending  <= 1'b1;
+                wr_pending   <= wr;
                 latency_cnt  <= READY_LATENCY;
             end
 
-            if (rd_pending) begin
+            if (req_pending) begin
                 if (latency_cnt > 0) begin
                     latency_cnt <= latency_cnt - 1;
                 end else begin
-                    dout      <= {24'h0, data_latch};
-                    ready     <= 1'b1;
-                    rd_pending <= 1'b0;
+                    dout        <= wr_pending ? 32'h0 : {24'h0, data_latch};
+                    ready       <= 1'b1;
+                    req_pending <= 1'b0;
+                    wr_pending  <= 1'b0;
                 end
             end
         end

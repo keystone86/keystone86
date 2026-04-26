@@ -5,16 +5,12 @@
 ;
 ; Phase-1 bootstrap version: extracts fault vector from FC via FC_TO_VECTOR
 ; hardware mapping, then calls INT_ENTER to deliver via IVT.
-;
-; Note: in the bootstrap ROM this is a simplified stub.
-; The full phase-1 version requires INT_ENTER service to be implemented.
-; Until INT_ENTER is available (Rung 5), this stub halts cleanly.
 
 SUB_FAULT_HANDLER:
-    ; TODO(rung5): Replace with full delivery:
-    ;   EXTRACT T4, MF_FC_TO_VECTOR
-    ;   SVCW    INT_ENTER
-    ;   ENDI    CM_FAULT_END
-    ;
-    ; Bootstrap stub — safe no-op fault landing:
+    ; Rung 5 Pass 4 remains bounded to #UD delivery. FC_TO_VECTOR maps the
+    ; raised FC_UD to vector 0x06; INT_ENTER performs the real-mode IVT/frame
+    ; staging, and CM_FAULT_END preserves fault state until commit consumes the
+    ; staged interrupt record.
+    EXTRACT T4, MF_FC_TO_VECTOR
+    SVCW INT_ENTER
     ENDI CM_FAULT_END

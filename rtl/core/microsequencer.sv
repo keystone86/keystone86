@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/microsequencer.sv
 //
-// Rung 4 service-capable microsequencer.
+// Rung 5 service-capable microsequencer.
 //
 // Active intent:
 //   - Decoder hands off only decode-owned metadata.
@@ -55,6 +55,7 @@ module microsequencer (
     output logic [3:0]  raise_fc,
     output logic [31:0] raise_fe,
     input  logic        endi_done,
+    input  logic [3:0]  fault_class_in,
 
     // --- Commit staging ---
     output logic        pc_eip_en,
@@ -66,6 +67,8 @@ module microsequencer (
 
     // --- Service metadata inputs ---
     output logic [31:0] stack_push_data,
+    output logic        mseq_t4_wr_en,
+    output logic [31:0] mseq_t4_wr_data,
 
     // --- Service dispatch interface ---
     output logic [7:0]  svc_id_out,
@@ -90,6 +93,7 @@ module microsequencer (
 
     localparam logic [3:0] UOP_NOP   = 4'h0;
     localparam logic [3:0] UOP_BR    = 4'h4;
+    localparam logic [3:0] UOP_EXTRACT = 4'h7;
     localparam logic [3:0] UOP_SVCW  = 4'h9;
     localparam logic [3:0] UOP_STAGE = 4'hA;
     localparam logic [3:0] UOP_RAISE = 4'hC;
@@ -124,7 +128,12 @@ module microsequencer (
     assign dbg_state      = state;
     assign dbg_upc        = upc_r;
     assign dbg_entry_id   = entry_id_r;
-    assign meta_next_eip  = next_eip_r;
+    // Normal instructions use M_NEXT_EIP as their return/fall-through
+    // boundary. The bounded Pass 4 #UD path pushes the faulting opcode IP:
+    // ENTRY_NULL consumes exactly one unknown opcode byte, so that IP is
+    // M_NEXT_EIP-1 without adding a new broad metadata field.
+    assign meta_next_eip  = (entry_id_r == ENTRY_NULL) ? (next_eip_r - 32'd1)
+                                                       : next_eip_r;
     assign meta_cond_code = cond_code_r;
 
     logic [3:0] uop_class;
@@ -222,9 +231,11 @@ module microsequencer (
                         dispatch_pending      <= 1'b0;
                         execute_fetch_pending <= 1'b1;
 
-                        // Keep the queue alive through displacement fetches.
+                        // Keep the queue alive through displacement/immediate
+                        // fetches and through the bounded #UD delivery redirect.
                         if ((entry_id_r == ENTRY_JMP_NEAR) || (entry_id_r == ENTRY_JCC)
-                            || is_call_r || is_ret_r || is_int_r || is_iret_r)
+                            || is_call_r || is_ret_r || is_int_r || is_iret_r
+                            || (entry_id_r == ENTRY_NULL))
                             ctrl_transfer_pending <= 1'b1;
                     end
                 end
@@ -255,6 +266,10 @@ module microsequencer (
                             end
 
                             UOP_BR: begin
+                                execute_fetch_pending <= 1'b1;
+                            end
+
+                            UOP_EXTRACT: begin
                                 execute_fetch_pending <= 1'b1;
                             end
 
@@ -306,6 +321,8 @@ module microsequencer (
         pc_stack_adj_en = 1'b0;
         pc_stack_adj_val= 32'h0;
         stack_push_data = next_eip_r;
+        mseq_t4_wr_en   = 1'b0;
+        mseq_t4_wr_data = 32'h0;
 
         // Keep selected service visible while waiting.
         svc_id_out      = svc_id_r;
@@ -342,6 +359,18 @@ module microsequencer (
                         end
 
                         UOP_EXT: begin
+                            upc_next = upc_r + 12'h1;
+                        end
+
+                        UOP_EXTRACT: begin
+                            if ((uop_imm10 == 10'h013) && (uinst[17:14] == REG_T4)) begin
+                                // Appendix A defines FC_TO_VECTOR. Pass 4
+                                // intentionally implements only FC_UD -> #UD
+                                // vector 0x06, not a general exception mapper.
+                                mseq_t4_wr_en   = 1'b1;
+                                mseq_t4_wr_data = (fault_class_in == FC_UD) ?
+                                                  32'h00000006 : 32'h00000000;
+                            end
                             upc_next = upc_r + 12'h1;
                         end
 

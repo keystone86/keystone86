@@ -3,4 +3,4 @@
 ; Planned bootstrap ROM address: 0x010
 ENTRY_NULL:
     RAISE FC_UD
-    ENDI CM_FAULT_END
+    BR C_ALWAYS, SUB_FAULT_HANDLER

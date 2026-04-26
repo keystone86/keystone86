@@ -88,6 +88,7 @@ STAGE_STACK_ADJ        = 0x06
 REG_T4                 = 0x4
 REG_SPECIAL            = 0xF
 FC_INT                 = 0xA
+MF_FC_TO_VECTOR        = 0x13
 
 C_ALWAYS = 0x0
 C_OK     = 0x1
@@ -116,6 +117,9 @@ def br(cond: int, rel10: int) -> str:
 def stage(field: int, src: int, dst: int = REG_SPECIAL) -> str:
     return f"{0xA0000000 | ((dst & 0xF) << 14) | ((src & 0xF) << 10) | (field & 0x3FF):08X}"
 
+def extract(dst: int, field: int) -> str:
+    return f"{0x70000000 | ((dst & 0xF) << 14) | (field & 0x3FF):08X}"
+
 def rel10(from_addr: int, to_addr: int) -> int:
     delta = to_addr - (from_addr + 1)
     if delta < -512 or delta > 511:
@@ -127,9 +131,12 @@ rom = ["00000000"] * 4096
 # --------------------------------------------------------------------
 # Baseline entries
 # --------------------------------------------------------------------
-rom[0x000] = endi(CM_FAULT_END)  # SUB_FAULT_HANDLER
+rom[0x000] = extract(REG_T4, MF_FC_TO_VECTOR)  # SUB_FAULT_HANDLER
+rom[0x001] = ext_word()
+rom[0x002] = svcw_ext(INT_ENTER)
+rom[0x003] = endi(CM_FAULT_END)
 rom[0x010] = raise_fc(0x6)       # ENTRY_NULL
-rom[0x011] = endi(CM_FAULT_END)
+rom[0x011] = br(C_ALWAYS, rel10(0x011, 0x000))
 
 rom[0x020] = endi(CM_NOP_EIP)    # ENTRY_NOP_XCHG_AX
 rom[0x030] = endi(CM_NOP_EIP)    # ENTRY_PREFIX_ONLY
@@ -244,11 +251,15 @@ rom[0x0A3] = endi(CM_IRET)
 
 listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, Rung 4 Jcc,
-; and Rung 5 Pass 2 INT_ENTER path plus Pass 3 bounded IRET_FLOW path
+; Rung 5 Pass 2 INT_ENTER path, Pass 3 bounded IRET_FLOW path,
+; and Pass 4 bounded #UD fault delivery through SUB_FAULT_HANDLER
 address  encoding     source
-0x000    {endi(CM_FAULT_END)}   SUB_FAULT_HANDLER: ENDI CM_FAULT_END
+0x000    {extract(REG_T4, MF_FC_TO_VECTOR)}   SUB_FAULT_HANDLER: EXTRACT T4, MF_FC_TO_VECTOR
+0x001    {ext_word()}   EXT
+0x002    {svcw_ext(INT_ENTER)}   SVCW INT_ENTER
+0x003    {endi(CM_FAULT_END)}   ENDI CM_FAULT_END
 0x010    {raise_fc(0x6)}   ENTRY_NULL: RAISE FC_UD
-0x011    {endi(CM_FAULT_END)}   ENDI CM_FAULT_END
+0x011    {br(C_ALWAYS, rel10(0x011, 0x000))}   BR C_ALWAYS, SUB_FAULT_HANDLER
 0x020    {endi(CM_NOP_EIP)}   ENTRY_NOP_XCHG_AX: ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
 0x030    {endi(CM_NOP_EIP)}   ENTRY_PREFIX_ONLY: ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
 0x040    {endi(CM_NOP)}   ENTRY_RESET: ENDI CM_NOP

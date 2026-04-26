@@ -206,6 +206,8 @@ module cpu_top (
     logic [31:0] t2_r;
     logic [31:0] t3_r;
     logic [31:0] t4_r;
+    logic        mseq_t4_wr_en;
+    logic [31:0] mseq_t4_wr_data;
     logic [31:0] meta_next_eip;
     logic [3:0]  meta_cond_code;
     logic        meta_modrm_present_r;
@@ -295,6 +297,7 @@ module cpu_top (
                 meta_disp_value_r    <= dec_disp_value;
             end
             if (fe_t4_wr_en) t4_r <= fe_t4_wr_data;
+            if (mseq_t4_wr_en) t4_r <= mseq_t4_wr_data;
             if (dec_ack && dec_payload16_valid) begin
                 if (dec_payload16_signed)
                     t4_r <= {{16{dec_payload16[15]}}, dec_payload16};
@@ -413,6 +416,7 @@ module cpu_top (
         .raise_fc        (raise_fc),
         .raise_fe        (raise_fe),
         .endi_done       (endi_done),
+        .fault_class_in  (fault_class),
 
         .pc_eip_en       (pc_eip_en),
         .pc_eip_val      (pc_eip_val),
@@ -421,6 +425,8 @@ module cpu_top (
         .pc_stack_adj_en (pc_stack_adj_en),
         .pc_stack_adj_val(pc_stack_adj_val),
         .stack_push_data (stack_push_data),
+        .mseq_t4_wr_en   (mseq_t4_wr_en),
+        .mseq_t4_wr_data (mseq_t4_wr_data),
 
         .svc_id_out      (svc_id_out),
         .svc_req_out     (svc_req_out),

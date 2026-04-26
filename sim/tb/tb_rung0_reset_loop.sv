@@ -89,6 +89,7 @@ module tb_rung0_reset_loop;
         .reset_n  (reset_n),
         .addr     (bus_addr),
         .rd       (bus_rd),
+        .wr       (bus_wr),
         .dout     (bus_din),
         .ready    (bus_ready)
     );

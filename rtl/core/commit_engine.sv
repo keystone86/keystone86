@@ -338,11 +338,70 @@ module commit_engine (
             end
             // ENDI launch edge only
             else if (endi_req && !endi_req_d) begin
+                // Bounded Rung 5 #UD delivery commit. SUB_FAULT_HANDLER uses
+                // CM_FAULT_END so fault state remains available while
+                // INT_ENTER stages the vector-derived handler record. Commit
+                // does not choose the vector or classify the fault; it only
+                // publishes the already staged interrupt record at ENDI.
+                if ((endi_mask == CM_FAULT_END) && eff_pc_int_en &&
+                    fault_pending_r) begin
+                    eip_r        <= eff_pc_int_eip;
+                    cs_r         <= eff_pc_int_cs;
+                    eflags_r     <= eff_pc_int_eflags;
+                    esp_r        <= eff_pc_int_esp;
+                    flush_req    <= 1'b1;
+                    flush_addr   <= eff_pc_int_eip;
+
+                    pc_int_en_r          <= 1'b1;
+                    pc_int_eip_r         <= eff_pc_int_eip;
+                    pc_int_cs_r          <= eff_pc_int_cs;
+                    pc_int_eflags_r      <= eff_pc_int_eflags;
+                    pc_int_esp_r         <= eff_pc_int_esp;
+                    pc_int_frame_write_en_r <= eff_pc_int_frame_write_en;
+                    pc_int_frame_addr_r  <= eff_pc_int_frame_addr;
+                    pc_int_frame_bytes_r <= eff_pc_int_frame_bytes;
+
+                    if (eff_pc_int_frame_write_en) begin
+                        stk_wr_en       <= 1'b1;
+                        stk_wr_addr     <= eff_pc_int_frame_addr;
+                        stk_wr_data     <= {24'h0, frame_byte(eff_pc_int_frame_bytes, 3'd0)};
+                        stk_wr_byteen   <= 4'b0001;
+                        stk_wr_wait_r   <= 1'b1;
+                        int_frame_write_r <= 1'b1;
+                        int_frame_idx_r <= 3'd0;
+                    end else begin
+                        pc_int_en_r       <= 1'b0;
+                        pc_int_eip_r      <= 32'h0;
+                        pc_int_cs_r       <= 16'h0;
+                        pc_int_eflags_r   <= 32'h0;
+                        pc_int_esp_r      <= 32'h0;
+                        pc_int_frame_write_en_r <= 1'b0;
+                        pc_int_frame_addr_r  <= 32'h0;
+                        pc_int_frame_bytes_r <= 48'h0;
+                        endi_done         <= 1'b1;
+                    end
+
+                    pc_eip_en_r       <= 1'b0;
+                    pc_eip_val_r      <= 32'h0;
+                    pc_target_en_r    <= 1'b0;
+                    pc_target_val_r   <= 32'h0;
+                    pc_stack_en_r       <= 1'b0;
+                    pc_stack_write_en_r <= 1'b0;
+                    pc_stack_addr_r     <= 32'h0;
+                    pc_stack_data_r     <= 32'h0;
+                    pc_stack_esp_val_r  <= 32'h0;
+                    pc_stack_adj_en_r   <= 1'b0;
+                    pc_stack_adj_val_r  <= 32'h0;
+
+                    fault_pending_r <= 1'b0;
+                    fault_class_r   <= 4'h0;
+                    fault_error_r   <= 32'h0;
+                end
                 // Bounded Rung 5 interrupt-control commit. The service stages
                 // a generic record; this block only applies fields selected by
                 // CM_INT/CM_IRET. INT_ENTER also requests six frame-byte writes,
                 // while IRET_FLOW commits only the popped state.
-                if (endi_mask[4] && endi_mask[3] && endi_mask[2] &&
+                else if (endi_mask[4] && endi_mask[3] && endi_mask[2] &&
                     endi_mask[1] && eff_pc_int_en && !fault_pending_r) begin
                     eip_r        <= eff_pc_int_eip;
                     cs_r         <= eff_pc_int_cs;
