@@ -1,5 +1,26 @@
 # Keystone86 / Aegis — Claude Code Session Contract
 
+Historical/staleness notice:
+
+This file predates the current Rung 5 verification closeout and may still
+contain older Rung 2/Rung 3 recovery details. Before using any guidance here,
+read `AGENTS.md` first and treat repository authority files and Git history as
+the source of truth.
+
+Current status:
+- Rung 5 is verified/documented.
+- Latest verification record: `docs/implementation/rung5_verification.md`.
+- Implementation verification commit: `b8e75f9 rung5: add bounded pass5 int iret roundtrip proof`.
+- Documentation closeout commit: `79cef97 docs: record committed rung5 verification`.
+- Current regression entry point: `make rung5-regress`.
+- Rung 5 is not claimed human-accepted by this file.
+- Rung 6 remains blocked until Rung 5 is explicitly accepted and Rung 6 is
+  started under the proven workflow.
+
+For bounded Codex-style rung workflow, use `docs/process/codex_workflow.md`
+where applicable. Do not use old Rung 2/Rung 3 recovery notes in this file as
+current rung status.
+
 ## READ THIS BEFORE TOUCHING ANYTHING
 
 This file is loaded at the start of every Claude Code session.
@@ -15,8 +36,10 @@ microcode-driven machine where instruction meaning lives in microcode
 routines, not in distributed RTL logic.
 
 Current generation: **Aegis**
-Current status: **Rung 3 passing** — near CALL/RET service path proven.
-Next milestone: Rung 4 (Jcc).
+Current status: **Rung 5 verified/documented** — bounded real-mode INT / IRET /
+#UD delivery path proven by the Rung 5 verification record.
+Next milestone: Rung 6 remains blocked until Rung 5 is explicitly accepted and
+Rung 6 is started under the proven workflow.
 
 This is an active implementation project with strict architectural
 guardrails. Drift from those guardrails is the primary failure mode.
@@ -79,6 +102,9 @@ rtl/core/commit_engine.sv
 rtl/core/bus_interface.sv
 rtl/core/services/fetch_engine.sv
 rtl/core/services/flow_control.sv
+rtl/core/services/operand_engine.sv
+rtl/core/services/stack_engine.sv
+rtl/core/services/interrupt_engine.sv
 rtl/core/services/service_dispatch.sv
 ```
 
@@ -87,7 +113,7 @@ rtl/core/services/service_dispatch.sv
 ```
 rtl/core/frontend/         ← future front-end refactor
 rtl/core/microcode/        ← future microcode refactor
-rtl/core/services/         ← except fetch_engine, flow_control, service_dispatch
+rtl/core/services/         ← except currently live bounded service files listed above
 rtl/core/bus/              ← future bus refactor
 sim/tb/integration/        ← future integration tests
 sim/tb/unit/               ← future unit tests
@@ -151,6 +177,8 @@ build/sim/rung0/     ← rung 0 .vvp and intermediates
 build/sim/rung1/     ← rung 1 .vvp and intermediates
 build/sim/rung2/     ← rung 2 .vvp and intermediates
 build/sim/rung3/     ← rung 3 .vvp and intermediates
+build/sim/rung4/     ← rung 4 .vvp and intermediates
+build/sim/rung5*/    ← rung 5 .vvp and intermediates
 build/synth/         ← ECP5 synthesis outputs
 build/formal/        ← SymbiYosys outputs
 ```
@@ -178,15 +206,22 @@ make rung0-sim
 make rung1-sim
 make rung2-sim
 make rung3-sim
+make rung4-sim
+make rung5-pass2-sim
+make rung5-pass3-sim
+make rung5-pass4-sim
+make rung5-pass5-sim
 
 # Regression (each includes all prior rungs)
 make rung0-regress
 make rung1-regress
 make rung2-regress
 make rung3-regress
+make rung4-regress
+make rung5-regress
 
 # Full current baseline
-make codegen && make ucode && make rung3-regress
+make codegen && make ucode && make rung5-regress
 ```
 
 iverilog flags: `-g2012 -Wall`
@@ -308,12 +343,10 @@ drift. Watch for them in every session:
    `sim/tb/integration/`, `sim/tb/unit/` are placeholders. Do not
    treat them as authoritative or modify them for current rung work.
 
-8. **Treating existing Rung 3/4 artifacts as authoritative** — the
-   repo contains Rung 3 and Rung 4 artifacts from before a drift
-   reset. These are NOT the current implementation target. Rung 3
-   must be re-proven clean from the Rung 2 baseline. Do not build
-   on top of existing Rung 3 RTL without first verifying it passes
-   `make rung3-regress` cleanly from the Rung 2 baseline.
+8. **Treating historical recovery notes as current authority** — old Rung 2/Rung 3
+   recovery text is historical. Current status comes from
+   `docs/implementation/rung5_verification.md` plus the authority chain in
+   `AGENTS.md`. Do not start Rung 6 from this file.
 
 ---
 
@@ -327,7 +360,7 @@ and git identity are mounted from the host — do not modify `.ssh/` or
 
 Always run the authoritative baseline first:
 ```bash
-make codegen && make ucode && make rung2-regress
+make codegen && make ucode && make rung5-regress
 ```
 
 Do not commit if the baseline is not passing. Do not commit if verification
@@ -364,8 +397,8 @@ Add Docker dev environment and build path consolidation
 - README.md: Docker setup section, accurate rung status
 
 Verification:
-- make codegen && make ucode && make rung2-regress
-- RESULT: ALL RUNG 2 TESTS PASSED
+- make codegen && make ucode && make rung5-regress
+- RESULT: see docs/implementation/rung5_verification.md for the committed Rung 5 record
 ```
 
 ### What not to do
@@ -468,27 +501,20 @@ Report only what actually ran against the actual delivered state.
 | 0 | Reset/fetch/decode/dispatch loop | **Passing** | `sim/tb/tb_rung0_reset_loop.sv` |
 | 1 | NOP classification, EIP advance | **Passing** | `sim/tb/tb_rung1_nop_loop.sv` |
 | 2 | JMP SHORT control transfer | **Passing** | `sim/tb/tb_rung2_jmp.sv` |
-| 3 | Near CALL/RET service path | **Needs re-proof from Rung 2 baseline** | `sim/tb/tb_rung3_call_ret.sv` |
-| 4+ | Jcc and beyond | Superseded — do not use | — |
+| 3 | Near CALL/RET service path | **Verified/documented** | `sim/tb/tb_rung3_call_ret.sv` |
+| 4 | Short Jcc path | **Verified/documented** | `sim/tb/tb_rung4_jcc.sv` |
+| 5 | Bounded INT/IRET/#UD delivery | **Verified/documented** | `sim/tb/tb_rung5_int_iret_roundtrip.sv` |
+| 6+ | Later rungs | Blocked until Rung 5 acceptance/start workflow | — |
 
-**Authoritative passing baseline:**
+**Current regression entry point:**
 ```bash
-make codegen && make ucode && make rung2-regress
+make rung5-regress
 ```
 
-**Context:** Rung 3 previously passed but drift was discovered during Rung 4
-work. The project was reset to the clean Rung 2 baseline. Rung 3 and Rung 4
-artifacts remain in the repo but are not authoritative. Rung 3 must be
-re-proven from the Rung 2 baseline before it can be claimed as passing again.
-Rung 4 artifacts will be superseded once Rung 3 is re-proven.
-
-**Rung 3 scope and implementation intent:**
-```
-docs/implementation/bringup/rung3.md
-```
-This is the sanitized template for Rung 3 work going forward. Use it as the
-bounded scope document. Do not treat existing Rung 3 RTL artifacts as
-authoritative — they may contain the drift that caused the reset.
+**Current context:** Rung 5 verification is recorded in
+`docs/implementation/rung5_verification.md`. The record documents committed
+implementation verification at `b8e75f9` and documentation closeout at
+`79cef97`. It does not by itself claim human acceptance.
 
 ---
 

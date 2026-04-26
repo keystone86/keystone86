@@ -1,5 +1,11 @@
 # Rung 3 Resume Context
 
+Historical notice: this file is stale Rung 3 recovery context. It is not current
+project guidance and must not be used to start new rung work. Current Rung 5
+verification status is recorded in `docs/implementation/rung5_verification.md`;
+Rung 6 remains blocked until Rung 5 is explicitly accepted and Rung 6 is started
+under the proven workflow.
+
 Branch: `rung3-codex`
 
 Base commit: `e56b099 Harden dev container agent workflow`

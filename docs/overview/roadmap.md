@@ -22,14 +22,20 @@
 - ENTRY_JCC
 
 ### Milestone A3
-- INT/IRET proof set complete
+- bounded real-mode INT/IRET/#UD proof verified/documented as Rung 5
+- latest record: `docs/implementation/rung5_verification.md`
+- documentation closeout: `79cef97 docs: record committed rung5 verification`
+
+Rung 5 does not claim protected-mode interrupt behavior. Rung 6 remains blocked
+until Rung 5 is explicitly accepted and Rung 6 is started under the proven
+workflow.
 
 ### Milestone A4
-- MOV family complete
+- MOV family
 
 ### Milestone A5
-- ALU family complete
+- ALU family
 
 ### Milestone A6
-- remaining phase-1 instructions complete
+- remaining phase-1 instructions
 - compliance and system milestones

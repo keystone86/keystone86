@@ -4,6 +4,28 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Rung 5 verification closeout
+
+- Rung 5 bounded real-mode INT / IRET / #UD delivery slice verified/documented.
+- Latest verification record: `docs/implementation/rung5_verification.md`.
+- Implementation verification commit: `b8e75f9 rung5: add bounded pass5 int iret roundtrip proof`.
+- Documentation closeout commit: `79cef97 docs: record committed rung5 verification`.
+- Current regression entry point recorded as `make rung5-regress`.
+- This changelog entry does not claim human acceptance; Rung 6 remains blocked
+  until Rung 5 is explicitly accepted and Rung 6 is started under the proven
+  workflow.
+
+### Rung 4 verification milestone
+
+- Rung 4 short-Jcc path verified/documented in `docs/implementation/rung4_verification.md`.
+- Rung 4 preserved prior Rung 0 through Rung 3 baseline behavior during its
+  committed-state verification run.
+
+### Rung 3 verification milestone
+
+- Rung 3 near CALL/RET path verified/documented in `docs/implementation/rung3_verification.md`.
+- Older Rung 3 recovery notes remain historical and are not current guidance.
+
 ### Post-Rung-2 cleanup — Pass 1–4
 
 Pass 1 — documentation/clarity:

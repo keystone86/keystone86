@@ -1,9 +1,26 @@
-cat > README.md <<'EOF'
 # Keystone86
 
 Keystone86 is an in-progress clean-room x86 RTL core project focused on building a structured, understandable, and maintainable 80486-class-compatible design path.
 
-The project is organized around **spec-first development**, explicit ownership boundaries between blocks, generated/shared definitions, and staged bring-up through simulation "rungs." The authoritative passing baseline is **Rung 2**. Rung 3 is being re-proven from the clean Rung 2 baseline after drift was discovered during Rung 4 work.
+The project is organized around **spec-first development**, explicit ownership boundaries between blocks, generated/shared definitions, and staged bring-up through simulation "rungs." The current verified/documented baseline is **Rung 5**.
+
+Latest verification record:
+- `docs/implementation/rung5_verification.md`
+
+Recorded Rung 5 implementation verification commit:
+- `b8e75f9 rung5: add bounded pass5 int iret roundtrip proof`
+
+Documentation closeout commit:
+- `79cef97 docs: record committed rung5 verification`
+
+Current regression entry point:
+```bash
+make rung5-regress
+```
+
+Rung 5 is verified/documented. This README does not claim human acceptance.
+Rung 6 remains blocked until Rung 5 is explicitly accepted and Rung 6 is started
+under the proven workflow.
 
 ## Current status
 
@@ -22,7 +39,9 @@ What is present now:
 - Rung 0 simulation target — **passing**
 - Rung 1 simulation target — **passing**
 - Rung 2 simulation target — **passing**
-- Rung 3 — **needs re-proof** (drift discovered during Rung 4, reset to Rung 2 baseline)
+- Rung 3 simulation target — **verified/documented**
+- Rung 4 simulation target — **verified/documented**
+- Rung 5 INT / IRET / #UD slice — **verified/documented**
 - self-checking simulation testbenches for early bring-up
 
 What is **not** present yet:
@@ -37,7 +56,7 @@ What is **not** present yet:
 
 So the correct way to describe the project today is:
 
-> **A real RTL bring-up project with working early-stage front-end/control-path simulation through Rung 2, not yet a complete 80486 core.**
+> **A real RTL bring-up project with simulation-proven behavior through the bounded Rung 5 INT / IRET / #UD slice, not yet a complete 80486 core.**
 
 ## Bring-up ladder
 
@@ -100,6 +119,48 @@ Goal:
 Run:
 ```bash
 make rung3-sim
+```
+
+### Rung 4
+
+Bounded short Jcc path.
+
+Goal:
+- 16 short Jcc conditions evaluated through the bounded condition service
+- taken and not-taken paths prove correct EIP behavior
+- control-transfer commit and prefetch flush remain commit-owned
+
+Run:
+```bash
+make rung4-sim
+```
+
+### Rung 5
+
+Bounded real-mode INT / IRET / fault-delivery slice.
+
+Verified scope:
+- `CD imm8` as bounded real-mode `INT imm8`
+- `CF` as bounded real-mode `IRET`
+- bounded `#UD` delivery through `SUB_FAULT_HANDLER -> INT_ENTER`
+- integrated `INT 21h ->` flat handler `IRET ->` restored continuation
+
+Non-scope:
+- protected-mode INT/IRET
+- descriptor validation
+- privilege checks
+- task gates
+- PIC/APIC
+- `INT3`
+- `INTO`
+- full real-mode `CS << 4 + IP` physical fetch
+- MOV
+- ALU
+- Rung 6+ behavior
+
+Run:
+```bash
+make rung5-regress
 ```
 
 ## Development environment
@@ -180,6 +241,10 @@ Use only one coding agent at a time. A safe workflow is:
 5. run the rung/regression checks
 6. commit only after the result is understood
 
+For Codex rung work, use the proven bounded workflow in:
+
+- `docs/process/codex_workflow.md`
+
 ### Codespaces
 
 The repo includes `.devcontainer/devcontainer.json` for GitHub Codespaces
@@ -248,24 +313,25 @@ Instruction-byte buffering and fetch-side queue management.
 Early instruction decode. Current bring-up includes:
 - opcode classification
 - multi-byte handling for early jump bring-up
-- position-proven byte capture (Rung 2)
-- instruction-local target EIP formation for current Rung 2 scope
+- position-proven byte capture for early control-flow rungs
+- bounded Rung 5 `INT imm8` and `IRET` classification
 
 ### `rtl/core/microsequencer.sv`
 
 Microcode dispatch and execution control. Current bring-up includes:
 - decode acceptance handshake
 - dispatch timing management
-- control-transfer serialization (Rung 2)
-- JMP target staging for commit (Rung 2)
+- control-transfer serialization for early branch/stack/control-flow rungs
+- bounded service sequencing through Rung 5
 
 ### `rtl/core/commit_engine.sv`
 
 Architectural commit boundary. Current bring-up includes:
 - reset-visible state ownership
 - staged EIP/target-EIP commit
-- authoritative queue flush / redirect visibility (Rung 2)
+- authoritative queue flush / redirect visibility
 - commit-owned redirect: redirect becomes architecturally real only here
+- bounded Rung 5 commit-visible CS, FLAGS, ESP, stack-frame, and redirect results
 
 ### `rtl/core/cpu_top.sv`
 
@@ -293,7 +359,7 @@ make ucode     # generates build/microcode/*.hex and *.lst
 ```bash
 make namespace-check       # confirms namespace export files are present
 make ucode-bootstrap-check # confirms microcode ROM seed is consistent
-make rung2-regress         # runs Rung 0 + Rung 1 + Rung 2 full baseline (authoritative passing baseline)
+make rung5-regress         # current regression entry point
 ```
 
 ### Run the early bring-up simulations
@@ -303,6 +369,7 @@ make rung0-sim
 make rung1-sim
 make rung2-sim
 make rung3-sim
+make rung4-sim
 ```
 
 ### Run regression (each rung includes all prior rungs)
@@ -312,6 +379,8 @@ make rung0-regress
 make rung1-regress
 make rung2-regress
 make rung3-regress
+make rung4-regress
+make rung5-regress
 ```
 
 ### Run all bootstrap smoke checks
@@ -349,9 +418,9 @@ When using an AI coding agent, keep the same discipline:
 5. run the appropriate rung/regression target
 6. commit only after the change is understood
 
-## What "Rung 2 complete" means here
+## Historical note: what "Rung 2 complete" means here
 
-Rung 2 should be understood narrowly.
+Rung 2 remains useful historical context and should be understood narrowly.
 
 It means the repo has an implemented and testable early control-transfer path for jump bring-up, including:
 - correct multi-byte decode for the covered cases
@@ -367,7 +436,8 @@ It does **not** mean the project has finished the general front end, full x86 de
 
 Likely next steps after the current state are:
 
-- broaden decode coverage beyond the current bring-up subset
+- accept the Rung 5 verification/documentation state before starting Rung 6
+- start Rung 6 only under the proven bounded workflow
 - extend microcode/service-path execution coverage
 - strengthen regression depth
 - continue rung-based bring-up for additional instruction classes
@@ -384,7 +454,7 @@ Keystone86 is best viewed as:
 It **is**:
 - a serious structured RTL build-out
 - a spec-driven CPU core project
-- a project with real early simulation bring-up through Rung 2 already landed
+- a project with real simulation bring-up through Rung 5 verified/documented
 - a foundation that is now beyond "empty bootstrap" with working control-transfer simulation, but still well before completion
 
 ## License
@@ -394,4 +464,3 @@ Add the intended license here if and when you decide it.
 ## Notes
 
 This repository may evolve quickly while the architecture, interfaces, and bring-up ladder are still being refined. Expect early-stage iteration, especially in front-end/control-path RTL and the simulation harnesses that prove each rung.
-EOF
