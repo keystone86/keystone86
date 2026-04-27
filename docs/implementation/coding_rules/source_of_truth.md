@@ -7,6 +7,15 @@ can orient quickly without reading every file.
 
 ---
 
+## Current Bring-Up Status
+
+The repository is verified/documented through Rung 5, as recorded in
+`docs/implementation/rung5_verification.md`. This source map does not claim
+human acceptance; Rung 6 remains blocked until Rung 5 is explicitly accepted
+and Rung 6 is started under the proven workflow.
+
+---
+
 ## Architecture
 
 **Authoritative source:** `docs/spec/frozen/` — the frozen constitutional spec set.
@@ -63,6 +72,11 @@ build/sim/rung0/     ← rung 0 .vvp and intermediates
 build/sim/rung1/     ← rung 1 .vvp and intermediates
 build/sim/rung2/     ← rung 2 .vvp and intermediates
 build/sim/rung3/     ← rung 3 .vvp and intermediates
+build/sim/rung4/     ← rung 4 .vvp and intermediates
+build/sim/rung5_pass2/ ← Rung 5 Pass 2 .vvp and intermediates
+build/sim/rung5_pass3/ ← Rung 5 Pass 3 .vvp and intermediates
+build/sim/rung5_pass4/ ← Rung 5 Pass 4 .vvp and intermediates
+build/sim/rung5_pass5/ ← Rung 5 Pass 5 .vvp and intermediates
 build/synth/         ← ECP5 synthesis outputs (future)
 build/formal/        ← SymbiYosys outputs (future)
 ```
@@ -78,14 +92,17 @@ intentionally — the Python layer has no import mechanism to pull from
 
 ## Microcode Source
 
-**Authoritative source:** `microcode/src/` (`.uasm` files)
+**Authoritative source for microcode organization and review:** `microcode/src/` (`.uasm` files)
 
 Bootstrap entries are in `microcode/src/entries/`.
 The shared fault handler is in `microcode/src/shared/`.
 
-These feed `ucode_build.py` indirectly — the current build script embeds
-the bootstrap ROM content directly rather than parsing `.uasm` files.
-The `.uasm` files are the intended future canonical source for microcode content.
+The current effective bootstrap ROM generator remains `scripts/ucode_build.py`;
+the build script embeds the bootstrap ROM content directly rather than parsing
+`.uasm` files. The `.uasm` files remain useful for source organization and
+review, and they are the intended future canonical source for microcode content.
+No microcode-generation refactor is part of the current Rung 5 documentation
+catch-up.
 
 ---
 
@@ -94,23 +111,26 @@ The `.uasm` files are the intended future canonical source for microcode content
 **Authoritative source:** `rtl/core/` — the live implementation files.
 
 The files in `rtl/core/frontend/`, `rtl/core/microcode/`, and `rtl/core/bus/`
-are structural scaffold placeholders for future phases. Some bounded
-`rtl/core/services/` modules are live for the active Rung 3 service path.
+are structural scaffold placeholders for future phases. The active Makefile
+common RTL source list is live for the verified/documented Rung 0 through Rung 5
+simulation paths.
 The live files currently used in simulation are:
 
 | File | Status |
 |---|---|
-| `rtl/core/cpu_top.sv` | Live — top-level integration |
-| `rtl/core/prefetch_queue.sv` | Live — Rung 0/1/2/3 |
-| `rtl/core/decoder.sv` | Live — Rung 0/1/2/3 |
-| `rtl/core/microsequencer.sv` | Live — Rung 0/1/2/3 |
-| `rtl/core/microcode_rom.sv` | Live — Rung 0/1/2/3 |
-| `rtl/core/commit_engine.sv` | Live — Rung 0/1/2/3 |
-| `rtl/core/bus_interface.sv` | Live — Rung 0/1/2/3 |
-| `rtl/core/services/service_dispatch.sv` | Live — bounded Rung 3 service routing |
-| `rtl/core/services/flow_control.sv` | Live — bounded Rung 2/3 control validation |
-| `rtl/core/services/operand_engine.sv` | Live — bounded Rung 3 operand service |
-| `rtl/core/services/stack_engine.sv` | Live — bounded Rung 3 stack service |
+| `rtl/core/cpu_top.sv` | Live — top-level integration through Rung 5 |
+| `rtl/core/prefetch_queue.sv` | Live — Rung 0 through Rung 5 |
+| `rtl/core/decoder.sv` | Live — Rung 0 through Rung 5 |
+| `rtl/core/microsequencer.sv` | Live — Rung 0 through Rung 5 |
+| `rtl/core/microcode_rom.sv` | Live — Rung 0 through Rung 5 |
+| `rtl/core/commit_engine.sv` | Live — Rung 0 through Rung 5 |
+| `rtl/core/bus_interface.sv` | Live — Rung 0 through Rung 5 |
+| `rtl/core/services/fetch_engine.sv` | Live — bounded fetch/immediate/displacement services through Rung 5 |
+| `rtl/core/services/service_dispatch.sv` | Live — bounded service routing through Rung 5 |
+| `rtl/core/services/flow_control.sv` | Live — bounded control validation and condition evaluation through Rung 5 |
+| `rtl/core/services/operand_engine.sv` | Live — bounded Rung 3 operand service, still compiled in common Rung 5 source list |
+| `rtl/core/services/stack_engine.sv` | Live — bounded stack service through Rung 5 |
+| `rtl/core/services/interrupt_engine.sv` | Live — bounded Rung 5 INT_ENTER and IRET_FLOW service |
 | `rtl/core/frontend/*.sv` | Scaffold — future front-end refactor |
 | `rtl/core/microcode/*.sv` | Scaffold — future microcode refactor |
 | other `rtl/core/services/*.sv` | Scaffold — future service implementation |
@@ -120,10 +140,22 @@ The live files currently used in simulation are:
 
 ## Testbenches and Simulation
 
-**Authoritative:** `sim/tb/tb_rung0_reset_loop.sv`, `tb_rung1_nop_loop.sv`, `tb_rung2_jmp.sv`, `tb_rung3_call_ret.sv`
+**Authoritative current rung proofs:**
 
-These are the accepted rung acceptance proofs through Rung 3. They are the gate
-criteria for each accepted rung.
+- `sim/tb/tb_rung0_reset_loop.sv`
+- `sim/tb/tb_rung1_nop_loop.sv`
+- `sim/tb/tb_rung2_jmp.sv`
+- `sim/tb/tb_rung3_call_ret.sv`
+- `sim/tb/tb_rung4_jcc.sv`
+- `sim/tb/tb_rung5_int_enter.sv`
+- `sim/tb/tb_rung5_iret_flow.sv`
+- `sim/tb/tb_rung5_ud_fault_delivery.sv`
+- `sim/tb/tb_rung5_int_iret_roundtrip.sv`
+
+These are the rung proof testbenches through the verified/documented Rung 5
+baseline. Rung 5 verification status is recorded in
+`docs/implementation/rung5_verification.md`; this source map does not claim
+human acceptance.
 
 Files under `sim/tb/integration/` and `sim/tb/unit/` are scaffold placeholders
 for future deeper regression infrastructure.

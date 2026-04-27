@@ -83,7 +83,7 @@ make rung5-regress
 ```
 
 `rung5-regress` is the comprehensive current verified/documented gate. It invokes
-the accepted Rung 4 regression path before the Rung 5 Pass 2/3/4/5 simulations.
+the verified/documented Rung 4 regression path before the Rung 5 Pass 2/3/4/5 simulations.
 Rung 5 verification is recorded in `docs/implementation/rung5_verification.md`;
 that record does not by itself record human acceptance.
 

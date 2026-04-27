@@ -17,7 +17,7 @@ under the proven workflow.
 make rung5-regress
 ```
 
-`make rung5-regress` invokes the accepted Rung 4 regression path and the Rung 5
+`make rung5-regress` invokes the verified/documented Rung 4 regression path and the Rung 5
 Pass 2, Pass 3, Pass 4, and Pass 5 simulations.
 
 ## Rung 5 Proof References

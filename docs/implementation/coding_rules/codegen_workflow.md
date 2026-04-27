@@ -17,6 +17,7 @@
 ## Required discipline
 
 When Appendix A changes:
+Appendix A is frozen/protected; editing it requires explicit protected-file authorization/proposal before this workflow proceeds.
 1. Update the frozen markdown file.
 2. Update `appendix_a_codegen.json` to match.
 3. Run:
