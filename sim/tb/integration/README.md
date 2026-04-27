@@ -5,5 +5,5 @@ Current status:
 - RTL-connected integration testbenches are still placeholders
 
 See:
-- `docs/implementation/bringup/STATUS_DASHBOARD.md`
+- `docs/implementation/rung5_verification.md`
 - `make bootstrap-report`

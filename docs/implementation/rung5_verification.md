@@ -47,7 +47,7 @@ make rung5-pass5-sim
 make rung5-regress
 ```
 
-`rung5-regress` invokes the accepted Rung 4 regression path and the Rung 5
+`rung5-regress` invokes the verified/documented Rung 4 regression path and the Rung 5
 Pass 2, Pass 3, Pass 4, and Pass 5 simulations.
 
 ## Proof Summary

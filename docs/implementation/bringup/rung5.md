@@ -654,7 +654,7 @@ Typical prerequisite steps may include:
 - `make codegen`
 - `make ucode`
 
-The Rung 5 regression target should include or invoke the accepted Rung 4 regression path so that the full Rung 0 through Rung 4 baseline chain remains proven while Rung 5 is added.
+The Rung 5 regression target should include or invoke the verified/documented Rung 4 regression path so that the full Rung 0 through Rung 4 baseline chain remains proven while Rung 5 is added.
 
 Typical proof should include:
 
