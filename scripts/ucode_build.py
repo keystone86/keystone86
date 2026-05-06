@@ -105,6 +105,7 @@ C_ALWAYS = 0x0
 C_OK     = 0x1
 C_WAIT   = 0x2
 C_FAULT  = 0x3
+C_W8     = 0xB
 C_T3Z    = 0xC
 
 def endi(mask: int) -> str:
@@ -259,19 +260,24 @@ rom[0x0A2] = br(C_FAULT, rel10(0x0A2, 0x000))
 rom[0x0A3] = endi(CM_IRET)
 
 # --------------------------------------------------------------------
-# Rung 6 Pass 2: ENTRY_MOV first slice at 0x0B0
+# Rung 6 Pass 4A: ENTRY_MOV immediate-to-register slice at 0x0B0
 #
-# B8+rd id only. Decoder supplies OC_MOV_R_IMM and M_REG_DST; FETCH_IMM32
-# consumes the four immediate bytes into T4; STAGE_GPR stages T4 for the
-# destination register selected by decode metadata. ENDI CM_MOV_REG is the
-# only GPR visibility point and leaves EFLAGS unchanged.
+# B0-B7 and B8-BF only. Decoder supplies OC_MOV_R_IMM, M_OPSZ, and M_REG_DST.
+# BR C_W8 selects FETCH_IMM8 for byte registers; the default path preserves
+# the proven FETCH_IMM32 dword behavior. ENDI CM_MOV_REG remains the only GPR
+# visibility point and leaves EFLAGS unchanged.
 # --------------------------------------------------------------------
 rom[0x0B0] = extract(REG_T3, MF_OPCODE_CLASS)
 rom[0x0B1] = extract(REG_T2, MF_REG_DST)
-rom[0x0B2] = svcw_small(FETCH_IMM32)
-rom[0x0B3] = br(C_FAULT, rel10(0x0B3, 0x000))
-rom[0x0B4] = stage(STAGE_GPR, REG_T4)
-rom[0x0B5] = endi(CM_MOV_REG)
+rom[0x0B2] = br(C_W8, rel10(0x0B2, 0x0B7))
+rom[0x0B3] = svcw_small(FETCH_IMM32)
+rom[0x0B4] = br(C_FAULT, rel10(0x0B4, 0x000))
+rom[0x0B5] = stage(STAGE_GPR, REG_T4)
+rom[0x0B6] = endi(CM_MOV_REG)
+rom[0x0B7] = svcw_small(FETCH_IMM8)
+rom[0x0B8] = br(C_FAULT, rel10(0x0B8, 0x000))
+rom[0x0B9] = stage(STAGE_GPR, REG_T4)
+rom[0x0BA] = endi(CM_MOV_REG)
 
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
@@ -345,10 +351,15 @@ address  encoding     source
 0x0A3    {endi(CM_IRET)}   ENDI CM_IRET (0x{CM_IRET:03X})
 0x0B0    {extract(REG_T3, MF_OPCODE_CLASS)}   ENTRY_MOV: EXTRACT T3, M_OPCODE_CLASS
 0x0B1    {extract(REG_T2, MF_REG_DST)}   EXTRACT T2, M_REG_DST
-0x0B2    {svcw_small(FETCH_IMM32)}   SVCW FETCH_IMM32
-0x0B3    {br(C_FAULT, rel10(0x0B3, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0B4    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
-0x0B5    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
+0x0B2    {br(C_W8, rel10(0x0B2, 0x0B7))}   BR C_W8, mov_imm8
+0x0B3    {svcw_small(FETCH_IMM32)}   SVCW FETCH_IMM32
+0x0B4    {br(C_FAULT, rel10(0x0B4, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0B5    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
+0x0B6    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
+0x0B7    {svcw_small(FETCH_IMM8)}   mov_imm8: SVCW FETCH_IMM8
+0x0B8    {br(C_FAULT, rel10(0x0B8, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0B9    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
+0x0BA    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
@@ -364,4 +375,4 @@ print(f"  CM_IRET = 0x{CM_IRET:03X}")
 print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 2 INT_ENTER)")
 print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 3 IRET_FLOW)")
 print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
-print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x0B0 (Rung 6 Pass 2 MOV r32, imm32)")
+print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x0B0 (Rung 6 Pass 4A MOV r8/r32 immediate)")

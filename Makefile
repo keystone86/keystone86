@@ -19,6 +19,7 @@ HOST_GID := $(shell id -g)
         rung5-pass4-sim rung5-pass4-clean \
         rung5-pass5-sim rung5-pass5-clean rung5-regress \
         rung6-pass2-sim rung6-pass2-clean \
+        rung6-pass4a-sim rung6-pass4a-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -100,6 +101,8 @@ help:
 	@echo "  make rung5-regress         - run Rung 4 regression plus Rung 5 Pass 2/3/4/5 simulations"
 	@echo "  make rung6-pass2-sim       - compile and run bounded Rung 6 Pass 2 MOV r32, imm32 simulation"
 	@echo "  make rung6-pass2-clean     - remove Rung 6 Pass 2 simulation artifacts"
+	@echo "  make rung6-pass4a-sim      - compile and run bounded Rung 6 Pass 4A MOV r8, imm8 simulation"
+	@echo "  make rung6-pass4a-clean    - remove Rung 6 Pass 4A simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -545,6 +548,28 @@ rung6-pass2-sim: require-container ucode
 rung6-pass2-clean: require-container
 	@rm -rf build/sim/rung6_pass2
 	@echo "Rung 6 Pass 2 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 4A — bounded MOV r8, imm8 byte-register slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS4A = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_imm8.sv
+
+rung6-pass4a-sim: require-container ucode
+	@echo "--- Rung 6 Pass 4A: compiling bounded MOV r8, imm8 RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass4a
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass4a/tb_rung6_mov_imm8.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS4A)
+	@echo "--- Rung 6 Pass 4A: running bounded MOV r8, imm8 simulation ---"
+	vvp build/sim/rung6_pass4a/tb_rung6_mov_imm8.vvp
+
+rung6-pass4a-clean: require-container
+	@rm -rf build/sim/rung6_pass4a
+	@echo "Rung 6 Pass 4A build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

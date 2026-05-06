@@ -11,9 +11,9 @@
 //     into commit_engine and become architectural only at ENDI.
 //   - Jcc condition metadata is latched as decode-owned metadata and carried
 //     to flow_control; the sequencer branches only on the registered T3 result.
-//   - The bounded MOV r32, imm32 first slice uses generic EXTRACT/STAGE_GPR
-//     behavior: decode supplies metadata, FETCH_IMM32 supplies T4, and ENDI
-//     is the only architectural register visibility point.
+//   - The bounded MOV immediate-to-register slices use generic BR/EXTRACT/
+//     STAGE_GPR behavior: decode supplies width/register metadata, FETCH_IMM*
+//     supplies T4, and ENDI is the only architectural register visibility point.
 //
 // Control-transfer cleanup rule for this rung:
 //   - Do NOT squash on JMP dispatch. fetch_engine still needs fall-through
@@ -67,6 +67,7 @@ module microsequencer (
     output logic [31:0] pc_target_val,
     output logic        pc_gpr_en,
     output logic [2:0]  pc_gpr_idx,
+    output logic [1:0]  pc_gpr_opsz,
     output logic [31:0] pc_gpr_val,
     output logic        pc_stack_adj_en,
     output logic [31:0] pc_stack_adj_val,
@@ -206,6 +207,7 @@ module microsequencer (
             C_OK:     br_taken = (sr_r == SR_OK);
             C_FAULT:  br_taken = (sr_r == SR_FAULT);
             C_WAIT:   br_taken = (sr_r == SR_WAIT);
+            C_W8:     br_taken = (meta_opsz_r == 2'h0);
             C_T3Z:    br_taken = (t3_data == 32'h0);
             C_T3NZ:   br_taken = (t3_data != 32'h0);
             default:  br_taken = 1'b0;
@@ -379,6 +381,7 @@ module microsequencer (
         pc_target_val   = 32'h0;
         pc_gpr_en       = 1'b0;
         pc_gpr_idx      = 3'h0;
+        pc_gpr_opsz     = 2'h0;
         pc_gpr_val      = 32'h0;
         pc_stack_adj_en = 1'b0;
         pc_stack_adj_val= 32'h0;
@@ -459,6 +462,7 @@ module microsequencer (
                             end else if (uop_imm10[5:0] == STAGE_GPR) begin
                                 pc_gpr_en  = 1'b1;
                                 pc_gpr_idx = meta_reg_dst_r;
+                                pc_gpr_opsz = meta_opsz_r;
                                 pc_gpr_val = temp_value(uop_src_reg);
                             end
                             upc_next = upc_r + 12'h1;

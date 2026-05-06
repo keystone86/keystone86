@@ -1,14 +1,22 @@
 .entry ENTRY_MOV, 0x01
 
-; Rung 6 Pass 2 first slice: B8+rd id, MOV r32, imm32 only.
-; Decoder supplies OC_MOV_R_IMM and M_REG_DST from opcode[2:0].
-; FETCH_IMM32 captures the immediate in T4. STAGE_GPR stages T4 to the
-; decoder-selected destination register; ENDI CM_MOV_REG is the architectural
-; GPR visibility boundary and does not update EFLAGS.
+; Rung 6 Pass 4A immediate-to-register slice:
+;   B0-B7 MOV r8, imm8
+;   B8-BF MOV r32, imm32
+; Decoder supplies OC_MOV_R_IMM, M_OPSZ, and raw M_REG_DST from opcode[2:0].
+; Width dispatch is explicit BR C_W8; the default path preserves the proven
+; dword behavior. STAGE_GPR stages T4, and ENDI CM_MOV_REG is the only
+; architectural GPR visibility boundary.
 ENTRY_MOV:
     EXTRACT T3, M_OPCODE_CLASS
     EXTRACT T2, M_REG_DST
+    BR C_W8, .mov_imm8
     SVCW FETCH_IMM32
+    BR C_FAULT, SUB_FAULT_HANDLER
+    STAGE STAGE_GPR, T4
+    ENDI CM_MOV_REG
+.mov_imm8:
+    SVCW FETCH_IMM8
     BR C_FAULT, SUB_FAULT_HANDLER
     STAGE STAGE_GPR, T4
     ENDI CM_MOV_REG

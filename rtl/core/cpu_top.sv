@@ -117,6 +117,7 @@ module cpu_top (
     logic [31:0] pc_target_val;
     logic        pc_gpr_en;
     logic [2:0]  pc_gpr_idx;
+    logic [1:0]  pc_gpr_opsz;
     logic [31:0] pc_gpr_val;
     logic        pc_stack_adj_en;
     logic [31:0] pc_stack_adj_val;
@@ -462,6 +463,7 @@ module cpu_top (
         .pc_target_val   (pc_target_val),
         .pc_gpr_en       (pc_gpr_en),
         .pc_gpr_idx      (pc_gpr_idx),
+        .pc_gpr_opsz     (pc_gpr_opsz),
         .pc_gpr_val      (pc_gpr_val),
         .pc_stack_adj_en (pc_stack_adj_en),
         .pc_stack_adj_val(pc_stack_adj_val),
@@ -657,6 +659,7 @@ module cpu_top (
 
         .pc_gpr_en                  (pc_gpr_en),
         .pc_gpr_idx                 (pc_gpr_idx),
+        .pc_gpr_opsz                (pc_gpr_opsz),
         .pc_gpr_val                 (pc_gpr_val),
 
         .pc_eip_en                  (pc_eip_en),
