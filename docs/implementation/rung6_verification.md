@@ -7,21 +7,24 @@ This document records verification evidence for committed Rung 6 work.
 Current recorded implementation commit:
 
 ```text
-da378236a7ec2dcbc848f66be8582d52c164096c
+1dfe1f32912cebed91971aef6bd08b9849e9f0ce
 ```
 
 Short commit:
 
 ```text
-da37823
+1dfe1f3
 ```
 
 Recorded scope:
 
 ```text
-Bounded Rung 6 Pass 2 first slice only:
-B8+rd id — MOV r32, imm32
+Bounded Rung 6 Pass 4A only:
+B0-B7 — MOV r8, imm8
 ```
+
+The existing proven `B8-BF` `MOV r32, imm32` path is preserved at this
+checkpoint.
 
 Additional Pass 3 confirmation checkpoint:
 
@@ -41,7 +44,10 @@ Pass 3 target for the `B8-BF` `MOV r32, imm32` GPR/commit proof.
 
 This is not full Rung 6 completion.
 This does not claim the full Appendix D MOV matrix.
-This confirms only the bounded `B8-BF` `MOV r32, imm32` GPR/commit proof.
+This confirms only bounded Pass 4A:
+
+- `B0-B7` `MOV r8, imm8`
+- preservation of `B8-BF` `MOV r32, imm32`
 
 ## Donor Material Status
 
@@ -57,13 +63,14 @@ Rung 6 completion by themselves.
 
 Date recorded: 2026-05-06 UTC.
 
-Commands run after commit `da37823`:
+Commands run after commit `1dfe1f3`:
 
 ```sh
 make codegen
 make ucode
 make rung5-regress
 make rung6-pass2-sim
+make rung6-pass4a-sim
 git diff --check
 git status --short
 ```
@@ -76,13 +83,16 @@ Results:
 | `make ucode` | PASS |
 | `make rung5-regress` | PASS |
 | `make rung6-pass2-sim` | PASS |
+| `make rung6-pass4a-sim` | PASS |
 | `git diff --check` | PASS |
 | `git status --short` | PASS, clean output |
 
-Existing `iverilog` warnings about constant selects and time units were present
-during simulation builds. They did not fail the commands.
+Existing Icarus/Iverilog warnings about constant selects, time units, and
+ignored `unique` case qualities were present during simulation builds. They did
+not fail the commands.
 
 Rung 5 regression still passes at this committed state.
+Rung 7 remains blocked.
 
 ## Pass 3 Confirmation
 
@@ -125,6 +135,27 @@ No files were changed during the Pass 3 confirmation session.
 Pass 3 required no RTL, microcode, script, Makefile, or testbench changes.
 Rung 5 regression still passes. Rung 7 remains blocked.
 
+## Pass 4A Evidence
+
+The bounded Rung 6 Pass 4A simulation proves only the authorized byte
+immediate-to-register slice:
+
+- all eight `B0-B7` opcodes route to `ENTRY_MOV`
+- `FETCH_IMM8` is issued for each byte-register immediate MOV
+- byte-register forms pass for `AL`, `CL`, `DL`, `BL`, `AH`, `CH`, `DH`, and
+  `BH`
+- low-byte writes update bits `[7:0]` of the containing 32-bit GPR
+- high-byte writes update bits `[15:8]` of the containing 32-bit GPR
+- `ENDI CM_MOV_REG` is used for the bounded register-destination MOV path
+- architectural GPR visibility remains commit-only through `CM_MOV_REG`
+- EFLAGS remain unchanged
+- no bus writes occur for register-immediate MOV
+- final EIP matches fall-through for the bounded Pass 4A instruction sequence
+- no fault occurs during the bounded Pass 4A MOV sequence
+
+The existing Pass 2 simulation still proves preservation of the `B8-BF`
+`MOV r32, imm32` path at commit `1dfe1f3`.
+
 ## Pass 2 First-Slice Evidence
 
 The bounded Rung 6 Pass 2 simulation proves the first slice only:
@@ -145,7 +176,9 @@ This verification record does not claim:
 - full Rung 6 completion
 - full Appendix D MOV matrix completion
 - full Rung 6 acceptance
-- `B0-B7` support
+- `MOV r16, imm16` support
+- `0x66` operand-size override support
+- `FETCH_IMM16` use for `B8-BF`
 - `88/89/8A/8B` support
 - `C6/C7` support
 - register-register MOV support
@@ -162,7 +195,9 @@ This verification record does not claim:
 
 Remaining Rung 6 blockers include:
 
-- `B0-B7`
+- `MOV r16, imm16`, pending explicit `0x66` / operand-size decision
+- `0x66` operand-size override
+- `FETCH_IMM16` for `B8-BF`
 - `88/89/8A/8B`
 - `C6/C7`
 - register-register MOV
