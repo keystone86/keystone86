@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through Rung 5 Pass 1:
+// Decoder role through Rung 6 Pass 2 first slice:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -10,6 +10,9 @@
 //     evaluation and taken-target computation remain service/microcode owned.
 //   - For CD imm8, consume only the opcode and report M_NEXT_EIP as opcode+2;
 //     FETCH_IMM8 remains the microcode-called service that consumes the vector.
+//   - For B8-BF MOV r32, imm32, consume only the opcode and report
+//     M_NEXT_EIP as opcode+5; FETCH_IMM32 remains the microcode-called service
+//     that consumes the immediate payload.
 //   - Leave target computation, condition evaluation, interrupt policy, and
 //     stack effects to services/microcode.
 //   - Hold decode results stable until dec_ack or committed-boundary squash.
@@ -52,6 +55,10 @@ module decoder (
     output logic        payload16_valid,
     output logic        payload16_signed,
     output logic [15:0] payload16,
+    output logic [7:0]  opcode_class,
+    output logic [1:0]  opsz,
+    output logic [2:0]  imm_class,
+    output logic [2:0]  reg_dst,
     output logic [3:0]  cond_code,
     input  logic        dec_ack,
 
@@ -91,12 +98,17 @@ module decoder (
     logic        is_ret_imm16;
     logic        is_jcc_short;
     logic        is_int_imm8;
+    logic        is_mov_r_imm32;
 
     logic        opcode_consumed;
     logic [7:0]  modrm_latch;
     logic        ff_is_call_near;
 
     assign ff_is_call_near = (modrm_latch[5:3] == 3'b010);
+
+    localparam logic [7:0] OC_MOV_R_IMM = 8'h02; // Appendix A M_OPCODE_CLASS
+    localparam logic [1:0] OPSZ_32      = 2'h2;
+    localparam logic [2:0] IMM_32       = 3'h4;
 
     // ----------------------------------------------------------------
     // State register
@@ -122,6 +134,7 @@ module decoder (
             is_ret_imm16      <= 1'b0;
             is_jcc_short      <= 1'b0;
             is_int_imm8       <= 1'b0;
+            is_mov_r_imm32    <= 1'b0;
             opcode_consumed   <= 1'b0;
             modrm_latch       <= 8'h0;
         end else if (squash) begin
@@ -144,6 +157,7 @@ module decoder (
             is_ret_imm16      <= 1'b0;
             is_jcc_short      <= 1'b0;
             is_int_imm8       <= 1'b0;
+            is_mov_r_imm32    <= 1'b0;
             opcode_consumed   <= 1'b0;
             modrm_latch       <= 8'h0;
         end else begin
@@ -162,6 +176,7 @@ module decoder (
                         is_ret_imm16      <= (q_data == 8'hC2);
                         is_jcc_short      <= (q_data[7:4] == 4'h7);
                         is_int_imm8       <= (q_data == 8'hCD);
+                        is_mov_r_imm32    <= (q_data[7:3] == 5'b10111);
                         aux_lo_valid      <= 1'b0;
                         aux_hi_valid      <= 1'b0;
                         sib_latch         <= 8'h0;
@@ -368,6 +383,9 @@ module decoder (
             8'hC3, 8'hC2:     return ENTRY_RET_NEAR;
             8'hCD:            return ENTRY_INT;
             8'hCF:            return ENTRY_IRET;
+            8'hB8, 8'hB9, 8'hBA, 8'hBB,
+            8'hBC, 8'hBD, 8'hBE, 8'hBF:
+                              return ENTRY_MOV;
             8'hF0, 8'hF2, 8'hF3,
             8'h2E, 8'h36, 8'h3E, 8'h26,
             8'h64, 8'h65,
@@ -392,6 +410,8 @@ module decoder (
             next_eip = opcode_eip_latch + 32'h2;
         else if (is_jmp_near || is_call_direct || is_ret_imm16)
             next_eip = opcode_eip_latch + 32'h3;
+        else if (is_mov_r_imm32)
+            next_eip = opcode_eip_latch + 32'h5;
         else if (is_call_ff)
             next_eip = opcode_eip_latch + 32'h2 +
                        (modrm_needs_sib(modrm_latch) ? 32'h1 : 32'h0) +
@@ -422,6 +442,10 @@ module decoder (
         payload16_valid  = 1'b0;
         payload16_signed = 1'b0;
         payload16        = {aux_hi, aux_lo};
+        opcode_class     = is_mov_r_imm32 ? OC_MOV_R_IMM : 8'h00;
+        opsz             = is_mov_r_imm32 ? OPSZ_32 : 2'h0;
+        imm_class        = is_mov_r_imm32 ? IMM_32 : 3'h0;
+        reg_dst          = is_mov_r_imm32 ? opcode_byte_latch[2:0] : 3'h0;
         cond_code        = opcode_byte_latch[3:0];
 
         case (state)

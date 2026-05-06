@@ -18,6 +18,7 @@ HOST_GID := $(shell id -g)
         rung5-pass3-sim rung5-pass3-clean \
         rung5-pass4-sim rung5-pass4-clean \
         rung5-pass5-sim rung5-pass5-clean rung5-regress \
+        rung6-pass2-sim rung6-pass2-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -97,6 +98,8 @@ help:
 	@echo "  make rung5-pass5-sim       - compile and run bounded Rung 5 Pass 5 INT/IRET round-trip simulation"
 	@echo "  make rung5-pass5-clean     - remove Rung 5 Pass 5 simulation artifacts"
 	@echo "  make rung5-regress         - run Rung 4 regression plus Rung 5 Pass 2/3/4/5 simulations"
+	@echo "  make rung6-pass2-sim       - compile and run bounded Rung 6 Pass 2 MOV r32, imm32 simulation"
+	@echo "  make rung6-pass2-clean     - remove Rung 6 Pass 2 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -520,6 +523,28 @@ rung5-regress: require-container ucode
 	$(MAKE) rung5-pass3-sim
 	$(MAKE) rung5-pass4-sim
 	$(MAKE) rung5-pass5-sim
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 2 — bounded MOV r32, imm32 first slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS2 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_imm32.sv
+
+rung6-pass2-sim: require-container ucode
+	@echo "--- Rung 6 Pass 2: compiling bounded MOV r32, imm32 RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass2
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass2/tb_rung6_mov_imm32.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS2)
+	@echo "--- Rung 6 Pass 2: running bounded MOV r32, imm32 simulation ---"
+	vvp build/sim/rung6_pass2/tb_rung6_mov_imm32.vvp
+
+rung6-pass2-clean: require-container
+	@rm -rf build/sim/rung6_pass2
+	@echo "Rung 6 Pass 2 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

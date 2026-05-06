@@ -16,6 +16,9 @@ for i in range(256):
     if i == 0x00:
         val = 0x010
         meaning = "ENTRY_NULL"
+    elif i == 0x01:
+        val = 0x0B0       # Rung 6 Pass 2: ENTRY_MOV first slice
+        meaning = "ENTRY_MOV"
     elif i == 0x07:
         val = 0x050       # Rung 2: ENTRY_JMP_NEAR
         meaning = "ENTRY_JMP_NEAR"
@@ -57,6 +60,7 @@ for i in range(256):
 # Encoding helpers
 # --------------------------------------------------------------------
 CM_EIP       = 0x002
+CM_GPR       = 0x001
 CM_CLR03     = 0x040
 CM_CLR47     = 0x080
 CM_CLRF      = 0x100
@@ -72,8 +76,10 @@ CM_CALL      = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 CM_RET       = CM_STACK | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 CM_INT       = CM_SEG | CM_STACK | CM_EFLAGS | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
 CM_IRET      = CM_SEG | CM_STACK | CM_EFLAGS | CM_EIP | CM_CLR03 | CM_CLR47 | CM_CLRF | CM_FLUSHQ
+CM_MOV_REG   = CM_GPR | CM_CLR03 | CM_CLR47 | CM_CLRF
 
 FETCH_IMM8             = 0x01
+FETCH_IMM32            = 0x03
 FETCH_DISP8            = 0x04
 FETCH_DISP16           = 0x05
 LOAD_RM32              = 0x22
@@ -85,9 +91,14 @@ CONDITION_EVAL         = 0x47
 INT_ENTER              = 0x62
 IRET_FLOW              = 0x63
 STAGE_STACK_ADJ        = 0x06
+STAGE_GPR              = 0x00
+REG_T2                 = 0x2
+REG_T3                 = 0x3
 REG_T4                 = 0x4
 REG_SPECIAL            = 0xF
 FC_INT                 = 0xA
+MF_OPCODE_CLASS        = 0x06
+MF_REG_DST             = 0x09
 MF_FC_TO_VECTOR        = 0x13
 
 C_ALWAYS = 0x0
@@ -247,12 +258,28 @@ rom[0x0A1] = svcw_ext(IRET_FLOW)
 rom[0x0A2] = br(C_FAULT, rel10(0x0A2, 0x000))
 rom[0x0A3] = endi(CM_IRET)
 
+# --------------------------------------------------------------------
+# Rung 6 Pass 2: ENTRY_MOV first slice at 0x0B0
+#
+# B8+rd id only. Decoder supplies OC_MOV_R_IMM and M_REG_DST; FETCH_IMM32
+# consumes the four immediate bytes into T4; STAGE_GPR stages T4 for the
+# destination register selected by decode metadata. ENDI CM_MOV_REG is the
+# only GPR visibility point and leaves EFLAGS unchanged.
+# --------------------------------------------------------------------
+rom[0x0B0] = extract(REG_T3, MF_OPCODE_CLASS)
+rom[0x0B1] = extract(REG_T2, MF_REG_DST)
+rom[0x0B2] = svcw_small(FETCH_IMM32)
+rom[0x0B3] = br(C_FAULT, rel10(0x0B3, 0x000))
+rom[0x0B4] = stage(STAGE_GPR, REG_T4)
+rom[0x0B5] = endi(CM_MOV_REG)
+
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
 listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, Rung 4 Jcc,
 ; Rung 5 Pass 2 INT_ENTER path, Pass 3 bounded IRET_FLOW path,
-; and Pass 4 bounded #UD fault delivery through SUB_FAULT_HANDLER
+; Pass 4 bounded #UD fault delivery through SUB_FAULT_HANDLER,
+; and Rung 6 Pass 2 bounded MOV r32, imm32 first slice
 address  encoding     source
 0x000    {extract(REG_T4, MF_FC_TO_VECTOR)}   SUB_FAULT_HANDLER: EXTRACT T4, MF_FC_TO_VECTOR
 0x001    {ext_word()}   EXT
@@ -316,6 +343,12 @@ address  encoding     source
 0x0A1    {svcw_ext(IRET_FLOW)}   SVCW IRET_FLOW
 0x0A2    {br(C_FAULT, rel10(0x0A2, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
 0x0A3    {endi(CM_IRET)}   ENDI CM_IRET (0x{CM_IRET:03X})
+0x0B0    {extract(REG_T3, MF_OPCODE_CLASS)}   ENTRY_MOV: EXTRACT T3, M_OPCODE_CLASS
+0x0B1    {extract(REG_T2, MF_REG_DST)}   EXTRACT T2, M_REG_DST
+0x0B2    {svcw_small(FETCH_IMM32)}   SVCW FETCH_IMM32
+0x0B3    {br(C_FAULT, rel10(0x0B3, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0B4    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
+0x0B5    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
@@ -330,3 +363,5 @@ print(f"  CM_INT  = 0x{CM_INT:03X}")
 print(f"  CM_IRET = 0x{CM_IRET:03X}")
 print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 2 INT_ENTER)")
 print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 3 IRET_FLOW)")
+print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
+print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x0B0 (Rung 6 Pass 2 MOV r32, imm32)")

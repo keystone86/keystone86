@@ -1,7 +1,8 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 2/3 top-level with service-based control-transfer paths.
+// Rung 6 Pass 2 top-level with service-based control-transfer paths and the
+// bounded MOV r32, imm32 first slice.
 
 import keystone86_pkg::*;
 
@@ -85,6 +86,10 @@ module cpu_top (
     logic        dec_payload16_valid;
     logic        dec_payload16_signed;
     logic [15:0] dec_payload16;
+    logic [7:0]  dec_opcode_class;
+    logic [1:0]  dec_opsz;
+    logic [2:0]  dec_imm_class;
+    logic [2:0]  dec_reg_dst;
     logic [3:0]  dec_cond_code;
     logic        dec_ack;
 
@@ -110,6 +115,9 @@ module cpu_top (
     logic [31:0] pc_eip_val;
     logic        pc_target_en;
     logic [31:0] pc_target_val;
+    logic        pc_gpr_en;
+    logic [2:0]  pc_gpr_idx;
+    logic [31:0] pc_gpr_val;
     logic        pc_stack_adj_en;
     logic [31:0] pc_stack_adj_val;
     logic [31:0] stack_push_data;
@@ -206,10 +214,18 @@ module cpu_top (
     logic [31:0] t2_r;
     logic [31:0] t3_r;
     logic [31:0] t4_r;
+    logic        mseq_t2_wr_en;
+    logic [31:0] mseq_t2_wr_data;
+    logic        mseq_t3_wr_en;
+    logic [31:0] mseq_t3_wr_data;
     logic        mseq_t4_wr_en;
     logic [31:0] mseq_t4_wr_data;
     logic [31:0] meta_next_eip;
     logic [3:0]  meta_cond_code;
+    logic [7:0]  meta_opcode_class_r;
+    logic [1:0]  meta_opsz_r;
+    logic [2:0]  meta_imm_class_r;
+    logic [2:0]  meta_reg_dst_r;
     logic        meta_modrm_present_r;
     logic [7:0]  meta_modrm_byte_r;
     logic [7:0]  meta_sib_byte_r;
@@ -220,6 +236,7 @@ module cpu_top (
     logic [1:0]  dbg_mseq_state_w;
     logic [11:0] dbg_upc_w;
     logic [7:0]  dbg_entry_id_w;
+    logic        decode_frontend_enable;
 
     assign dbg_eip           = eip;
     assign dbg_esp           = esp;
@@ -232,6 +249,9 @@ module cpu_top (
     assign dbg_fault_class   = fault_class;
     assign dbg_decode_done   = decode_done;
     assign dbg_fetch_addr    = fetch_addr_internal;
+    // Decode must not consume payload bytes while microcode-owned services are
+    // fetching immediates/displacements from the shared prefetch queue.
+    assign decode_frontend_enable = (dbg_mseq_state_w == 2'h0);
 
     assign eu_req     = commit_stack_wr_pending || ie_mem_rd_req ||
                         se_stk_rd_req || op_mem_rd_req;
@@ -288,6 +308,10 @@ module cpu_top (
             meta_sib_byte_r      <= 8'h0;
             meta_modrm_class_r   <= 4'hF;
             meta_disp_value_r    <= 32'h0;
+            meta_opcode_class_r  <= 8'h0;
+            meta_opsz_r          <= 2'h0;
+            meta_imm_class_r     <= 3'h0;
+            meta_reg_dst_r       <= 3'h0;
         end else begin
             if (dec_ack) begin
                 meta_modrm_present_r <= dec_modrm_present;
@@ -295,7 +319,13 @@ module cpu_top (
                 meta_sib_byte_r      <= dec_sib_byte;
                 meta_modrm_class_r   <= dec_modrm_class;
                 meta_disp_value_r    <= dec_disp_value;
+                meta_opcode_class_r  <= dec_opcode_class;
+                meta_opsz_r          <= dec_opsz;
+                meta_imm_class_r     <= dec_imm_class;
+                meta_reg_dst_r       <= dec_reg_dst;
             end
+            if (mseq_t2_wr_en) t2_r <= mseq_t2_wr_data;
+            if (mseq_t3_wr_en) t3_r <= mseq_t3_wr_data;
             if (fe_t4_wr_en) t4_r <= fe_t4_wr_data;
             if (mseq_t4_wr_en) t4_r <= mseq_t4_wr_data;
             if (dec_ack && dec_payload16_valid) begin
@@ -369,7 +399,7 @@ module cpu_top (
         .mode_prot    (mode_prot),
         .cs_d_bit     (cs_d_bit),
         .q_data       (q_data),
-        .q_valid      (q_valid),
+        .q_valid      (q_valid && decode_frontend_enable),
         .q_consume    (q_consume_dec),
         .decode_done  (decode_done),
         .entry_id     (entry_id),
@@ -390,6 +420,10 @@ module cpu_top (
         .payload16_valid (dec_payload16_valid),
         .payload16_signed(dec_payload16_signed),
         .payload16    (dec_payload16),
+        .opcode_class (dec_opcode_class),
+        .opsz         (dec_opsz),
+        .imm_class    (dec_imm_class),
+        .reg_dst      (dec_reg_dst),
         .cond_code    (dec_cond_code),
         .dec_ack      (dec_ack),
         .q_fetch_eip  (q_fetch_eip)
@@ -426,9 +460,16 @@ module cpu_top (
         .pc_eip_val      (pc_eip_val),
         .pc_target_en    (pc_target_en),
         .pc_target_val   (pc_target_val),
+        .pc_gpr_en       (pc_gpr_en),
+        .pc_gpr_idx      (pc_gpr_idx),
+        .pc_gpr_val      (pc_gpr_val),
         .pc_stack_adj_en (pc_stack_adj_en),
         .pc_stack_adj_val(pc_stack_adj_val),
         .stack_push_data (stack_push_data),
+        .mseq_t2_wr_en   (mseq_t2_wr_en),
+        .mseq_t2_wr_data (mseq_t2_wr_data),
+        .mseq_t3_wr_en   (mseq_t3_wr_en),
+        .mseq_t3_wr_data (mseq_t3_wr_data),
         .mseq_t4_wr_en   (mseq_t4_wr_en),
         .mseq_t4_wr_data (mseq_t4_wr_data),
 
@@ -440,6 +481,10 @@ module cpu_top (
         .t2_data         (t2_r),
         .t4_data         (t4_r),
         .t3_data         (t3_r),
+        .meta_opcode_class_in(dec_opcode_class),
+        .meta_opsz_in    (dec_opsz),
+        .meta_imm_class_in(dec_imm_class),
+        .meta_reg_dst_in (dec_reg_dst),
         .meta_next_eip   (meta_next_eip),
         .meta_cond_code  (meta_cond_code),
 
@@ -610,9 +655,9 @@ module cpu_top (
         .raise_fc                   (raise_fc),
         .raise_fe                   (raise_fe),
 
-        .pc_gpr_en                  (1'b0),
-        .pc_gpr_idx                 (3'h0),
-        .pc_gpr_val                 (32'h0),
+        .pc_gpr_en                  (pc_gpr_en),
+        .pc_gpr_idx                 (pc_gpr_idx),
+        .pc_gpr_val                 (pc_gpr_val),
 
         .pc_eip_en                  (pc_eip_en),
         .pc_eip_val                 (pc_eip_val),

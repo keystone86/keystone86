@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/microsequencer.sv
 //
-// Rung 5 service-capable microsequencer.
+// Rung 6 Pass 2 service-capable microsequencer.
 //
 // Active intent:
 //   - Decoder hands off only decode-owned metadata.
@@ -11,6 +11,9 @@
 //     into commit_engine and become architectural only at ENDI.
 //   - Jcc condition metadata is latched as decode-owned metadata and carried
 //     to flow_control; the sequencer branches only on the registered T3 result.
+//   - The bounded MOV r32, imm32 first slice uses generic EXTRACT/STAGE_GPR
+//     behavior: decode supplies metadata, FETCH_IMM32 supplies T4, and ENDI
+//     is the only architectural register visibility point.
 //
 // Control-transfer cleanup rule for this rung:
 //   - Do NOT squash on JMP dispatch. fetch_engine still needs fall-through
@@ -62,11 +65,18 @@ module microsequencer (
     output logic [31:0] pc_eip_val,
     output logic        pc_target_en,
     output logic [31:0] pc_target_val,
+    output logic        pc_gpr_en,
+    output logic [2:0]  pc_gpr_idx,
+    output logic [31:0] pc_gpr_val,
     output logic        pc_stack_adj_en,
     output logic [31:0] pc_stack_adj_val,
 
     // --- Service metadata inputs ---
     output logic [31:0] stack_push_data,
+    output logic        mseq_t2_wr_en,
+    output logic [31:0] mseq_t2_wr_data,
+    output logic        mseq_t3_wr_en,
+    output logic [31:0] mseq_t3_wr_data,
     output logic        mseq_t4_wr_en,
     output logic [31:0] mseq_t4_wr_data,
 
@@ -82,6 +92,10 @@ module microsequencer (
     input  logic [31:0] t3_data,
 
     // --- Metadata latch outputs (to services) ---
+    input  logic [7:0]  meta_opcode_class_in,
+    input  logic [1:0]  meta_opsz_in,
+    input  logic [2:0]  meta_imm_class_in,
+    input  logic [2:0]  meta_reg_dst_in,
     output logic [31:0] meta_next_eip,
     output logic [3:0]  meta_cond_code,
 
@@ -99,6 +113,13 @@ module microsequencer (
     localparam logic [3:0] UOP_RAISE = 4'hC;
     localparam logic [3:0] UOP_ENDI  = 4'hE;
     localparam logic [3:0] UOP_EXT   = 4'hF;
+
+    localparam logic [9:0] MF_OPSZ         = 10'h001;
+    localparam logic [9:0] MF_IMM_CLASS    = 10'h004;
+    localparam logic [9:0] MF_OPCODE_CLASS = 10'h006;
+    localparam logic [9:0] MF_REG_DST      = 10'h009;
+    localparam logic [9:0] MF_NEXT_EIP     = 10'h012;
+    localparam logic [9:0] MF_FC_TO_VECTOR = 10'h013;
 
     logic [1:0]  state, state_next;
     logic [11:0] upc_r, upc_next;
@@ -122,6 +143,10 @@ module microsequencer (
     logic [7:0]  svc_id_r;
     logic [1:0]  sr_r;
     logic [3:0]  cond_code_r;
+    logic [7:0]  meta_opcode_class_r;
+    logic [1:0]  meta_opsz_r;
+    logic [2:0]  meta_imm_class_r;
+    logic [2:0]  meta_reg_dst_r;
 
     assign upc            = upc_r;
     assign dispatch_entry = dispatch_entry_latch;
@@ -140,11 +165,37 @@ module microsequencer (
     logic [5:0] uop_target;
     logic [3:0] uop_cond;
     logic [9:0] uop_imm10;
+    logic [3:0] uop_dst_reg;
+    logic [3:0] uop_src_reg;
 
     assign uop_class  = uinst[31:28];
     assign uop_target = uinst[27:22];
     assign uop_cond   = uinst[21:18];
     assign uop_imm10  = uinst[9:0];
+    assign uop_dst_reg = uinst[17:14];
+    assign uop_src_reg = uinst[13:10];
+
+    function automatic logic [31:0] temp_value(input logic [3:0] reg_id);
+        case (reg_id)
+            REG_T2:  return t2_data;
+            REG_T3:  return t3_data;
+            REG_T4:  return t4_data;
+            default: return 32'h0;
+        endcase
+    endfunction
+
+    function automatic logic [31:0] extract_value(input logic [9:0] field_id);
+        case (field_id)
+            MF_OPSZ:         return {30'h0, meta_opsz_r};
+            MF_IMM_CLASS:    return {29'h0, meta_imm_class_r};
+            MF_OPCODE_CLASS: return {24'h0, meta_opcode_class_r};
+            MF_REG_DST:      return {29'h0, meta_reg_dst_r};
+            MF_NEXT_EIP:     return next_eip_r;
+            MF_FC_TO_VECTOR: return (fault_class_in == FC_UD) ? 32'h00000006 :
+                                                                 32'h00000000;
+            default:         return 32'h0;
+        endcase
+    endfunction
 
     logic br_taken;
     logic [7:0] current_svc_id;
@@ -196,6 +247,10 @@ module microsequencer (
             ext_pending_r         <= 1'b0;
             svc_id_r              <= 8'h00;
             sr_r                  <= SR_OK;
+            meta_opcode_class_r   <= 8'h00;
+            meta_opsz_r           <= 2'h0;
+            meta_imm_class_r      <= 3'h0;
+            meta_reg_dst_r        <= 3'h0;
         end else begin
             state <= state_next;
             upc_r <= upc_next;
@@ -212,6 +267,10 @@ module microsequencer (
                         entry_id_r           <= entry_id_in;
                         next_eip_r           <= next_eip_in;
                         cond_code_r          <= cond_code_in;
+                        meta_opcode_class_r  <= meta_opcode_class_in;
+                        meta_opsz_r          <= meta_opsz_in;
+                        meta_imm_class_r     <= meta_imm_class_in;
+                        meta_reg_dst_r       <= meta_reg_dst_in;
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
                         is_jcc_r             <= (entry_id_in == ENTRY_JCC);
                         is_call_r            <= dec_is_call;
@@ -318,9 +377,16 @@ module microsequencer (
         pc_eip_val      = 32'h0;
         pc_target_en    = 1'b0;
         pc_target_val   = 32'h0;
+        pc_gpr_en       = 1'b0;
+        pc_gpr_idx      = 3'h0;
+        pc_gpr_val      = 32'h0;
         pc_stack_adj_en = 1'b0;
         pc_stack_adj_val= 32'h0;
         stack_push_data = next_eip_r;
+        mseq_t2_wr_en   = 1'b0;
+        mseq_t2_wr_data = 32'h0;
+        mseq_t3_wr_en   = 1'b0;
+        mseq_t3_wr_data = 32'h0;
         mseq_t4_wr_en   = 1'b0;
         mseq_t4_wr_data = 32'h0;
 
@@ -363,13 +429,19 @@ module microsequencer (
                         end
 
                         UOP_EXTRACT: begin
-                            if ((uop_imm10 == 10'h013) && (uinst[17:14] == REG_T4)) begin
-                                // Appendix A defines FC_TO_VECTOR. Pass 4
-                                // intentionally implements only FC_UD -> #UD
-                                // vector 0x06, not a general exception mapper.
+                            // First-slice MOV uses the same generic EXTRACT
+                            // mechanism as the existing fault-vector extract:
+                            // metadata is selected by Appendix A field id, and
+                            // only implemented temp destinations are written.
+                            if (uop_dst_reg == REG_T2) begin
+                                mseq_t2_wr_en   = 1'b1;
+                                mseq_t2_wr_data = extract_value(uop_imm10);
+                            end else if (uop_dst_reg == REG_T3) begin
+                                mseq_t3_wr_en   = 1'b1;
+                                mseq_t3_wr_data = extract_value(uop_imm10);
+                            end else if (uop_dst_reg == REG_T4) begin
                                 mseq_t4_wr_en   = 1'b1;
-                                mseq_t4_wr_data = (fault_class_in == FC_UD) ?
-                                                  32'h00000006 : 32'h00000000;
+                                mseq_t4_wr_data = extract_value(uop_imm10);
                             end
                             upc_next = upc_r + 12'h1;
                         end
@@ -383,7 +455,11 @@ module microsequencer (
                         UOP_STAGE: begin
                             if (uop_imm10[5:0] == STAGE_STACK_ADJ) begin
                                 pc_stack_adj_en  = 1'b1;
-                                pc_stack_adj_val = t4_data;
+                                pc_stack_adj_val = temp_value(uop_src_reg);
+                            end else if (uop_imm10[5:0] == STAGE_GPR) begin
+                                pc_gpr_en  = 1'b1;
+                                pc_gpr_idx = meta_reg_dst_r;
+                                pc_gpr_val = temp_value(uop_src_reg);
                             end
                             upc_next = upc_r + 12'h1;
                         end

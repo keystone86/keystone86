@@ -3,6 +3,7 @@
 //
 // Current phase support:
 //   FETCH_IMM8
+//   FETCH_IMM32
 //   FETCH_DISP8
 //   FETCH_DISP16
 //   FETCH_DISP32
@@ -13,7 +14,9 @@
 //   cycle and ended up consuming the next opcode byte instead.
 //
 // Result is written to T4. FETCH_IMM8 is zero-extended for the Rung 5
-// interrupt vector path; DISP8/DISP16 remain sign-extended displacements.
+// interrupt vector path; FETCH_IMM32 is assembled little-endian for the
+// Rung 6 MOV r32, imm32 first slice; DISP8/DISP16 remain sign-extended
+// displacements.
 
 import keystone86_pkg::*;
 
@@ -49,6 +52,7 @@ module fetch_engine (
     function automatic logic [2:0] bytes_for_service(input logic [7:0] sid);
         case (sid)
             FETCH_IMM8:  return 3'd1;
+            FETCH_IMM32: return 3'd4;
             FETCH_DISP8:  return 3'd1;
             FETCH_DISP16: return 3'd2;
             FETCH_DISP32: return 3'd4;
