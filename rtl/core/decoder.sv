@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through Rung 6 Pass 2 first slice:
+// Decoder role through Rung 6 Pass 5A:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -13,6 +13,9 @@
 //   - For B0-B7 MOV r8, imm8 and B8-BF MOV r32, imm32, consume only the
 //     opcode and report M_NEXT_EIP after the immediate; FETCH_IMM* remains the
 //     microcode-called service that consumes the immediate payload.
+//   - For 88/89/8A/8B MOV register-register, consume opcode+ModRM only when
+//     the instruction is handed to ENTRY_MOV. Non-ModRM.mod=11 forms remain
+//     unsupported and do not enter the memory MOV path.
 //   - Leave target computation, condition evaluation, interrupt policy, and
 //     stack effects to services/microcode.
 //   - Hold decode results stable until dec_ack or committed-boundary squash.
@@ -59,6 +62,8 @@ module decoder (
     output logic [1:0]  opsz,
     output logic [2:0]  imm_class,
     output logic [2:0]  reg_dst,
+    output logic [2:0]  reg_src,
+    output logic [2:0]  reg_rm,
     output logic [3:0]  cond_code,
     input  logic        dec_ack,
 
@@ -100,6 +105,7 @@ module decoder (
     logic        is_int_imm8;
     logic        is_mov_r_imm8;
     logic        is_mov_r_imm32;
+    logic        is_mov_modrm;
 
     logic        opcode_consumed;
     logic [7:0]  modrm_latch;
@@ -107,9 +113,12 @@ module decoder (
 
     assign ff_is_call_near = (modrm_latch[5:3] == 3'b010);
 
-    localparam logic [7:0] OC_MOV_R_IMM = 8'h02; // Appendix A M_OPCODE_CLASS
+    localparam logic [7:0] OC_MOV_RM_R  = 8'h00; // Appendix A M_OPCODE_CLASS
+    localparam logic [7:0] OC_MOV_R_RM  = 8'h01;
+    localparam logic [7:0] OC_MOV_R_IMM = 8'h02;
     localparam logic [1:0] OPSZ_8       = 2'h0;
     localparam logic [1:0] OPSZ_32      = 2'h2;
+    localparam logic [2:0] IMM_NONE     = 3'h0;
     localparam logic [2:0] IMM_8        = 3'h1;
     localparam logic [2:0] IMM_32       = 3'h4;
 
@@ -139,6 +148,7 @@ module decoder (
             is_int_imm8       <= 1'b0;
             is_mov_r_imm8     <= 1'b0;
             is_mov_r_imm32    <= 1'b0;
+            is_mov_modrm      <= 1'b0;
             opcode_consumed   <= 1'b0;
             modrm_latch       <= 8'h0;
         end else if (squash) begin
@@ -163,6 +173,7 @@ module decoder (
             is_int_imm8       <= 1'b0;
             is_mov_r_imm8     <= 1'b0;
             is_mov_r_imm32    <= 1'b0;
+            is_mov_modrm      <= 1'b0;
             opcode_consumed   <= 1'b0;
             modrm_latch       <= 8'h0;
         end else begin
@@ -183,6 +194,8 @@ module decoder (
                         is_int_imm8       <= (q_data == 8'hCD);
                         is_mov_r_imm8     <= (q_data[7:3] == 5'b10110);
                         is_mov_r_imm32    <= (q_data[7:3] == 5'b10111);
+                        is_mov_modrm      <= (q_data == 8'h88) || (q_data == 8'h89) ||
+                                             (q_data == 8'h8A) || (q_data == 8'h8B);
                         aux_lo_valid      <= 1'b0;
                         aux_hi_valid      <= 1'b0;
                         sib_latch         <= 8'h0;
@@ -266,7 +279,9 @@ module decoder (
                 if (q_valid) begin
                     if (q_data == 8'hE8 || q_data == 8'hC2)
                         state_next = DEC_DISP16;
-                    else if (q_data == 8'hFF)
+                    else if (q_data == 8'hFF || q_data == 8'h88 ||
+                             q_data == 8'h89 || q_data == 8'h8A ||
+                             q_data == 8'h8B)
                         state_next = DEC_MODRM;
                     else
                         state_next = DEC_CONSUME;
@@ -284,9 +299,9 @@ module decoder (
 
             DEC_MODRM: begin
                 if (opcode_consumed && aux_lo_valid) begin
-                    if (ff_is_call_near && modrm_needs_sib(modrm_latch))
+                    if (is_call_ff && ff_is_call_near && modrm_needs_sib(modrm_latch))
                         state_next = DEC_SIB;
-                    else if (ff_is_call_near && (disp_total != 3'd0))
+                    else if (is_call_ff && ff_is_call_near && (disp_total != 3'd0))
                         state_next = DEC_DISP;
                     else
                         state_next = DEC_DONE;
@@ -374,7 +389,8 @@ module decoder (
 
     function automatic logic [7:0] classify_opcode(
         input logic [7:0] op,
-        input logic       ff2
+        input logic       ff2,
+        input logic       mov_modrm_reg
     );
         case (op)
             8'h90:            return ENTRY_NOP_XCHG_AX;
@@ -386,6 +402,8 @@ module decoder (
                               return ENTRY_JCC;
             8'hE8:            return ENTRY_CALL_NEAR;
             8'hFF:            return ff2 ? ENTRY_CALL_NEAR : ENTRY_NULL;
+            8'h88, 8'h89,
+            8'h8A, 8'h8B:     return mov_modrm_reg ? ENTRY_MOV : ENTRY_NULL;
             8'hC3, 8'hC2:     return ENTRY_RET_NEAR;
             8'hCD:            return ENTRY_INT;
             8'hCF:            return ENTRY_IRET;
@@ -422,6 +440,8 @@ module decoder (
             next_eip = opcode_eip_latch + 32'h2;
         else if (is_mov_r_imm32)
             next_eip = opcode_eip_latch + 32'h5;
+        else if (is_mov_modrm)
+            next_eip = opcode_eip_latch + 32'h2;
         else if (is_call_ff)
             next_eip = opcode_eip_latch + 32'h2 +
                        (modrm_needs_sib(modrm_latch) ? 32'h1 : 32'h0) +
@@ -441,7 +461,7 @@ module decoder (
         ret_imm      = 16'h0;
         modrm_byte   = modrm_latch;
         sib_byte     = sib_latch;
-        modrm_present= is_call_ff;
+        modrm_present= is_call_ff || is_mov_modrm;
         modrm_class  = classify_modrm(modrm_latch);
         disp_valid   = (disp_total != 3'd0);
         case (disp_total)
@@ -452,13 +472,26 @@ module decoder (
         payload16_valid  = 1'b0;
         payload16_signed = 1'b0;
         payload16        = {aux_hi, aux_lo};
-        opcode_class     = (is_mov_r_imm8 || is_mov_r_imm32) ? OC_MOV_R_IMM : 8'h00;
+        if (is_mov_r_imm8 || is_mov_r_imm32)
+            opcode_class = OC_MOV_R_IMM;
+        else if (is_mov_modrm)
+            opcode_class = opcode_byte_latch[1] ? OC_MOV_R_RM : OC_MOV_RM_R;
+        else
+            opcode_class = 8'h00;
         opsz             = is_mov_r_imm8  ? OPSZ_8  :
-                           is_mov_r_imm32 ? OPSZ_32 : 2'h0;
+                           is_mov_r_imm32 ? OPSZ_32 :
+                           is_mov_modrm   ? (opcode_byte_latch[0] ? OPSZ_32 : OPSZ_8) :
+                                            2'h0;
         imm_class        = is_mov_r_imm8  ? IMM_8   :
-                           is_mov_r_imm32 ? IMM_32  : 3'h0;
-        reg_dst          = (is_mov_r_imm8 || is_mov_r_imm32) ?
-                           opcode_byte_latch[2:0] : 3'h0;
+                           is_mov_r_imm32 ? IMM_32  : IMM_NONE;
+        if (is_mov_r_imm8 || is_mov_r_imm32)
+            reg_dst = opcode_byte_latch[2:0];
+        else if (is_mov_modrm)
+            reg_dst = opcode_byte_latch[1] ? modrm_latch[5:3] : modrm_latch[2:0];
+        else
+            reg_dst = 3'h0;
+        reg_src          = is_mov_modrm ? modrm_latch[5:3] : 3'h0;
+        reg_rm           = is_mov_modrm ? modrm_latch[2:0] : 3'h0;
         cond_code        = opcode_byte_latch[3:0];
 
         case (state)
@@ -499,7 +532,8 @@ module decoder (
 
             DEC_DONE: begin
                 decode_done = 1'b1;
-                entry_id    = classify_opcode(opcode_byte_latch, ff_is_call_near);
+                entry_id    = classify_opcode(opcode_byte_latch, ff_is_call_near,
+                                              (modrm_latch[7:6] == 2'b11));
 
                 if (is_call_direct) begin
                     is_call          = 1'b1;

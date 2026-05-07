@@ -20,6 +20,7 @@ HOST_GID := $(shell id -g)
         rung5-pass5-sim rung5-pass5-clean rung5-regress \
         rung6-pass2-sim rung6-pass2-clean \
         rung6-pass4a-sim rung6-pass4a-clean \
+        rung6-pass5a-sim rung6-pass5a-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -103,6 +104,8 @@ help:
 	@echo "  make rung6-pass2-clean     - remove Rung 6 Pass 2 simulation artifacts"
 	@echo "  make rung6-pass4a-sim      - compile and run bounded Rung 6 Pass 4A MOV r8, imm8 simulation"
 	@echo "  make rung6-pass4a-clean    - remove Rung 6 Pass 4A simulation artifacts"
+	@echo "  make rung6-pass5a-sim      - compile and run bounded Rung 6 Pass 5A MOV reg/reg simulation"
+	@echo "  make rung6-pass5a-clean    - remove Rung 6 Pass 5A simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -266,6 +269,7 @@ RTL_SOURCES_COMMON = \
   rtl/core/services/fetch_engine.sv \
   rtl/core/services/flow_control.sv \
   rtl/core/services/operand_engine.sv \
+  rtl/core/services/load_store.sv \
   rtl/core/services/stack_engine.sv \
   rtl/core/services/interrupt_engine.sv \
   rtl/core/services/service_dispatch.sv \
@@ -570,6 +574,28 @@ rung6-pass4a-sim: require-container ucode
 rung6-pass4a-clean: require-container
 	@rm -rf build/sim/rung6_pass4a
 	@echo "Rung 6 Pass 4A build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 5A — bounded MOV register-register ModRM.mod=11 slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS5A = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_reg_reg.sv
+
+rung6-pass5a-sim: require-container ucode
+	@echo "--- Rung 6 Pass 5A: compiling bounded MOV register-register RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass5a
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass5a/tb_rung6_mov_reg_reg.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS5A)
+	@echo "--- Rung 6 Pass 5A: running bounded MOV register-register simulation ---"
+	vvp build/sim/rung6_pass5a/tb_rung6_mov_reg_reg.vvp
+
+rung6-pass5a-clean: require-container
+	@rm -rf build/sim/rung6_pass5a
+	@echo "Rung 6 Pass 5A build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

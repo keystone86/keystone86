@@ -1,8 +1,8 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 6 Pass 2 top-level with service-based control-transfer paths and the
-// bounded MOV r32, imm32 first slice.
+// Rung 6 Pass 5A top-level with service-based control-transfer paths and
+// bounded MOV immediate/register-register slices.
 
 import keystone86_pkg::*;
 
@@ -90,6 +90,8 @@ module cpu_top (
     logic [1:0]  dec_opsz;
     logic [2:0]  dec_imm_class;
     logic [2:0]  dec_reg_dst;
+    logic [2:0]  dec_reg_src;
+    logic [2:0]  dec_reg_rm;
     logic [3:0]  dec_cond_code;
     logic        dec_ack;
 
@@ -119,6 +121,10 @@ module cpu_top (
     logic [2:0]  pc_gpr_idx;
     logic [1:0]  pc_gpr_opsz;
     logic [31:0] pc_gpr_val;
+    logic        commit_pc_gpr_en;
+    logic [2:0]  commit_pc_gpr_idx;
+    logic [1:0]  commit_pc_gpr_opsz;
+    logic [31:0] commit_pc_gpr_val;
     logic        pc_stack_adj_en;
     logic [31:0] pc_stack_adj_val;
     logic [31:0] stack_push_data;
@@ -171,6 +177,21 @@ module cpu_top (
     logic [31:0] op_mem_rd_addr;
     logic        op_mem_rd_ready;
     logic [31:0] op_mem_rd_data;
+
+    // load_store metadata side: bounded LOAD_REG_META/STORE_REG_META only
+    logic [7:0]  ls_svc_id;
+    logic        ls_svc_req;
+    logic        ls_svc_done;
+    logic [1:0]  ls_svc_sr;
+    logic        ls_t4_wr_en;
+    logic [31:0] ls_t4_wr_data;
+    logic        ls_pc_gpr_en;
+    logic [2:0]  ls_pc_gpr_idx;
+    logic [1:0]  ls_pc_gpr_opsz;
+    logic [31:0] ls_pc_gpr_val;
+    logic [2:0]  gpr_rd_idx;
+    logic [1:0]  gpr_rd_opsz;
+    logic [31:0] gpr_rd_val;
 
     // stack_engine side
     logic [7:0]  se_svc_id;
@@ -227,6 +248,8 @@ module cpu_top (
     logic [1:0]  meta_opsz_r;
     logic [2:0]  meta_imm_class_r;
     logic [2:0]  meta_reg_dst_r;
+    logic [2:0]  meta_reg_src_r;
+    logic [2:0]  meta_reg_rm_r;
     logic        meta_modrm_present_r;
     logic [7:0]  meta_modrm_byte_r;
     logic [7:0]  meta_sib_byte_r;
@@ -270,6 +293,10 @@ module cpu_top (
     assign op_mem_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) &&
                              (!se_stk_rd_req) && eu_done;
     assign op_mem_rd_data  = eu_rdata;
+    assign commit_pc_gpr_en   = pc_gpr_en | ls_pc_gpr_en;
+    assign commit_pc_gpr_idx  = ls_pc_gpr_en ? ls_pc_gpr_idx : pc_gpr_idx;
+    assign commit_pc_gpr_opsz = ls_pc_gpr_en ? ls_pc_gpr_opsz : pc_gpr_opsz;
+    assign commit_pc_gpr_val  = ls_pc_gpr_en ? ls_pc_gpr_val : pc_gpr_val;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -313,6 +340,8 @@ module cpu_top (
             meta_opsz_r          <= 2'h0;
             meta_imm_class_r     <= 3'h0;
             meta_reg_dst_r       <= 3'h0;
+            meta_reg_src_r       <= 3'h0;
+            meta_reg_rm_r        <= 3'h0;
         end else begin
             if (dec_ack) begin
                 meta_modrm_present_r <= dec_modrm_present;
@@ -324,10 +353,13 @@ module cpu_top (
                 meta_opsz_r          <= dec_opsz;
                 meta_imm_class_r     <= dec_imm_class;
                 meta_reg_dst_r       <= dec_reg_dst;
+                meta_reg_src_r       <= dec_reg_src;
+                meta_reg_rm_r        <= dec_reg_rm;
             end
             if (mseq_t2_wr_en) t2_r <= mseq_t2_wr_data;
             if (mseq_t3_wr_en) t3_r <= mseq_t3_wr_data;
             if (fe_t4_wr_en) t4_r <= fe_t4_wr_data;
+            if (ls_t4_wr_en) t4_r <= ls_t4_wr_data;
             if (mseq_t4_wr_en) t4_r <= mseq_t4_wr_data;
             if (dec_ack && dec_payload16_valid) begin
                 if (dec_payload16_signed)
@@ -425,6 +457,8 @@ module cpu_top (
         .opsz         (dec_opsz),
         .imm_class    (dec_imm_class),
         .reg_dst      (dec_reg_dst),
+        .reg_src      (dec_reg_src),
+        .reg_rm       (dec_reg_rm),
         .cond_code    (dec_cond_code),
         .dec_ack      (dec_ack),
         .q_fetch_eip  (q_fetch_eip)
@@ -527,6 +561,11 @@ module cpu_top (
         .op_svc_done (op_svc_done),
         .op_svc_sr   (op_svc_sr),
 
+        .ls_svc_id   (ls_svc_id),
+        .ls_svc_req  (ls_svc_req),
+        .ls_svc_done (ls_svc_done),
+        .ls_svc_sr   (ls_svc_sr),
+
         .se_svc_id   (se_svc_id),
         .se_svc_req  (se_svc_req),
         .se_svc_done (se_svc_done),
@@ -596,6 +635,31 @@ module cpu_top (
         .t2_wr_data    (op_t2_wr_data)
     );
 
+    load_store u_load_store (
+        .clk              (clk),
+        .reset_n          (reset_n),
+        .svc_id           (ls_svc_id),
+        .svc_req          (ls_svc_req),
+        .svc_done         (ls_svc_done),
+        .svc_sr           (ls_svc_sr),
+        .meta_opcode_class(meta_opcode_class_r),
+        .meta_opsz        (meta_opsz_r),
+        .meta_modrm_class (meta_modrm_class_r),
+        .meta_reg_dst     (meta_reg_dst_r),
+        .meta_reg_src     (meta_reg_src_r),
+        .meta_reg_rm      (meta_reg_rm_r),
+        .gpr_rd_idx       (gpr_rd_idx),
+        .gpr_rd_opsz      (gpr_rd_opsz),
+        .gpr_rd_val       (gpr_rd_val),
+        .t4_in            (t4_r),
+        .t4_wr_en         (ls_t4_wr_en),
+        .t4_wr_data       (ls_t4_wr_data),
+        .pc_gpr_en        (ls_pc_gpr_en),
+        .pc_gpr_idx       (ls_pc_gpr_idx),
+        .pc_gpr_opsz      (ls_pc_gpr_opsz),
+        .pc_gpr_val       (ls_pc_gpr_val)
+    );
+
     stack_engine u_stack (
         .clk              (clk),
         .reset_n          (reset_n),
@@ -657,10 +721,14 @@ module cpu_top (
         .raise_fc                   (raise_fc),
         .raise_fe                   (raise_fe),
 
-        .pc_gpr_en                  (pc_gpr_en),
-        .pc_gpr_idx                 (pc_gpr_idx),
-        .pc_gpr_opsz                (pc_gpr_opsz),
-        .pc_gpr_val                 (pc_gpr_val),
+        .pc_gpr_en                  (commit_pc_gpr_en),
+        .pc_gpr_idx                 (commit_pc_gpr_idx),
+        .pc_gpr_opsz                (commit_pc_gpr_opsz),
+        .pc_gpr_val                 (commit_pc_gpr_val),
+
+        .gpr_rd_idx                 (gpr_rd_idx),
+        .gpr_rd_opsz                (gpr_rd_opsz),
+        .gpr_rd_val                 (gpr_rd_val),
 
         .pc_eip_en                  (pc_eip_en),
         .pc_eip_val                 (pc_eip_val),

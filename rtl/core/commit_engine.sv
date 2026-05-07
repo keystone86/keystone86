@@ -22,9 +22,10 @@
 //     the 16-bit IP/CS/FLAGS frame bytes at ENDI. Rung 5 Pass 3 IRET_FLOW uses
 //     the same bounded interrupt-control record without a frame write, applying
 //     the popped EIP/CS/FLAGS/ESP only at ENDI/CM_IRET.
-//   - Rung 6 MOV immediate-to-register slices stage one GPR write through
-//     STAGE_GPR and publish it only on ENDI CM_MOV_REG. B0-B7 byte writes merge
-//     into the containing 32-bit GPR at commit; EFLAGS are not written.
+//   - Rung 6 MOV register slices stage one GPR write and publish it only on
+//     ENDI CM_MOV_REG. B0-B7 and 88/8A byte writes merge into the containing
+//     32-bit GPR at commit; EFLAGS are not written. The read port exposes only
+//     committed GPR state to the bounded LOAD_REG_META service.
 //
 // Scope note:
 //   This file may contain structural surfaces that later rungs can build on.
@@ -51,6 +52,11 @@ module commit_engine (
     input  logic [2:0]  pc_gpr_idx,
     input  logic [1:0]  pc_gpr_opsz,
     input  logic [31:0] pc_gpr_val,
+
+    // --- Committed GPR read port for bounded register-metadata services ---
+    input  logic [2:0]  gpr_rd_idx,
+    input  logic [1:0]  gpr_rd_opsz,
+    output logic [31:0] gpr_rd_val,
 
     // --- Pending fall-through EIP commit ---
     input  logic        pc_eip_en,
@@ -186,6 +192,9 @@ module commit_engine (
     assign fault_pending = fault_pending_r;
     assign fault_class   = fault_class_r;
     assign fault_error   = fault_error_r;
+    assign gpr_rd_val    = read_gpr_value(gpr_r[gpr_commit_index(gpr_rd_idx,
+                                                                  gpr_rd_opsz)],
+                                           gpr_rd_idx, gpr_rd_opsz);
 
     assign eff_pc_eip_en       = pc_eip_en | pc_eip_en_r;
     assign eff_pc_eip_val      = pc_eip_en ? pc_eip_val : pc_eip_val_r;
@@ -237,6 +246,23 @@ module commit_engine (
                     return merged;
                 end
                 default: return new_val;
+            endcase
+        end
+    endfunction
+
+    function automatic logic [31:0] read_gpr_value(
+        input logic [31:0] old_val,
+        input logic [2:0]  raw_idx,
+        input logic [1:0]  opsz_val
+    );
+        begin
+            unique case (opsz_val)
+                2'h0: begin
+                    if (raw_idx[2])
+                        return {24'h0, old_val[15:8]};
+                    return {24'h0, old_val[7:0]};
+                end
+                default: return old_val;
             endcase
         end
     endfunction

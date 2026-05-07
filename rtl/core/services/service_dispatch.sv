@@ -30,6 +30,11 @@ module service_dispatch (
     input  logic       op_svc_done,
     input  logic [1:0] op_svc_sr,
 
+    output logic [7:0] ls_svc_id,
+    output logic       ls_svc_req,
+    input  logic       ls_svc_done,
+    input  logic [1:0] ls_svc_sr,
+
     output logic [7:0] se_svc_id,
     output logic       se_svc_req,
     input  logic       se_svc_done,
@@ -44,6 +49,7 @@ module service_dispatch (
     logic use_fetch;
     logic use_flow;
     logic use_operand;
+    logic use_load_store;
     logic use_stack;
     logic use_interrupt;
 
@@ -54,6 +60,8 @@ module service_dispatch (
         fc_svc_req = 1'b0;
         op_svc_id  = svc_id;
         op_svc_req = 1'b0;
+        ls_svc_id  = svc_id;
+        ls_svc_req = 1'b0;
         se_svc_id  = svc_id;
         se_svc_req = 1'b0;
         ie_svc_id  = svc_id;
@@ -62,6 +70,7 @@ module service_dispatch (
         use_fetch  = 1'b0;
         use_flow   = 1'b0;
         use_operand= 1'b0;
+        use_load_store = 1'b0;
         use_stack  = 1'b0;
         use_interrupt = 1'b0;
 
@@ -85,6 +94,11 @@ module service_dispatch (
                 use_operand = 1'b1;
             end
 
+            LOAD_REG_META,
+            STORE_REG_META: begin
+                use_load_store = 1'b1;
+            end
+
             PUSH16,
             PUSH32,
             POP16,
@@ -101,6 +115,7 @@ module service_dispatch (
                 use_fetch     = 1'b0;
                 use_flow      = 1'b0;
                 use_operand   = 1'b0;
+                use_load_store = 1'b0;
                 use_stack     = 1'b0;
                 use_interrupt = 1'b0;
             end
@@ -113,6 +128,8 @@ module service_dispatch (
                 fc_svc_req = 1'b1;
             else if (use_operand)
                 op_svc_req = 1'b1;
+            else if (use_load_store)
+                ls_svc_req = 1'b1;
             else if (use_stack)
                 se_svc_req = 1'b1;
             else if (use_interrupt)
@@ -128,6 +145,9 @@ module service_dispatch (
         end else if (use_operand) begin
             svc_done = op_svc_done;
             svc_sr   = op_svc_sr;
+        end else if (use_load_store) begin
+            svc_done = ls_svc_done;
+            svc_sr   = ls_svc_sr;
         end else if (use_stack) begin
             svc_done = se_svc_done;
             svc_sr   = se_svc_sr;
