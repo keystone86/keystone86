@@ -1,9 +1,11 @@
 .entry ENTRY_MOV, 0x01
 
-; Rung 6 Pass 5A bounded MOV slice:
+; Rung 6 Pass 5B bounded MOV slice:
 ;   B0-B7 MOV r8, imm8
 ;   B8-BF MOV r32, imm32
+;   66+B8-BF MOV r16, imm16
 ;   88/89/8A/8B register-register only when ModRM.mod=11
+;   66+89/8B register-register only when ModRM.mod=11
 ; Decoder supplies OC_MOV_R_IMM, M_OPSZ, and raw M_REG_DST from opcode[2:0].
 ; For 88/89/8A/8B it supplies OC_MOV_RM_R or OC_MOV_R_RM, M_REG_SRC,
 ; M_REG_RM, and M_REG_DST. LOAD_REG_META/STORE_REG_META are bounded to
@@ -15,12 +17,18 @@ ENTRY_MOV:
     EXTRACT T3, M_IMM_CLASS
     BR C_T3Z, .mov_r_rm
     BR C_W8, .mov_imm8
+    BR C_W16, .mov_imm16
     SVCW FETCH_IMM32
     BR C_FAULT, SUB_FAULT_HANDLER
     STAGE STAGE_GPR, T4
     ENDI CM_MOV_REG
 .mov_imm8:
     SVCW FETCH_IMM8
+    BR C_FAULT, SUB_FAULT_HANDLER
+    STAGE STAGE_GPR, T4
+    ENDI CM_MOV_REG
+.mov_imm16:
+    SVCW FETCH_IMM16
     BR C_FAULT, SUB_FAULT_HANDLER
     STAGE STAGE_GPR, T4
     ENDI CM_MOV_REG

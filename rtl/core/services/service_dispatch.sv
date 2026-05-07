@@ -76,6 +76,7 @@ module service_dispatch (
 
         unique case (svc_id)
             FETCH_IMM8,
+            FETCH_IMM16,
             FETCH_IMM32,
             FETCH_DISP8,
             FETCH_DISP16,

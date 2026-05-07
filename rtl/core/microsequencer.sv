@@ -207,6 +207,7 @@ module microsequencer (
             C_OK:     br_taken = (sr_r == SR_OK);
             C_FAULT:  br_taken = (sr_r == SR_FAULT);
             C_WAIT:   br_taken = (sr_r == SR_WAIT);
+            C_W16:    br_taken = (meta_opsz_r == 2'h1);
             C_W8:     br_taken = (meta_opsz_r == 2'h0);
             C_T3Z:    br_taken = (t3_data == 32'h0);
             C_T3NZ:   br_taken = (t3_data != 32'h0);

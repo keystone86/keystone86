@@ -21,6 +21,8 @@ HOST_GID := $(shell id -g)
         rung6-pass2-sim rung6-pass2-clean \
         rung6-pass4a-sim rung6-pass4a-clean \
         rung6-pass5a-sim rung6-pass5a-clean \
+        rung6-pass4b-sim rung6-pass4b-clean \
+        rung6-pass5b-sim rung6-pass5b-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -106,6 +108,10 @@ help:
 	@echo "  make rung6-pass4a-clean    - remove Rung 6 Pass 4A simulation artifacts"
 	@echo "  make rung6-pass5a-sim      - compile and run bounded Rung 6 Pass 5A MOV reg/reg simulation"
 	@echo "  make rung6-pass5a-clean    - remove Rung 6 Pass 5A simulation artifacts"
+	@echo "  make rung6-pass4b-sim      - compile and run bounded Rung 6 Pass 4B MOV r16, imm16 simulation"
+	@echo "  make rung6-pass4b-clean    - remove Rung 6 Pass 4B simulation artifacts"
+	@echo "  make rung6-pass5b-sim      - compile and run bounded Rung 6 Pass 5B MOV reg/reg16 simulation"
+	@echo "  make rung6-pass5b-clean    - remove Rung 6 Pass 5B simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -596,6 +602,50 @@ rung6-pass5a-sim: require-container ucode
 rung6-pass5a-clean: require-container
 	@rm -rf build/sim/rung6_pass5a
 	@echo "Rung 6 Pass 5A build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 4B — bounded 66+B8-BF MOV r16, imm16 slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS4B = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_imm16.sv
+
+rung6-pass4b-sim: require-container ucode
+	@echo "--- Rung 6 Pass 4B: compiling bounded MOV r16, imm16 RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass4b
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass4b/tb_rung6_mov_imm16.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS4B)
+	@echo "--- Rung 6 Pass 4B: running bounded MOV r16, imm16 simulation ---"
+	vvp build/sim/rung6_pass4b/tb_rung6_mov_imm16.vvp
+
+rung6-pass4b-clean: require-container
+	@rm -rf build/sim/rung6_pass4b
+	@echo "Rung 6 Pass 4B build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 5B — bounded 66+89/8B register-register16 slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS5B = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_reg_reg16.sv
+
+rung6-pass5b-sim: require-container ucode
+	@echo "--- Rung 6 Pass 5B: compiling bounded MOV register-register16 RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass5b
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass5b/tb_rung6_mov_reg_reg16.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS5B)
+	@echo "--- Rung 6 Pass 5B: running bounded MOV register-register16 simulation ---"
+	vvp build/sim/rung6_pass5b/tb_rung6_mov_reg_reg16.vvp
+
+rung6-pass5b-clean: require-container
+	@rm -rf build/sim/rung6_pass5b
+	@echo "Rung 6 Pass 5B build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

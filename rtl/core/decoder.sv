@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through Rung 6 Pass 5A:
+// Decoder role through Rung 6 Pass 5B:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -10,12 +10,15 @@
 //     evaluation and taken-target computation remain service/microcode owned.
 //   - For CD imm8, consume only the opcode and report M_NEXT_EIP as opcode+2;
 //     FETCH_IMM8 remains the microcode-called service that consumes the vector.
-//   - For B0-B7 MOV r8, imm8 and B8-BF MOV r32, imm32, consume only the
-//     opcode and report M_NEXT_EIP after the immediate; FETCH_IMM* remains the
+//   - For B0-B7 MOV r8, imm8, B8-BF MOV r32, imm32, and the bounded
+//     66+B8-BF MOV r16, imm16 slice, consume only opcode/prefix bytes and
+//     report M_NEXT_EIP after the immediate; FETCH_IMM* remains the
 //     microcode-called service that consumes the immediate payload.
 //   - For 88/89/8A/8B MOV register-register, consume opcode+ModRM only when
-//     the instruction is handed to ENTRY_MOV. Non-ModRM.mod=11 forms remain
-//     unsupported and do not enter the memory MOV path.
+//     the instruction is handed to ENTRY_MOV. The 0x66 latch is intentionally
+//     limited to 89/8B ModRM.mod=11 for r16 register-register MOV. Non-register
+//     or otherwise unsupported prefixed forms remain unsupported and do not
+//     enter the memory MOV path.
 //   - Leave target computation, condition evaluation, interrupt policy, and
 //     stack effects to services/microcode.
 //   - Hold decode results stable until dec_ack or committed-boundary squash.
@@ -78,7 +81,8 @@ module decoder (
         DEC_MODRM   = 4'h3,   // used for FF forms
         DEC_SIB     = 4'h4,
         DEC_DISP    = 4'h5,
-        DEC_DONE    = 4'h6
+        DEC_DONE    = 4'h6,
+        DEC_PREFIX66= 4'h7
     } dec_state_t;
 
     dec_state_t state, state_next;
@@ -106,6 +110,7 @@ module decoder (
     logic        is_mov_r_imm8;
     logic        is_mov_r_imm32;
     logic        is_mov_modrm;
+    logic        prefix66_active;
 
     logic        opcode_consumed;
     logic [7:0]  modrm_latch;
@@ -117,9 +122,11 @@ module decoder (
     localparam logic [7:0] OC_MOV_R_RM  = 8'h01;
     localparam logic [7:0] OC_MOV_R_IMM = 8'h02;
     localparam logic [1:0] OPSZ_8       = 2'h0;
+    localparam logic [1:0] OPSZ_16      = 2'h1;
     localparam logic [1:0] OPSZ_32      = 2'h2;
     localparam logic [2:0] IMM_NONE     = 3'h0;
     localparam logic [2:0] IMM_8        = 3'h1;
+    localparam logic [2:0] IMM_16       = 3'h3;
     localparam logic [2:0] IMM_32       = 3'h4;
 
     // ----------------------------------------------------------------
@@ -149,6 +156,7 @@ module decoder (
             is_mov_r_imm8     <= 1'b0;
             is_mov_r_imm32    <= 1'b0;
             is_mov_modrm      <= 1'b0;
+            prefix66_active   <= 1'b0;
             opcode_consumed   <= 1'b0;
             modrm_latch       <= 8'h0;
         end else if (squash) begin
@@ -174,6 +182,7 @@ module decoder (
             is_mov_r_imm8     <= 1'b0;
             is_mov_r_imm32    <= 1'b0;
             is_mov_modrm      <= 1'b0;
+            prefix66_active   <= 1'b0;
             opcode_consumed   <= 1'b0;
             modrm_latch       <= 8'h0;
         end else begin
@@ -183,19 +192,21 @@ module decoder (
                 DEC_IDLE: begin
                     if (q_valid) begin
                         opcode_eip_latch  <= q_fetch_eip;
-                        opcode_byte_latch <= q_data;
-                        is_jmp_short      <= (q_data == 8'hEB);
-                        is_jmp_near       <= (q_data == 8'hE9);
-                        is_call_direct    <= (q_data == 8'hE8);
-                        is_call_ff        <= (q_data == 8'hFF);
-                        is_ret_near       <= (q_data == 8'hC3);
-                        is_ret_imm16      <= (q_data == 8'hC2);
-                        is_jcc_short      <= (q_data[7:4] == 4'h7);
-                        is_int_imm8       <= (q_data == 8'hCD);
-                        is_mov_r_imm8     <= (q_data[7:3] == 5'b10110);
-                        is_mov_r_imm32    <= (q_data[7:3] == 5'b10111);
-                        is_mov_modrm      <= (q_data == 8'h88) || (q_data == 8'h89) ||
-                                             (q_data == 8'h8A) || (q_data == 8'h8B);
+                        opcode_byte_latch <= (q_data == 8'h66) ? 8'h00 : q_data;
+                        is_jmp_short      <= (q_data != 8'h66) && (q_data == 8'hEB);
+                        is_jmp_near       <= (q_data != 8'h66) && (q_data == 8'hE9);
+                        is_call_direct    <= (q_data != 8'h66) && (q_data == 8'hE8);
+                        is_call_ff        <= (q_data != 8'h66) && (q_data == 8'hFF);
+                        is_ret_near       <= (q_data != 8'h66) && (q_data == 8'hC3);
+                        is_ret_imm16      <= (q_data != 8'h66) && (q_data == 8'hC2);
+                        is_jcc_short      <= (q_data != 8'h66) && (q_data[7:4] == 4'h7);
+                        is_int_imm8       <= (q_data != 8'h66) && (q_data == 8'hCD);
+                        is_mov_r_imm8     <= (q_data != 8'h66) && (q_data[7:3] == 5'b10110);
+                        is_mov_r_imm32    <= (q_data != 8'h66) && (q_data[7:3] == 5'b10111);
+                        is_mov_modrm      <= (q_data != 8'h66) &&
+                                             ((q_data == 8'h88) || (q_data == 8'h89) ||
+                                              (q_data == 8'h8A) || (q_data == 8'h8B));
+                        prefix66_active   <= (q_data == 8'h66);
                         aux_lo_valid      <= 1'b0;
                         aux_hi_valid      <= 1'b0;
                         sib_latch         <= 8'h0;
@@ -204,6 +215,29 @@ module decoder (
                         disp_total        <= 3'h0;
                         opcode_consumed   <= 1'b0;
                         modrm_latch       <= 8'h0;
+                    end
+                end
+
+                DEC_PREFIX66: begin
+                    if (!opcode_consumed) begin
+                        if (q_valid && (q_fetch_eip == opcode_eip_latch))
+                            opcode_consumed <= 1'b1;
+                    end else if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h1)) begin
+                        // The Rung 6 prefix latch is one-instruction and only
+                        // 66+B8-BF/89/8B are allowed to become MOV entries.
+                        opcode_byte_latch <= q_data;
+                        is_jmp_short      <= 1'b0;
+                        is_jmp_near       <= 1'b0;
+                        is_call_direct    <= 1'b0;
+                        is_call_ff        <= 1'b0;
+                        is_ret_near       <= 1'b0;
+                        is_ret_imm16      <= 1'b0;
+                        is_jcc_short      <= 1'b0;
+                        is_int_imm8       <= 1'b0;
+                        is_mov_r_imm8     <= 1'b0;
+                        is_mov_r_imm32    <= (q_data[7:3] == 5'b10111);
+                        is_mov_modrm      <= (q_data == 8'h88) || (q_data == 8'h89) ||
+                                             (q_data == 8'h8A) || (q_data == 8'h8B);
                     end
                 end
 
@@ -231,7 +265,7 @@ module decoder (
                     if (!opcode_consumed) begin
                         opcode_consumed <= 1'b1;
                     end else if (!aux_lo_valid) begin
-                        if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h1)) begin
+                        if (q_valid && (q_fetch_eip == opcode_eip_latch + modrm_offset())) begin
                             modrm_latch  <= q_data;
                             aux_lo_valid <= 1'b1;
                             disp_total   <= disp_bytes_for_modrm(q_data, 8'h0, 1'b0);
@@ -277,7 +311,9 @@ module decoder (
         case (state)
             DEC_IDLE: begin
                 if (q_valid) begin
-                    if (q_data == 8'hE8 || q_data == 8'hC2)
+                    if (q_data == 8'h66)
+                        state_next = DEC_PREFIX66;
+                    else if (q_data == 8'hE8 || q_data == 8'hC2)
                         state_next = DEC_DISP16;
                     else if (q_data == 8'hFF || q_data == 8'h88 ||
                              q_data == 8'h89 || q_data == 8'h8A ||
@@ -285,6 +321,17 @@ module decoder (
                         state_next = DEC_MODRM;
                     else
                         state_next = DEC_CONSUME;
+                end
+            end
+
+            DEC_PREFIX66: begin
+                if (opcode_consumed && q_valid &&
+                    (q_fetch_eip == opcode_eip_latch + 32'h1)) begin
+                    if ((q_data == 8'h88) || (q_data == 8'h89) ||
+                        (q_data == 8'h8A) || (q_data == 8'h8B))
+                        state_next = DEC_MODRM;
+                    else
+                        state_next = DEC_DONE;
                 end
             end
 
@@ -368,6 +415,10 @@ module decoder (
                {29'h0, disp_idx};
     endfunction
 
+    function automatic logic [31:0] modrm_offset();
+        return prefix66_active ? 32'd2 : 32'd1;
+    endfunction
+
     function automatic logic [3:0] classify_modrm(input logic [7:0] m);
         if (m[7:6] == 2'b11)
             return 4'h0; // MRM_REG
@@ -390,8 +441,20 @@ module decoder (
     function automatic logic [7:0] classify_opcode(
         input logic [7:0] op,
         input logic       ff2,
-        input logic       mov_modrm_reg
+        input logic       mov_modrm_reg,
+        input logic       pref66
     );
+        if (pref66) begin
+            case (op)
+                8'h89,
+                8'h8B: return mov_modrm_reg ? ENTRY_MOV : ENTRY_NULL;
+                8'hB8, 8'hB9, 8'hBA, 8'hBB,
+                8'hBC, 8'hBD, 8'hBE, 8'hBF:
+                       return ENTRY_MOV;
+                default: return ENTRY_NULL;
+            endcase
+        end
+
         case (op)
             8'h90:            return ENTRY_NOP_XCHG_AX;
             8'hEB, 8'hE9:     return ENTRY_JMP_NEAR;
@@ -432,7 +495,13 @@ module decoder (
         entry_id     = ENTRY_NULL;
 
         // Architectural M_NEXT_EIP
-        if (is_jmp_short || is_jcc_short || is_int_imm8)
+        if (prefix66_active && is_mov_r_imm32)
+            next_eip = opcode_eip_latch + 32'h4;
+        else if (prefix66_active && is_mov_modrm)
+            next_eip = opcode_eip_latch + 32'h3;
+        else if (prefix66_active)
+            next_eip = opcode_eip_latch + 32'h2;
+        else if (is_jmp_short || is_jcc_short || is_int_imm8)
             next_eip = opcode_eip_latch + 32'h2;
         else if (is_jmp_near || is_call_direct || is_ret_imm16)
             next_eip = opcode_eip_latch + 32'h3;
@@ -479,10 +548,12 @@ module decoder (
         else
             opcode_class = 8'h00;
         opsz             = is_mov_r_imm8  ? OPSZ_8  :
+                           (prefix66_active && (is_mov_r_imm32 || is_mov_modrm)) ? OPSZ_16 :
                            is_mov_r_imm32 ? OPSZ_32 :
                            is_mov_modrm   ? (opcode_byte_latch[0] ? OPSZ_32 : OPSZ_8) :
                                             2'h0;
         imm_class        = is_mov_r_imm8  ? IMM_8   :
+                           (prefix66_active && is_mov_r_imm32) ? IMM_16 :
                            is_mov_r_imm32 ? IMM_32  : IMM_NONE;
         if (is_mov_r_imm8 || is_mov_r_imm32)
             reg_dst = opcode_byte_latch[2:0];
@@ -495,6 +566,16 @@ module decoder (
         cond_code        = opcode_byte_latch[3:0];
 
         case (state)
+            DEC_PREFIX66: begin
+                if (!opcode_consumed && q_valid &&
+                    (q_fetch_eip == opcode_eip_latch)) begin
+                    q_consume = 1'b1;
+                end else if (opcode_consumed && q_valid &&
+                             (q_fetch_eip == opcode_eip_latch + 32'h1)) begin
+                    q_consume = 1'b1;
+                end
+            end
+
             DEC_CONSUME: begin
                 q_consume = 1'b1;
             end
@@ -515,7 +596,7 @@ module decoder (
                 if (!opcode_consumed) begin
                     q_consume = 1'b1;
                 end else if (!aux_lo_valid && q_valid &&
-                             (q_fetch_eip == opcode_eip_latch + 32'h1)) begin
+                             (q_fetch_eip == opcode_eip_latch + modrm_offset())) begin
                     q_consume = 1'b1;
                 end
             end
@@ -533,7 +614,8 @@ module decoder (
             DEC_DONE: begin
                 decode_done = 1'b1;
                 entry_id    = classify_opcode(opcode_byte_latch, ff_is_call_near,
-                                              (modrm_latch[7:6] == 2'b11));
+                                              (modrm_latch[7:6] == 2'b11),
+                                              prefix66_active);
 
                 if (is_call_direct) begin
                     is_call          = 1'b1;

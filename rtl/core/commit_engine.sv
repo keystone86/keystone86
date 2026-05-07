@@ -23,9 +23,10 @@
 //     the same bounded interrupt-control record without a frame write, applying
 //     the popped EIP/CS/FLAGS/ESP only at ENDI/CM_IRET.
 //   - Rung 6 MOV register slices stage one GPR write and publish it only on
-//     ENDI CM_MOV_REG. B0-B7 and 88/8A byte writes merge into the containing
-//     32-bit GPR at commit; EFLAGS are not written. The read port exposes only
-//     committed GPR state to the bounded LOAD_REG_META service.
+//     ENDI CM_MOV_REG. Byte writes merge into the containing 32-bit GPR, and
+//     16-bit writes merge the low word while preserving bits [31:16]; EFLAGS
+//     are not written. The read port exposes only committed GPR state to the
+//     bounded LOAD_REG_META service.
 //
 // Scope note:
 //   This file may contain structural surfaces that later rungs can build on.
@@ -245,6 +246,10 @@ module commit_engine (
                         merged[7:0] = new_val[7:0];
                     return merged;
                 end
+                2'h1: begin
+                    merged[15:0] = new_val[15:0];
+                    return merged;
+                end
                 default: return new_val;
             endcase
         end
@@ -262,6 +267,7 @@ module commit_engine (
                         return {24'h0, old_val[15:8]};
                     return {24'h0, old_val[7:0]};
                 end
+                2'h1: return {16'h0, old_val[15:0]};
                 default: return old_val;
             endcase
         end
