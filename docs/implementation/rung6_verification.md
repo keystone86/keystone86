@@ -7,24 +7,33 @@ This document records verification evidence for committed Rung 6 work.
 Current recorded implementation commit:
 
 ```text
-1dfe1f32912cebed91971aef6bd08b9849e9f0ce
+d2485136ef73f774eb4ca1b935fad14de52cc540
 ```
 
 Short commit:
 
 ```text
-1dfe1f3
+d248513
 ```
 
 Recorded scope:
 
 ```text
-Bounded Rung 6 Pass 4A only:
-B0-B7 — MOV r8, imm8
+Bounded Rung 6 Pass 5A only:
+register-only MOV forms from 88/89/8A/8B with ModRM.mod=11 only
 ```
 
-The existing proven `B8-BF` `MOV r32, imm32` path is preserved at this
-checkpoint.
+Implemented Pass 5A forms:
+
+- `88 /r` `MOV r/m8, r8`, register destination only
+- `89 /r` `MOV r/m32, r32`, register destination only
+- `8A /r` `MOV r8, r/m8`, register source only
+- `8B /r` `MOV r32, r/m32`, register source only
+
+The existing proven immediate-register paths are preserved at this checkpoint:
+
+- `B8-BF` `MOV r32, imm32`
+- `B0-B7` `MOV r8, imm8`
 
 Additional Pass 3 confirmation checkpoint:
 
@@ -43,10 +52,12 @@ required: the committed Pass 2 implementation already satisfies the bounded
 Pass 3 target for the `B8-BF` `MOV r32, imm32` GPR/commit proof.
 
 This is not full Rung 6 completion.
+This does not claim full Pass 5.
 This does not claim the full Appendix D MOV matrix.
-This confirms only bounded Pass 4A:
+This confirms only bounded Pass 5A:
 
-- `B0-B7` `MOV r8, imm8`
+- register-only `88/89/8A/8B` with `ModRM.mod=11`
+- preservation of `B0-B7` `MOV r8, imm8`
 - preservation of `B8-BF` `MOV r32, imm32`
 
 ## Donor Material Status
@@ -90,6 +101,67 @@ Results:
 Existing Icarus/Iverilog warnings about constant selects, time units, and
 ignored `unique` case qualities were present during simulation builds. They did
 not fail the commands.
+
+Rung 5 regression still passes at this committed state.
+Rung 7 remains blocked.
+
+## Pass 5A Evidence
+
+Date recorded: 2026-05-07 UTC.
+
+Commands run after commit `d2485136ef73f774eb4ca1b935fad14de52cc540`:
+
+```sh
+make codegen
+make ucode
+make rung5-regress
+make rung6-pass2-sim
+make rung6-pass4a-sim
+make rung6-pass5a-sim
+git diff --check
+git status --short
+```
+
+Results:
+
+| Command | Result |
+|---|---|
+| `make codegen` | PASS |
+| `make ucode` | PASS |
+| `make rung5-regress` | PASS |
+| `make rung6-pass2-sim` | PASS |
+| `make rung6-pass4a-sim` | PASS |
+| `make rung6-pass5a-sim` | PASS |
+| `git diff --check` | PASS |
+| `git status --short` | PASS, clean output |
+
+Existing Icarus/Iverilog warnings about time units, constant selects, and
+ignored `unique` case qualities were present during simulation builds. They did
+not fail the commands.
+
+The bounded Rung 6 Pass 5A simulation proves only the authorized
+register-register slice:
+
+- all 8x8 `r8` register combinations pass
+- all 8x8 `r32` register combinations pass
+- `88/89` destination-`r/m` direction behavior passes for `ModRM.mod=11`
+- `8A/8B` destination-`reg` direction behavior passes for `ModRM.mod=11`
+- non-`ModRM.mod=11` forms remain unsupported and do not execute memory MOV
+- `LOAD_REG_META` and `STORE_REG_META` are bounded metadata-only register
+  services for this slice
+- no `EA_CALC`, `LOAD_RM`, `STORE_RM`, memory access, or memory visibility
+  decision is implemented
+- no bus writes occur for the register-only MOV sequence
+- `ENDI CM_MOV_REG` is used for the bounded register-destination MOV paths
+- architectural GPR visibility remains commit-only through `CM_MOV_REG`
+- EFLAGS remain unchanged
+- final EIP matches fall-through for the bounded Pass 5A instruction sequence
+- no fault occurs during the bounded Pass 5A register-only MOV sequence
+
+The Pass 2 and Pass 4A simulations still prove preservation of:
+
+- `B8-BF` `MOV r32, imm32`
+- `B0-B7` `MOV r8, imm8`
 
 Rung 5 regression still passes at this committed state.
 Rung 7 remains blocked.
@@ -174,19 +246,20 @@ The bounded Rung 6 Pass 2 simulation proves the first slice only:
 This verification record does not claim:
 
 - full Rung 6 completion
+- full Pass 5 completion
 - full Appendix D MOV matrix completion
 - full Rung 6 acceptance
 - `MOV r16, imm16` support
 - `0x66` operand-size override support
 - `FETCH_IMM16` use for `B8-BF`
-- `88/89/8A/8B` support
+- memory forms for `88/89/8A/8B`
 - `C6/C7` support
-- register-register MOV support
 - memory-source MOV support
 - memory-destination MOV support
 - `EA_CALC_16` or `EA_CALC_32` completion
 - `LOAD_RM*` or `STORE_RM*` completion
-- `LOAD_REG_META` or `STORE_REG_META` completion
+- general-purpose `LOAD_REG_META` or `STORE_REG_META` completion beyond the
+  bounded Pass 5A register-register MOV metadata use
 - memory-destination visibility-path resolution
 - final Rung 6 acceptance
 - Rung 7 behavior
@@ -198,14 +271,14 @@ Remaining Rung 6 blockers include:
 - `MOV r16, imm16`, pending explicit `0x66` / operand-size decision
 - `0x66` operand-size override
 - `FETCH_IMM16` for `B8-BF`
-- `88/89/8A/8B`
+- memory forms for `88/89/8A/8B`
 - `C6/C7`
-- register-register MOV
 - memory MOV
 - `EA_CALC`
 - `LOAD_RM` / `STORE_RM`
-- `LOAD_REG_META` / `STORE_REG_META`
+- general-purpose `LOAD_REG_META` / `STORE_REG_META` beyond bounded Pass 5A
 - memory-destination visibility decision
+- full Pass 5
 - full opcode-class dispatch
 - full MOV matrix verification
 - final Rung 6 acceptance
