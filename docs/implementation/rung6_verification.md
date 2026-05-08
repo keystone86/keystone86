@@ -7,21 +7,54 @@ This document records verification evidence for committed Rung 6 work.
 Current recorded implementation commit:
 
 ```text
-c45af9b266e6bdddff1d7f5a8bd1eb3d5956428f
+49d3e84a96f99c5de0fe08644fcabcd1c46b3da9
 ```
 
 Short commit:
 
 ```text
-c45af9b
+49d3e84
 ```
 
 Recorded scope:
 
 ```text
-Bounded Rung 6 Pass 6A-1 only:
-memory-source MOV using default 32-bit addressing, absolute disp32 only
+Bounded Rung 6 Pass 6B-1 only:
+memory-destination MOV using default 32-bit addressing, absolute disp32 only
 ```
+
+Implemented Pass 6B-1 forms:
+
+- `88 /r` `MOV r/m8, r8`, memory destination only
+- `89 /r` `MOV r/m32, r32`, memory destination only
+- `0x66` + `89 /r` `MOV r/m16, r16`, memory destination only
+
+Implemented Pass 6B-1 addressing subset:
+
+- `ModRM.mod = 00`
+- `ModRM.r/m = 101`
+- `disp32` absolute address
+- default 32-bit addressing only
+- no SIB
+- no base register
+- no index register
+- no scale
+- no disp8
+- no `mod=01`
+- no `mod=10`
+- no `0x67`
+
+Implemented Pass 6B-1 memory-destination visibility policy:
+
+- `STORE_RM8`, `STORE_RM16`, and `STORE_RM32` are direct
+  microcode-sequenced `load_store` service-side bus writes
+- `STORE_RM*` completes before `ENDI`
+- memory-destination MOV uses `ENDI CM_NOP|CM_EIP`, not `CM_MOV_REG`
+- `ENDI` performs normal sequential completion / EIP cleanup only
+- no new memory-store commit mask was added
+- no new frozen-spec field was added
+- no new microinstruction was added
+- no commit-time memory-store policy was added
 
 Implemented Pass 6A-1 forms:
 
@@ -84,9 +117,14 @@ Pass 3 target for the `B8-BF` `MOV r32, imm32` GPR/commit proof.
 This is not full Rung 6 completion.
 This does not claim full Pass 6A.
 This does not claim the full Appendix D MOV matrix.
-This confirms only bounded Pass 6A-1 memory-source absolute disp32 support,
-plus the previously recorded bounded Pass 4B, Pass 5A, and Pass 5B support:
+This confirms only bounded Pass 6B-1 memory-destination absolute disp32
+support, plus the previously recorded bounded Pass 6A-1, Pass 4B, Pass 5A, and
+Pass 5B support:
 
+- `88 /r` `MOV r/m8, r8`, memory destination only, direct absolute disp32 only
+- `89 /r` `MOV r/m32, r32`, memory destination only, direct absolute disp32 only
+- `0x66` + `89 /r` `MOV r/m16, r16`, memory destination only, direct absolute
+  disp32 only
 - `8A /r` `MOV r8, r/m8`, memory source only, direct absolute disp32 only
 - `8B /r` `MOV r32, r/m32`, memory source only, direct absolute disp32 only
 - `0x66` + `8B /r` `MOV r16, r/m16`, memory source only, direct absolute
@@ -139,6 +177,95 @@ Results:
 Existing Icarus/Iverilog warnings about constant selects, time units, and
 ignored `unique` case qualities were present during simulation builds. They did
 not fail the commands.
+
+Rung 5 regression still passes at this committed state.
+Rung 7 remains blocked.
+
+## Pass 6B-1 Evidence
+
+Date recorded: 2026-05-08 UTC.
+
+Commands run after commit `49d3e84a96f99c5de0fe08644fcabcd1c46b3da9`:
+
+```sh
+make codegen
+make ucode
+make rung5-regress
+make rung6-pass2-sim
+make rung6-pass4a-sim
+make rung6-pass4b-sim
+make rung6-pass5a-sim
+make rung6-pass5b-sim
+make rung6-pass6a1-sim
+make rung6-pass6b1-sim
+git diff --check
+git status --short
+```
+
+Results:
+
+| Command | Result |
+|---|---|
+| `make codegen` | PASS |
+| `make ucode` | PASS |
+| `make rung5-regress` | PASS |
+| `make rung6-pass2-sim` | PASS |
+| `make rung6-pass4a-sim` | PASS |
+| `make rung6-pass4b-sim` | PASS |
+| `make rung6-pass5a-sim` | PASS |
+| `make rung6-pass5b-sim` | PASS |
+| `make rung6-pass6a1-sim` | PASS |
+| `make rung6-pass6b1-sim` | PASS |
+| `git diff --check` | PASS |
+| `git status --short` | PASS, clean output |
+
+Existing Icarus/Iverilog warnings about time units, constant selects, and
+ignored `unique` case qualities were present during simulation builds. They did
+not fail the commands.
+
+The bounded Rung 6 Pass 6B-1 simulation proves only the authorized
+memory-destination absolute-disp32 slice:
+
+- `88 /r` byte stores to absolute disp32 memory destination pass for all eight
+  raw byte-register sources
+- `89 /r` dword stores to absolute disp32 memory destination pass for all eight
+  `r32` sources
+- `0x66` + `89 /r` word stores to absolute disp32 memory destination pass for
+  all eight `r16` sources
+- `EA_CALC_32` is issued once per authorized memory-destination MOV and is
+  bounded to direct absolute disp32 only
+- `LOAD_REG_META` is issued to read each bounded memory-destination source
+  register
+- `STORE_RM8`, `STORE_RM16`, and `STORE_RM32` are issued for the authorized
+  memory-destination write widths only
+- `STORE_RM8` uses bus byte enable `0001`
+- `STORE_RM16` uses bus byte enable `0011`
+- `STORE_RM32` uses bus byte enable `1111`
+- final memory values match the expected byte, word, and dword stores
+- `STORE_RM*` completes before `ENDI`
+- memory-destination MOV uses `ENDI CM_NOP|CM_EIP`, not `CM_MOV_REG`
+- no new memory-store commit mask, frozen-spec field, microinstruction, or
+  commit-time memory-store policy is used
+- EFLAGS remain unchanged
+- no unintended GPR changes occur for memory-destination MOV
+- final EIP matches fall-through for the bounded Pass 6B-1 instruction
+  sequence
+- unsupported adjacent memory-destination forms tested with `mod=01`, `mod=10`,
+  SIB, `0x66` + `88`, and `0x67` remain unsupported and do not execute MOV
+- no fault occurs during the authorized bounded Pass 6B-1 memory-destination
+  MOV sequence
+
+The existing Pass 2, Pass 4A, Pass 4B, Pass 5A, Pass 5B, and Pass 6A-1
+simulations still prove preservation of:
+
+- `B8-BF` `MOV r32, imm32`
+- `B0-B7` `MOV r8, imm8`
+- `0x66` + `B8-BF` `MOV r16, imm16`
+- `88/89/8A/8B` register-register `r8/r32` with `ModRM.mod=11` only
+- `0x66` + `89/8B` register-register `r16` with `ModRM.mod=11` only
+- `8A /r` byte loads from absolute disp32 memory source
+- `8B /r` dword loads from absolute disp32 memory source
+- `0x66` + `8B /r` word loads from absolute disp32 memory source
 
 Rung 5 regression still passes at this committed state.
 Rung 7 remains blocked.
@@ -443,19 +570,20 @@ This verification record does not claim:
 - broad `0x66` prefix architecture
 - `0x66` support for non-authorized instructions
 - `0x67` address-size override behavior
-- memory forms for `88/89`
+- `88/89` memory-destination addressing beyond direct absolute disp32
 - `8A/8B` memory-source addressing beyond direct absolute disp32
 - `C6/C7` support
-- memory-destination MOV support
+- immediate-to-memory MOV support
 - `EA_CALC_16` support
 - `EA_CALC_32` beyond direct absolute disp32
 - `LOAD_RM*` beyond bounded memory-source reads for direct absolute disp32
-- `STORE_RM*` completion
+- `STORE_RM*` beyond bounded memory-destination writes for direct absolute
+  disp32 MOV
 - general-purpose `LOAD_REG_META` or `STORE_REG_META` completion beyond the
-  bounded Pass 5A register-register MOV metadata use
+  bounded Pass 5A/5B register-register MOV and Pass 6B-1 memory-destination MOV
+  metadata use
 - SIB, base/index/scale, disp8, `mod=01`, or `mod=10` memory addressing
 - protected-mode, page, or segment behavior
-- memory-destination visibility-path resolution
 - final Rung 6 acceptance
 - Rung 7 behavior
 
@@ -463,17 +591,17 @@ This verification record does not claim:
 
 Remaining Rung 6 blockers include:
 
-- memory destination forms for `88/89`
 - `C6/C7`
-- `STORE_RM`
+- immediate-to-memory MOV
+- `STORE_RM*` beyond bounded memory-destination direct absolute disp32 MOV
 - SIB/base/index/scale effective-address calculation
 - disp8, `mod=01`, and `mod=10` memory addressing
 - `0x67` address-size override behavior
 - `EA_CALC_16`
 - 16-bit addressing
 - protected-mode/page/segment behavior
-- general-purpose `LOAD_REG_META` / `STORE_REG_META` beyond bounded Pass 5A
-- memory-destination visibility decision
+- general-purpose `LOAD_REG_META` / `STORE_REG_META` beyond bounded
+  register-register and Pass 6B-1 memory-destination MOV
 - full MOV matrix verification
 - full opcode-class dispatch
 - final Rung 6 acceptance
