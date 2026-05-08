@@ -17,7 +17,7 @@ for i in range(256):
         val = 0x010
         meaning = "ENTRY_NULL"
     elif i == 0x01:
-        val = 0x0B0       # Rung 6 Pass 6A-1: bounded MOV register/immediate/mem-source slice
+        val = 0x0B0       # Rung 6 Pass 6B-1: bounded MOV register/immediate/mem-source/mem-destination slice
         meaning = "ENTRY_MOV"
     elif i == 0x07:
         val = 0x050       # Rung 2: ENTRY_JMP_NEAR
@@ -88,6 +88,9 @@ EA_CALC_32             = 0x11
 LOAD_RM8               = 0x20
 LOAD_RM16              = 0x21
 LOAD_RM32              = 0x22
+STORE_RM8              = 0x23
+STORE_RM16             = 0x24
+STORE_RM32             = 0x25
 LOAD_REG_META          = 0x26
 STORE_REG_META         = 0x27
 PUSH32                 = 0x41
@@ -271,20 +274,23 @@ rom[0x0A2] = br(C_FAULT, rel10(0x0A2, 0x000))
 rom[0x0A3] = endi(CM_IRET)
 
 # --------------------------------------------------------------------
-# Rung 6 Pass 6A-1: ENTRY_MOV immediate, register-register, and bounded
-# memory-source direct-disp32 slices at 0x0B0
+# Rung 6 Pass 6B-1: ENTRY_MOV immediate, register-register, bounded
+# memory-source direct-disp32, and bounded memory-destination direct-disp32
+# slices at 0x0B0
 #
 # B0-B7, B8-BF, and 66+B8-BF keep the proven immediate path with width
 # dispatch. 88/89/8A/8B and 66+89/8B use LOAD_REG_META/STORE_REG_META only
 # after decoder has accepted ModRM.mod=11. 8A/8B and 66+8B direct absolute
 # disp32 memory-source forms use EA_CALC_32 and LOAD_RM8/16/32, then publish
-# through the same CM_MOV_REG commit boundary. Other memory forms remain on
+# through the same CM_MOV_REG commit boundary. 88/89 and 66+89 direct absolute
+# disp32 memory-destination forms use EA_CALC_32, LOAD_REG_META, and
+# STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP. Other memory forms remain on
 # ENTRY_NULL and are not routed here.
 # --------------------------------------------------------------------
 rom[0x0B0] = extract(REG_T3, MF_OPCODE_CLASS)
 rom[0x0B1] = br(C_T3Z, rel10(0x0B1, 0x0C2))
 rom[0x0B2] = extract(REG_T3, MF_IMM_CLASS)
-rom[0x0B3] = br(C_T3Z, rel10(0x0B3, 0x0C7))
+rom[0x0B3] = br(C_T3Z, rel10(0x0B3, 0x0D8))
 rom[0x0B4] = br(C_W8, rel10(0x0B4, 0x0BA))
 rom[0x0B5] = br(C_W16, rel10(0x0B5, 0x0BE))
 rom[0x0B6] = svcw_small(FETCH_IMM32)
@@ -299,34 +305,51 @@ rom[0x0BE] = svcw_small(FETCH_IMM16)
 rom[0x0BF] = br(C_FAULT, rel10(0x0BF, 0x000))
 rom[0x0C0] = stage(STAGE_GPR, REG_T4)
 rom[0x0C1] = endi(CM_MOV_REG)
-rom[0x0C2] = svcw_small(LOAD_REG_META)
-rom[0x0C3] = br(C_FAULT, rel10(0x0C3, 0x000))
-rom[0x0C4] = svcw_small(STORE_REG_META)
+rom[0x0C2] = extract(REG_T3, MF_MODRM_CLASS)
+rom[0x0C3] = br(C_T3Z, rel10(0x0C3, 0x0D3))
+rom[0x0C4] = svcw_small(EA_CALC_32)
 rom[0x0C5] = br(C_FAULT, rel10(0x0C5, 0x000))
-rom[0x0C6] = endi(CM_MOV_REG)
-rom[0x0C7] = extract(REG_T3, MF_MODRM_CLASS)
-rom[0x0C8] = br(C_T3Z, rel10(0x0C8, 0x0D1))
-rom[0x0C9] = svcw_small(EA_CALC_32)
-rom[0x0CA] = br(C_FAULT, rel10(0x0CA, 0x000))
-rom[0x0CB] = br(C_W8, rel10(0x0CB, 0x0D6))
-rom[0x0CC] = br(C_W16, rel10(0x0CC, 0x0DA))
-rom[0x0CD] = svcw_small(LOAD_RM32)
+rom[0x0C6] = svcw_small(LOAD_REG_META)
+rom[0x0C7] = br(C_FAULT, rel10(0x0C7, 0x000))
+rom[0x0C8] = br(C_W8, rel10(0x0C8, 0x0CD))
+rom[0x0C9] = br(C_W16, rel10(0x0C9, 0x0D0))
+rom[0x0CA] = svcw_small(STORE_RM32)
+rom[0x0CB] = br(C_FAULT, rel10(0x0CB, 0x000))
+rom[0x0CC] = endi(CM_NOP_EIP)
+rom[0x0CD] = svcw_small(STORE_RM8)
 rom[0x0CE] = br(C_FAULT, rel10(0x0CE, 0x000))
-rom[0x0CF] = stage(STAGE_GPR, REG_T4)
-rom[0x0D0] = endi(CM_MOV_REG)
-rom[0x0D1] = svcw_small(LOAD_REG_META)
-rom[0x0D2] = br(C_FAULT, rel10(0x0D2, 0x000))
-rom[0x0D3] = svcw_small(STORE_REG_META)
+rom[0x0CF] = endi(CM_NOP_EIP)
+rom[0x0D0] = svcw_small(STORE_RM16)
+rom[0x0D1] = br(C_FAULT, rel10(0x0D1, 0x000))
+rom[0x0D2] = endi(CM_NOP_EIP)
+rom[0x0D3] = svcw_small(LOAD_REG_META)
 rom[0x0D4] = br(C_FAULT, rel10(0x0D4, 0x000))
-rom[0x0D5] = endi(CM_MOV_REG)
-rom[0x0D6] = svcw_small(LOAD_RM8)
-rom[0x0D7] = br(C_FAULT, rel10(0x0D7, 0x000))
-rom[0x0D8] = stage(STAGE_GPR, REG_T4)
-rom[0x0D9] = endi(CM_MOV_REG)
-rom[0x0DA] = svcw_small(LOAD_RM16)
+rom[0x0D5] = svcw_small(STORE_REG_META)
+rom[0x0D6] = br(C_FAULT, rel10(0x0D6, 0x000))
+rom[0x0D7] = endi(CM_MOV_REG)
+rom[0x0D8] = extract(REG_T3, MF_MODRM_CLASS)
+rom[0x0D9] = br(C_T3Z, rel10(0x0D9, 0x0E2))
+rom[0x0DA] = svcw_small(EA_CALC_32)
 rom[0x0DB] = br(C_FAULT, rel10(0x0DB, 0x000))
-rom[0x0DC] = stage(STAGE_GPR, REG_T4)
-rom[0x0DD] = endi(CM_MOV_REG)
+rom[0x0DC] = br(C_W8, rel10(0x0DC, 0x0E7))
+rom[0x0DD] = br(C_W16, rel10(0x0DD, 0x0EB))
+rom[0x0DE] = svcw_small(LOAD_RM32)
+rom[0x0DF] = br(C_FAULT, rel10(0x0DF, 0x000))
+rom[0x0E0] = stage(STAGE_GPR, REG_T4)
+rom[0x0E1] = endi(CM_MOV_REG)
+rom[0x0E2] = svcw_small(LOAD_REG_META)
+rom[0x0E3] = br(C_FAULT, rel10(0x0E3, 0x000))
+rom[0x0E4] = svcw_small(STORE_REG_META)
+rom[0x0E5] = br(C_FAULT, rel10(0x0E5, 0x000))
+rom[0x0E6] = endi(CM_MOV_REG)
+rom[0x0E7] = svcw_small(LOAD_RM8)
+rom[0x0E8] = br(C_FAULT, rel10(0x0E8, 0x000))
+rom[0x0E9] = stage(STAGE_GPR, REG_T4)
+rom[0x0EA] = endi(CM_MOV_REG)
+rom[0x0EB] = svcw_small(LOAD_RM16)
+rom[0x0EC] = br(C_FAULT, rel10(0x0EC, 0x000))
+rom[0x0ED] = stage(STAGE_GPR, REG_T4)
+rom[0x0EE] = endi(CM_MOV_REG)
 
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
@@ -334,7 +357,7 @@ listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, Rung 4 Jcc,
 ; Rung 5 Pass 2 INT_ENTER path, Pass 3 bounded IRET_FLOW path,
 ; Pass 4 bounded #UD fault delivery through SUB_FAULT_HANDLER,
-; and Rung 6 Pass 6A-1 bounded MOV immediate/register-register/mem-source slices
+; and Rung 6 Pass 6B-1 bounded MOV immediate/register-register/mem-source/mem-destination slices
 address  encoding     source
 0x000    {extract(REG_T4, MF_FC_TO_VECTOR)}   SUB_FAULT_HANDLER: EXTRACT T4, MF_FC_TO_VECTOR
 0x001    {ext_word()}   EXT
@@ -401,7 +424,7 @@ address  encoding     source
 0x0B0    {extract(REG_T3, MF_OPCODE_CLASS)}   ENTRY_MOV: EXTRACT T3, M_OPCODE_CLASS
 0x0B1    {br(C_T3Z, rel10(0x0B1, 0x0C2))}   BR C_T3Z, mov_rm_r
 0x0B2    {extract(REG_T3, MF_IMM_CLASS)}   EXTRACT T3, M_IMM_CLASS
-0x0B3    {br(C_T3Z, rel10(0x0B3, 0x0C7))}   BR C_T3Z, mov_r_rm
+0x0B3    {br(C_T3Z, rel10(0x0B3, 0x0D8))}   BR C_T3Z, mov_r_rm
 0x0B4    {br(C_W8, rel10(0x0B4, 0x0BA))}   BR C_W8, mov_imm8
 0x0B5    {br(C_W16, rel10(0x0B5, 0x0BE))}   BR C_W16, mov_imm16
 0x0B6    {svcw_small(FETCH_IMM32)}   SVCW FETCH_IMM32
@@ -416,34 +439,51 @@ address  encoding     source
 0x0BF    {br(C_FAULT, rel10(0x0BF, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
 0x0C0    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
 0x0C1    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
-0x0C2    {svcw_small(LOAD_REG_META)}   mov_rm_r: SVCW LOAD_REG_META
-0x0C3    {br(C_FAULT, rel10(0x0C3, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0C4    {svcw_small(STORE_REG_META)}   SVCW STORE_REG_META
+0x0C2    {extract(REG_T3, MF_MODRM_CLASS)}   mov_rm_r: EXTRACT T3, M_MODRM_CLASS
+0x0C3    {br(C_T3Z, rel10(0x0C3, 0x0D3))}   BR C_T3Z, mov_rm_r_reg
+0x0C4    {svcw_small(EA_CALC_32)}   SVCW EA_CALC_32
 0x0C5    {br(C_FAULT, rel10(0x0C5, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0C6    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
-0x0C7    {extract(REG_T3, MF_MODRM_CLASS)}   mov_r_rm: EXTRACT T3, M_MODRM_CLASS
-0x0C8    {br(C_T3Z, rel10(0x0C8, 0x0D1))}   BR C_T3Z, mov_r_rm_reg
-0x0C9    {svcw_small(EA_CALC_32)}   SVCW EA_CALC_32
-0x0CA    {br(C_FAULT, rel10(0x0CA, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0CB    {br(C_W8, rel10(0x0CB, 0x0D6))}   BR C_W8, mov_mem_load8
-0x0CC    {br(C_W16, rel10(0x0CC, 0x0DA))}   BR C_W16, mov_mem_load16
-0x0CD    {svcw_small(LOAD_RM32)}   SVCW LOAD_RM32
+0x0C6    {svcw_small(LOAD_REG_META)}   SVCW LOAD_REG_META
+0x0C7    {br(C_FAULT, rel10(0x0C7, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0C8    {br(C_W8, rel10(0x0C8, 0x0CD))}   BR C_W8, mov_mem_store8
+0x0C9    {br(C_W16, rel10(0x0C9, 0x0D0))}   BR C_W16, mov_mem_store16
+0x0CA    {svcw_small(STORE_RM32)}   SVCW STORE_RM32
+0x0CB    {br(C_FAULT, rel10(0x0CB, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0CC    {endi(CM_NOP_EIP)}   ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
+0x0CD    {svcw_small(STORE_RM8)}   mov_mem_store8: SVCW STORE_RM8
 0x0CE    {br(C_FAULT, rel10(0x0CE, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0CF    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
-0x0D0    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
-0x0D1    {svcw_small(LOAD_REG_META)}   mov_r_rm_reg: SVCW LOAD_REG_META
-0x0D2    {br(C_FAULT, rel10(0x0D2, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0D3    {svcw_small(STORE_REG_META)}   SVCW STORE_REG_META
+0x0CF    {endi(CM_NOP_EIP)}   ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
+0x0D0    {svcw_small(STORE_RM16)}   mov_mem_store16: SVCW STORE_RM16
+0x0D1    {br(C_FAULT, rel10(0x0D1, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0D2    {endi(CM_NOP_EIP)}   ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
+0x0D3    {svcw_small(LOAD_REG_META)}   mov_rm_r_reg: SVCW LOAD_REG_META
 0x0D4    {br(C_FAULT, rel10(0x0D4, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0D5    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
-0x0D6    {svcw_small(LOAD_RM8)}   mov_mem_load8: SVCW LOAD_RM8
-0x0D7    {br(C_FAULT, rel10(0x0D7, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0D8    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
-0x0D9    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
-0x0DA    {svcw_small(LOAD_RM16)}   mov_mem_load16: SVCW LOAD_RM16
+0x0D5    {svcw_small(STORE_REG_META)}   SVCW STORE_REG_META
+0x0D6    {br(C_FAULT, rel10(0x0D6, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0D7    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
+0x0D8    {extract(REG_T3, MF_MODRM_CLASS)}   mov_r_rm: EXTRACT T3, M_MODRM_CLASS
+0x0D9    {br(C_T3Z, rel10(0x0D9, 0x0E2))}   BR C_T3Z, mov_r_rm_reg
+0x0DA    {svcw_small(EA_CALC_32)}   SVCW EA_CALC_32
 0x0DB    {br(C_FAULT, rel10(0x0DB, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
-0x0DC    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
-0x0DD    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
+0x0DC    {br(C_W8, rel10(0x0DC, 0x0E7))}   BR C_W8, mov_mem_load8
+0x0DD    {br(C_W16, rel10(0x0DD, 0x0EB))}   BR C_W16, mov_mem_load16
+0x0DE    {svcw_small(LOAD_RM32)}   SVCW LOAD_RM32
+0x0DF    {br(C_FAULT, rel10(0x0DF, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0E0    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
+0x0E1    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
+0x0E2    {svcw_small(LOAD_REG_META)}   mov_r_rm_reg: SVCW LOAD_REG_META
+0x0E3    {br(C_FAULT, rel10(0x0E3, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0E4    {svcw_small(STORE_REG_META)}   SVCW STORE_REG_META
+0x0E5    {br(C_FAULT, rel10(0x0E5, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0E6    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
+0x0E7    {svcw_small(LOAD_RM8)}   mov_mem_load8: SVCW LOAD_RM8
+0x0E8    {br(C_FAULT, rel10(0x0E8, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0E9    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
+0x0EA    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
+0x0EB    {svcw_small(LOAD_RM16)}   mov_mem_load16: SVCW LOAD_RM16
+0x0EC    {br(C_FAULT, rel10(0x0EC, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
+0x0ED    {stage(STAGE_GPR, REG_T4)}   STAGE STAGE_GPR, T4
+0x0EE    {endi(CM_MOV_REG)}   ENDI CM_MOV_REG (0x{CM_MOV_REG:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
@@ -459,4 +499,4 @@ print(f"  CM_IRET = 0x{CM_IRET:03X}")
 print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 2 INT_ENTER)")
 print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 3 IRET_FLOW)")
 print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
-print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x0B0 (Rung 6 Pass 6A-1 MOV immediate/register-register/mem-source)")
+print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x0B0 (Rung 6 Pass 6B-1 MOV immediate/register-register/mem-source/mem-destination)")

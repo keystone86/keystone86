@@ -8,7 +8,8 @@
 //   66 8B /r   mod=00 r/m=101 disp32 -> MOV r16, [disp32]
 //
 // This test intentionally does not exercise SIB, base/index/scale, disp8,
-// mod=01/10, 0x67, memory destination, STORE_RM, or C6/C7.
+// mod=01/10, 0x67, STORE_RM, or C6/C7. Pass 6B-1 covers the newly-authorized
+// direct-disp32 memory-destination MOV forms in a separate testbench.
 
 `timescale 1ns/1ps
 
@@ -509,10 +510,6 @@ module tb_rung6_mov_mem_src_disp32;
             end
         end
 
-        run_unsupported_form(6, 8'h88, 8'h05, 8'h00, 8'h30, 8'h00, 8'h00, 8'h00,
-                             "88 mod=00 direct memory destination");
-        run_unsupported_form(6, 8'h89, 8'h05, 8'h00, 8'h30, 8'h00, 8'h00, 8'h00,
-                             "89 mod=00 direct memory destination");
         run_unsupported_form(3, 8'h8A, 8'h45, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
                              "8A mod=01 disp8");
         run_unsupported_form(6, 8'h8B, 8'h85, 8'h00, 8'h30, 8'h00, 8'h00, 8'h00,

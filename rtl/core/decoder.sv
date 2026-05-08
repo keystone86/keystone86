@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through Rung 6 Pass 6A-1:
+// Decoder role through Rung 6 Pass 6B-1:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -21,8 +21,11 @@
 //     enter the memory MOV path.
 //   - For the bounded Pass 6A-1 memory-source slice, accept only 8A/8B and
 //     66+8B with ModRM.mod=00 and r/m=101, consume the disp32 absolute address,
-//     and report M_NEXT_EIP after that displacement. SIB, register-base,
-//     disp8, mod=01/10, memory-destination MOV, and 0x67 remain unsupported.
+//     and report M_NEXT_EIP after that displacement.
+//   - For the bounded Pass 6B-1 memory-destination slice, accept only 88/89
+//     and 66+89 with ModRM.mod=00 and r/m=101, consume the disp32 absolute
+//     address, and report M_NEXT_EIP after that displacement. SIB,
+//     register-base, disp8, mod=01/10, C6/C7, and 0x67 remain unsupported.
 //   - Leave target computation, condition evaluation, interrupt policy, and
 //     stack effects to services/microcode.
 //   - Hold decode results stable until dec_ack or committed-boundary squash.
@@ -355,9 +358,12 @@ module decoder (
                     else if (is_call_ff && ff_is_call_near && (disp_total != 3'd0))
                         state_next = DEC_DISP;
                     else if (is_mov_modrm &&
-                             mov_mem_src_disp32_form(opcode_byte_latch,
-                                                      modrm_latch,
-                                                      prefix66_active))
+                             (mov_mem_src_disp32_form(opcode_byte_latch,
+                                                       modrm_latch,
+                                                       prefix66_active) ||
+                              mov_mem_dst_disp32_form(opcode_byte_latch,
+                                                       modrm_latch,
+                                                       prefix66_active)))
                         state_next = DEC_DISP;
                     else
                         state_next = DEC_DONE;
@@ -466,16 +472,36 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_mem_dst_disp32_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic       pref66
+    );
+        logic direct_disp32;
+        begin
+            direct_disp32 = (m[7:6] == 2'b00) && (m[2:0] == 3'b101);
+            if (!direct_disp32)
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h89);
+
+            return (op == 8'h88) || (op == 8'h89);
+        end
+    endfunction
+
     function automatic logic [7:0] classify_opcode(
         input logic [7:0] op,
         input logic       ff2,
         input logic       mov_modrm_reg,
         input logic       mov_mem_src_disp32,
+        input logic       mov_mem_dst_disp32,
         input logic       pref66
     );
         if (pref66) begin
             case (op)
-                8'h89: return mov_modrm_reg ? ENTRY_MOV : ENTRY_NULL;
+                8'h89: return (mov_modrm_reg || mov_mem_dst_disp32) ? ENTRY_MOV
+                                                                     : ENTRY_NULL;
                 8'h8B: return (mov_modrm_reg || mov_mem_src_disp32) ? ENTRY_MOV
                                                                      : ENTRY_NULL;
                 8'hB8, 8'hB9, 8'hBA, 8'hBB,
@@ -496,7 +522,8 @@ module decoder (
             8'hE8:            return ENTRY_CALL_NEAR;
             8'hFF:            return ff2 ? ENTRY_CALL_NEAR : ENTRY_NULL;
             8'h88, 8'h89:
-                              return mov_modrm_reg ? ENTRY_MOV : ENTRY_NULL;
+                              return (mov_modrm_reg || mov_mem_dst_disp32) ? ENTRY_MOV
+                                                                           : ENTRY_NULL;
             8'h8A, 8'h8B:     return (mov_modrm_reg || mov_mem_src_disp32) ? ENTRY_MOV
                                                                             : ENTRY_NULL;
             8'hC3, 8'hC2:     return ENTRY_RET_NEAR;
@@ -530,7 +557,8 @@ module decoder (
         if (prefix66_active && is_mov_r_imm32)
             next_eip = opcode_eip_latch + 32'h4;
         else if (prefix66_active && is_mov_modrm) begin
-            if (mov_mem_src_disp32_form(opcode_byte_latch, modrm_latch, 1'b1))
+            if (mov_mem_src_disp32_form(opcode_byte_latch, modrm_latch, 1'b1) ||
+                mov_mem_dst_disp32_form(opcode_byte_latch, modrm_latch, 1'b1))
                 next_eip = opcode_eip_latch + 32'h7;
             else
                 next_eip = opcode_eip_latch + 32'h3;
@@ -546,7 +574,8 @@ module decoder (
         else if (is_mov_r_imm32)
             next_eip = opcode_eip_latch + 32'h5;
         else if (is_mov_modrm) begin
-            if (mov_mem_src_disp32_form(opcode_byte_latch, modrm_latch, 1'b0))
+            if (mov_mem_src_disp32_form(opcode_byte_latch, modrm_latch, 1'b0) ||
+                mov_mem_dst_disp32_form(opcode_byte_latch, modrm_latch, 1'b0))
                 next_eip = opcode_eip_latch + 32'h6;
             else
                 next_eip = opcode_eip_latch + 32'h2;
@@ -656,6 +685,9 @@ module decoder (
                 entry_id    = classify_opcode(opcode_byte_latch, ff_is_call_near,
                                               (modrm_latch[7:6] == 2'b11),
                                               mov_mem_src_disp32_form(opcode_byte_latch,
+                                                                       modrm_latch,
+                                                                       prefix66_active),
+                                              mov_mem_dst_disp32_form(opcode_byte_latch,
                                                                        modrm_latch,
                                                                        prefix66_active),
                                               prefix66_active);

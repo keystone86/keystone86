@@ -8,6 +8,8 @@
 //     independent of whether svc_req is still high.
 //   - LOAD_RM32 remains routed to operand_engine for the older CALL path unless
 //     MOV memory-source metadata selects the Rung 6 load_store path.
+//   - STORE_RM8/16/32 are bounded Rung 6 MOV memory-destination services and
+//     route directly to load_store.
 
 import keystone86_pkg::*;
 
@@ -115,6 +117,12 @@ module service_dispatch (
 
             LOAD_RM16,
             LOAD_RM8: begin
+                use_load_store = 1'b1;
+            end
+
+            STORE_RM8,
+            STORE_RM16,
+            STORE_RM32: begin
                 use_load_store = 1'b1;
             end
 

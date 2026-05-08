@@ -1,9 +1,9 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 6 Pass 6A-1 top-level with service-based control-transfer paths,
-// bounded MOV immediate/register-register slices, and direct-disp32
-// memory-source MOV reads.
+// Rung 6 Pass 6B-1 top-level with service-based control-transfer paths,
+// bounded MOV immediate/register-register slices, direct-disp32 memory-source
+// MOV reads, and direct-disp32 memory-destination MOV writes.
 
 import keystone86_pkg::*;
 
@@ -188,6 +188,7 @@ module cpu_top (
     logic [31:0] ea_t2_wr_data;
 
     // load_store side: register metadata plus bounded memory-source LOAD_RM*
+    // and memory-destination STORE_RM* direct-disp32 operations.
     logic [7:0]  ls_svc_id;
     logic        ls_svc_req;
     logic        ls_svc_done;
@@ -199,6 +200,11 @@ module cpu_top (
     logic [3:0]  ls_mem_rd_byteen;
     logic        ls_mem_rd_ready;
     logic [31:0] ls_mem_rd_data;
+    logic        ls_mem_wr_req;
+    logic [31:0] ls_mem_wr_addr;
+    logic [3:0]  ls_mem_wr_byteen;
+    logic [31:0] ls_mem_wr_data;
+    logic        ls_mem_wr_ready;
     logic        ls_pc_gpr_en;
     logic [2:0]  ls_pc_gpr_idx;
     logic [1:0]  ls_pc_gpr_opsz;
@@ -292,26 +298,37 @@ module cpu_top (
     assign decode_frontend_enable = (dbg_mseq_state_w == 2'h0);
 
     assign eu_req     = commit_stack_wr_pending || ie_mem_rd_req ||
-                        se_stk_rd_req || ls_mem_rd_req || op_mem_rd_req;
-    assign eu_wr      = commit_stack_wr_pending;
+                        se_stk_rd_req || ls_mem_rd_req ||
+                        ls_mem_wr_req || op_mem_rd_req;
+    assign eu_wr      = commit_stack_wr_pending ||
+                        ((!ie_mem_rd_req) && (!se_stk_rd_req) && ls_mem_wr_req);
     assign eu_addr    = commit_stack_wr_pending ? commit_stack_wr_addr_r :
                         (ie_mem_rd_req ? ie_mem_rd_addr :
                         (se_stk_rd_req ? se_stk_rd_addr :
-                        (ls_mem_rd_req ? ls_mem_rd_addr : op_mem_rd_addr)));
+                        (ls_mem_wr_req ? ls_mem_wr_addr :
+                        (ls_mem_rd_req ? ls_mem_rd_addr : op_mem_rd_addr))));
     assign eu_byteen  = commit_stack_wr_pending ? commit_stack_wr_byteen_r :
-                        (ls_mem_rd_req ? ls_mem_rd_byteen : 4'b1111);
-    assign eu_wdata   = commit_stack_wr_pending ? commit_stack_wr_data_r : 32'h0;
+                        (ie_mem_rd_req ? 4'b1111 :
+                        (se_stk_rd_req ? 4'b1111 :
+                        (ls_mem_wr_req ? ls_mem_wr_byteen :
+                        (ls_mem_rd_req ? ls_mem_rd_byteen : 4'b1111))));
+    assign eu_wdata   = commit_stack_wr_pending ? commit_stack_wr_data_r :
+                        (((!ie_mem_rd_req) && (!se_stk_rd_req) && ls_mem_wr_req) ?
+                         ls_mem_wr_data : 32'h0);
 
     assign ie_mem_rd_ready = (!commit_stack_wr_pending) && ie_mem_rd_req && eu_done;
     assign ie_mem_rd_data  = eu_rdata;
     assign se_stk_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) && eu_done;
     assign se_stk_rd_data  = eu_rdata;
     assign op_mem_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) &&
-                             (!se_stk_rd_req) && (!ls_mem_rd_req) && eu_done;
+                             (!se_stk_rd_req) && (!ls_mem_rd_req) &&
+                             (!ls_mem_wr_req) && eu_done;
     assign op_mem_rd_data  = eu_rdata;
     assign ls_mem_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) &&
                              (!se_stk_rd_req) && ls_mem_rd_req && eu_done;
     assign ls_mem_rd_data  = eu_rdata;
+    assign ls_mem_wr_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) &&
+                             (!se_stk_rd_req) && ls_mem_wr_req && eu_done;
     assign commit_pc_gpr_en   = pc_gpr_en | ls_pc_gpr_en;
     assign commit_pc_gpr_idx  = ls_pc_gpr_en ? ls_pc_gpr_idx : pc_gpr_idx;
     assign commit_pc_gpr_opsz = ls_pc_gpr_en ? ls_pc_gpr_opsz : pc_gpr_opsz;
@@ -703,6 +720,11 @@ module cpu_top (
         .mem_rd_byteen    (ls_mem_rd_byteen),
         .mem_rd_data      (ls_mem_rd_data),
         .mem_rd_ready     (ls_mem_rd_ready),
+        .mem_wr_req       (ls_mem_wr_req),
+        .mem_wr_addr      (ls_mem_wr_addr),
+        .mem_wr_byteen    (ls_mem_wr_byteen),
+        .mem_wr_data      (ls_mem_wr_data),
+        .mem_wr_ready     (ls_mem_wr_ready),
         .pc_gpr_en        (ls_pc_gpr_en),
         .pc_gpr_idx       (ls_pc_gpr_idx),
         .pc_gpr_opsz      (ls_pc_gpr_opsz),

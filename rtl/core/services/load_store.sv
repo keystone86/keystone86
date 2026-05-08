@@ -3,11 +3,13 @@
 //
 // Bounded Rung 6 load/store service.
 //
-// Existing LOAD_REG_META/STORE_REG_META behavior remains limited to
-// ModRM.mod=11 MOV register-register forms. Pass 6A-1 adds only memory-source
-// LOAD_RM8/16/32 for the direct absolute disp32 form after EA_CALC_32 has
-// staged the effective address in T2. STORE_RM* and memory-destination MOV
-// remain unsupported.
+// Existing STORE_REG_META behavior remains limited to ModRM.mod=11 MOV
+// register-register forms. Pass 6A-1 adds only memory-source LOAD_RM8/16/32
+// for the direct absolute disp32 form after EA_CALC_32 has staged the
+// effective address in T2. Pass 6B-1 adds only memory-destination STORE_RM*
+// for the same direct absolute disp32 form; LOAD_REG_META may read the source
+// register for that bounded store path, and the memory write is completed
+// before ENDI.
 
 import keystone86_pkg::*;
 
@@ -43,6 +45,12 @@ module load_store (
     input  logic [31:0] mem_rd_data,
     input  logic        mem_rd_ready,
 
+    output logic        mem_wr_req,
+    output logic [31:0] mem_wr_addr,
+    output logic [3:0]  mem_wr_byteen,
+    output logic [31:0] mem_wr_data,
+    input  logic        mem_wr_ready,
+
     output logic        pc_gpr_en,
     output logic [2:0]  pc_gpr_idx,
     output logic [1:0]  pc_gpr_opsz,
@@ -63,6 +71,8 @@ module load_store (
     ls_state_t state_r;
     logic [7:0]  active_svc_id_r;
     logic [31:0] mem_addr_r;
+    logic [31:0] mem_wdata_r;
+    logic        active_is_store_r;
     logic [1:0]  complete_sr_r;
     logic        complete_t4_wr_en_r;
     logic [31:0] complete_t4_wr_data_r;
@@ -85,9 +95,13 @@ module load_store (
     assign svc_sr     = sr_r;
     assign t4_wr_en   = t4_wr_en_r;
     assign t4_wr_data = t4_wr_data_r;
-    assign mem_rd_req = (state_r == LS_MEM_WAIT);
+    assign mem_rd_req = (state_r == LS_MEM_WAIT) && !active_is_store_r;
     assign mem_rd_addr = mem_addr_r;
     assign mem_rd_byteen = byteen_for_service(active_svc_id_r);
+    assign mem_wr_req = (state_r == LS_MEM_WAIT) && active_is_store_r;
+    assign mem_wr_addr = mem_addr_r;
+    assign mem_wr_byteen = byteen_for_service(active_svc_id_r);
+    assign mem_wr_data = mem_wdata_r;
     assign pc_gpr_en  = pc_gpr_en_r;
     assign pc_gpr_idx = pc_gpr_idx_r;
     assign pc_gpr_opsz = pc_gpr_opsz_r;
@@ -104,6 +118,9 @@ module load_store (
             LOAD_RM8:  return 4'b0001;
             LOAD_RM16: return 4'b0011;
             LOAD_RM32: return 4'b1111;
+            STORE_RM8:  return 4'b0001;
+            STORE_RM16: return 4'b0011;
+            STORE_RM32: return 4'b1111;
             default:   return 4'b0000;
         endcase
     endfunction
@@ -113,6 +130,9 @@ module load_store (
             LOAD_RM8:  return (meta_opsz == 2'h0);
             LOAD_RM16: return (meta_opsz == 2'h1);
             LOAD_RM32: return (meta_opsz == 2'h2);
+            STORE_RM8:  return (meta_opsz == 2'h0);
+            STORE_RM16: return (meta_opsz == 2'h1);
+            STORE_RM32: return (meta_opsz == 2'h2);
             default:   return 1'b0;
         endcase
     endfunction
@@ -129,11 +149,25 @@ module load_store (
         endcase
     endfunction
 
+    function automatic logic [31:0] store_data_for_service(
+        input logic [7:0]  sid,
+        input logic [31:0] data
+    );
+        case (sid)
+            STORE_RM8:  return {24'h0, data[7:0]};
+            STORE_RM16: return {16'h0, data[15:0]};
+            STORE_RM32: return data;
+            default:    return 32'h0;
+        endcase
+    endfunction
+
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             state_r      <= LS_IDLE;
             active_svc_id_r <= 8'h00;
             mem_addr_r   <= 32'h0;
+            mem_wdata_r  <= 32'h0;
+            active_is_store_r <= 1'b0;
             complete_sr_r <= SR_WAIT;
             complete_t4_wr_en_r <= 1'b0;
             complete_t4_wr_data_r <= 32'h0;
@@ -164,7 +198,9 @@ module load_store (
                         unique case (svc_id)
                             LOAD_REG_META: begin
                                 done_r <= 1'b1;
-                                if (meta_modrm_class != MRM_REG) begin
+                                if (!((meta_modrm_class == MRM_REG) ||
+                                      ((meta_opcode_class == OC_MOV_RM_R) &&
+                                       is_direct_disp32_mem_form()))) begin
                                     sr_r <= SR_FAULT;
                                 end else begin
                                     sr_r         <= SR_OK;
@@ -195,6 +231,24 @@ module load_store (
                                     state_r         <= LS_MEM_WAIT;
                                     active_svc_id_r <= svc_id;
                                     mem_addr_r      <= t2_in;
+                                    active_is_store_r <= 1'b0;
+                                end else begin
+                                    done_r <= 1'b1;
+                                    sr_r   <= SR_FAULT;
+                                end
+                            end
+
+                            STORE_RM8,
+                            STORE_RM16,
+                            STORE_RM32: begin
+                                if ((meta_opcode_class == OC_MOV_RM_R) &&
+                                    is_direct_disp32_mem_form() &&
+                                    service_width_matches_opsz(svc_id)) begin
+                                    state_r           <= LS_MEM_WAIT;
+                                    active_svc_id_r   <= svc_id;
+                                    mem_addr_r        <= t2_in;
+                                    mem_wdata_r       <= store_data_for_service(svc_id, t4_in);
+                                    active_is_store_r <= 1'b1;
                                 end else begin
                                     done_r <= 1'b1;
                                     sr_r   <= SR_FAULT;
@@ -210,7 +264,12 @@ module load_store (
                 end
 
                 LS_MEM_WAIT: begin
-                    if (mem_rd_ready) begin
+                    if (active_is_store_r && mem_wr_ready) begin
+                        state_r                 <= LS_DONE;
+                        complete_sr_r           <= SR_OK;
+                        complete_t4_wr_en_r     <= 1'b0;
+                        complete_t4_wr_data_r   <= 32'h0;
+                    end else if (!active_is_store_r && mem_rd_ready) begin
                         state_r                 <= LS_DONE;
                         complete_sr_r           <= SR_OK;
                         complete_t4_wr_en_r     <= 1'b1;
