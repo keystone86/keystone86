@@ -559,6 +559,7 @@ module cpu_top (
         .meta_imm_class_in(dec_imm_class),
         .meta_modrm_class_in(dec_modrm_class),
         .meta_reg_dst_in (dec_reg_dst),
+        .meta_reg_rm_in  (dec_reg_rm),
         .meta_next_eip   (meta_next_eip),
         .meta_cond_code  (meta_cond_code),
 

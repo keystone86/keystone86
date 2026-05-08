@@ -1,6 +1,6 @@
 .entry ENTRY_MOV, 0x01
 
-; Rung 6 Pass 6B-1 bounded MOV slice:
+; Rung 6 Pass 6C-1 bounded MOV slice:
 ;   B0-B7 MOV r8, imm8
 ;   B8-BF MOV r32, imm32
 ;   66+B8-BF MOV r16, imm16
@@ -8,19 +8,24 @@
 ;   66+89/8B register-register only when ModRM.mod=11
 ;   8A/8B and 66+8B memory-source only for ModRM.mod=00, r/m=101 disp32
 ;   88/89 and 66+89 memory-destination only for ModRM.mod=00, r/m=101 disp32
+;   C6/C7 /0 and 66+C7 /0 immediate-to-memory only for ModRM.mod=00,
+;     r/m=101 disp32
 ; Decoder supplies OC_MOV_R_IMM, M_OPSZ, and raw M_REG_DST from opcode[2:0].
 ; For 88/89/8A/8B it supplies OC_MOV_RM_R or OC_MOV_R_RM, M_REG_SRC,
 ; M_REG_RM, and M_REG_DST. LOAD_REG_META/STORE_REG_META are bounded to
 ; ModRM.mod=11 metadata. The Pass 6A-1 memory-source path uses EA_CALC_32 and
 ; LOAD_RM8/16/32 only for direct absolute disp32. The Pass 6B-1
 ; memory-destination path uses EA_CALC_32, LOAD_REG_META, and STORE_RM8/16/32
-; before ENDI CM_NOP|CM_EIP. ENDI CM_MOV_REG remains the only architectural GPR
-; visibility boundary.
+; before ENDI CM_NOP|CM_EIP. The Pass 6C-1 immediate-to-memory path uses
+; FETCH_IMM*, EA_CALC_32, and STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP.
+; ENDI CM_MOV_REG remains the only architectural GPR visibility boundary.
 ENTRY_MOV:
     EXTRACT T3, M_OPCODE_CLASS
     BR C_T3Z, .mov_rm_r
     EXTRACT T3, M_IMM_CLASS
     BR C_T3Z, .mov_r_rm
+    EXTRACT T3, M_REG_RM
+    BR C_T3NZ, .mov_rm_imm
     BR C_W8, .mov_imm8
     BR C_W16, .mov_imm16
     SVCW FETCH_IMM32
@@ -90,3 +95,29 @@ ENTRY_MOV:
     BR C_FAULT, SUB_FAULT_HANDLER
     STAGE STAGE_GPR, T4
     ENDI CM_MOV_REG
+.mov_rm_imm:
+    BR C_W8, .mov_rm_imm8
+    BR C_W16, .mov_rm_imm16
+    SVCW FETCH_IMM32
+    BR C_FAULT, SUB_FAULT_HANDLER
+    SVCW EA_CALC_32
+    BR C_FAULT, SUB_FAULT_HANDLER
+    SVCW STORE_RM32
+    BR C_FAULT, SUB_FAULT_HANDLER
+    ENDI CM_NOP|CM_EIP
+.mov_rm_imm8:
+    SVCW FETCH_IMM8
+    BR C_FAULT, SUB_FAULT_HANDLER
+    SVCW EA_CALC_32
+    BR C_FAULT, SUB_FAULT_HANDLER
+    SVCW STORE_RM8
+    BR C_FAULT, SUB_FAULT_HANDLER
+    ENDI CM_NOP|CM_EIP
+.mov_rm_imm16:
+    SVCW FETCH_IMM16
+    BR C_FAULT, SUB_FAULT_HANDLER
+    SVCW EA_CALC_32
+    BR C_FAULT, SUB_FAULT_HANDLER
+    SVCW STORE_RM16
+    BR C_FAULT, SUB_FAULT_HANDLER
+    ENDI CM_NOP|CM_EIP

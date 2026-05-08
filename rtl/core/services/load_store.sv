@@ -9,7 +9,8 @@
 // effective address in T2. Pass 6B-1 adds only memory-destination STORE_RM*
 // for the same direct absolute disp32 form; LOAD_REG_META may read the source
 // register for that bounded store path, and the memory write is completed
-// before ENDI.
+// before ENDI. Pass 6C-1 reuses STORE_RM* for OC_MOV_RM_IMM after FETCH_IMM*
+// leaves the immediate in T4.
 
 import keystone86_pkg::*;
 
@@ -59,6 +60,7 @@ module load_store (
 
     localparam logic [7:0] OC_MOV_RM_R = 8'h00;
     localparam logic [7:0] OC_MOV_R_RM = 8'h01;
+    localparam logic [7:0] OC_MOV_RM_IMM = 8'h03;
     localparam logic [3:0] MRM_REG     = 4'h0;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
 
@@ -241,7 +243,8 @@ module load_store (
                             STORE_RM8,
                             STORE_RM16,
                             STORE_RM32: begin
-                                if ((meta_opcode_class == OC_MOV_RM_R) &&
+                                if (((meta_opcode_class == OC_MOV_RM_R) ||
+                                     (meta_opcode_class == OC_MOV_RM_IMM)) &&
                                     is_direct_disp32_mem_form() &&
                                     service_width_matches_opsz(svc_id)) begin
                                     state_r           <= LS_MEM_WAIT;

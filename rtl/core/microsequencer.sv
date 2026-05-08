@@ -11,9 +11,10 @@
 //     into commit_engine and become architectural only at ENDI.
 //   - Jcc condition metadata is latched as decode-owned metadata and carried
 //     to flow_control; the sequencer branches only on the registered T3 result.
-//   - The bounded MOV immediate-to-register slices use generic BR/EXTRACT/
-//     STAGE_GPR behavior: decode supplies width/register metadata, FETCH_IMM*
-//     supplies T4, and ENDI is the only architectural register visibility point.
+//   - The bounded MOV immediate slices use generic BR/EXTRACT/STAGE_GPR and
+//     service behavior: decode supplies width/register/rm metadata, FETCH_IMM*
+//     supplies T4, and ENDI is the only architectural register visibility point
+//     for register destinations. Memory destinations use STORE_RM* before ENDI.
 //
 // Control-transfer cleanup rule for this rung:
 //   - Do NOT squash on JMP dispatch. fetch_engine still needs fall-through
@@ -98,6 +99,7 @@ module microsequencer (
     input  logic [2:0]  meta_imm_class_in,
     input  logic [3:0]  meta_modrm_class_in,
     input  logic [2:0]  meta_reg_dst_in,
+    input  logic [2:0]  meta_reg_rm_in,
     output logic [31:0] meta_next_eip,
     output logic [3:0]  meta_cond_code,
 
@@ -121,6 +123,7 @@ module microsequencer (
     localparam logic [9:0] MF_IMM_CLASS    = 10'h004;
     localparam logic [9:0] MF_OPCODE_CLASS = 10'h006;
     localparam logic [9:0] MF_REG_DST      = 10'h009;
+    localparam logic [9:0] MF_REG_RM       = 10'h00B;
     localparam logic [9:0] MF_NEXT_EIP     = 10'h012;
     localparam logic [9:0] MF_FC_TO_VECTOR = 10'h013;
 
@@ -151,6 +154,7 @@ module microsequencer (
     logic [2:0]  meta_imm_class_r;
     logic [3:0]  meta_modrm_class_r;
     logic [2:0]  meta_reg_dst_r;
+    logic [2:0]  meta_reg_rm_r;
 
     assign upc            = upc_r;
     assign dispatch_entry = dispatch_entry_latch;
@@ -195,6 +199,7 @@ module microsequencer (
             MF_IMM_CLASS:    return {29'h0, meta_imm_class_r};
             MF_OPCODE_CLASS: return {24'h0, meta_opcode_class_r};
             MF_REG_DST:      return {29'h0, meta_reg_dst_r};
+            MF_REG_RM:       return {29'h0, meta_reg_rm_r};
             MF_NEXT_EIP:     return next_eip_r;
             MF_FC_TO_VECTOR: return (fault_class_in == FC_UD) ? 32'h00000006 :
                                                                  32'h00000000;
@@ -259,6 +264,7 @@ module microsequencer (
             meta_imm_class_r      <= 3'h0;
             meta_modrm_class_r    <= 4'hF;
             meta_reg_dst_r        <= 3'h0;
+            meta_reg_rm_r         <= 3'h0;
         end else begin
             state <= state_next;
             upc_r <= upc_next;
@@ -280,6 +286,7 @@ module microsequencer (
                         meta_imm_class_r     <= meta_imm_class_in;
                         meta_modrm_class_r   <= meta_modrm_class_in;
                         meta_reg_dst_r       <= meta_reg_dst_in;
+                        meta_reg_rm_r        <= meta_reg_rm_in;
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
                         is_jcc_r             <= (entry_id_in == ENTRY_JCC);
                         is_call_r            <= dec_is_call;
