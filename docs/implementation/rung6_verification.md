@@ -7,21 +7,63 @@ This document records verification evidence for committed Rung 6 work.
 Current recorded implementation commit:
 
 ```text
-49d3e84a96f99c5de0fe08644fcabcd1c46b3da9
+ba37a22bd4c38e940e385c08c7a087127f2dfd86
 ```
 
 Short commit:
 
 ```text
-49d3e84
+ba37a22
 ```
 
 Recorded scope:
 
 ```text
-Bounded Rung 6 Pass 6B-1 only:
-memory-destination MOV using default 32-bit addressing, absolute disp32 only
+Bounded Rung 6 Pass 6C-1 only:
+C6/C7 immediate-to-memory MOV using default 32-bit addressing, absolute disp32 only
 ```
+
+Implemented Pass 6C-1 forms:
+
+- `C6 /0 ib` `MOV r/m8, imm8`, memory destination only
+- `C7 /0 id` `MOV r/m32, imm32`, memory destination only
+- `0x66` + `C7 /0 iw` `MOV r/m16, imm16`, memory destination only
+
+Implemented Pass 6C-1 addressing subset:
+
+- memory destination only
+- `ModRM.mod = 00`
+- `ModRM.r/m = 101`
+- `ModRM.reg/opcode extension = /0` only
+- `disp32` absolute address
+- default 32-bit addressing only
+- no SIB
+- no base register
+- no index register
+- no scale
+- no disp8
+- no `mod=01`
+- no `mod=10`
+- no `mod=11` register-destination `C6/C7`
+- no `0x67`
+
+Implemented Pass 6C-1 immediate-to-memory behavior:
+
+- reuses `FETCH_IMM8` for `C6 /0 ib`
+- reuses `FETCH_IMM32` for `C7 /0 id`
+- reuses `FETCH_IMM16` for `0x66` + `C7 /0 iw`
+- reuses bounded `EA_CALC_32` direct disp32 only
+- reuses `STORE_RM8`, `STORE_RM16`, and `STORE_RM32` as direct
+  microcode-sequenced `load_store` service-side bus writes
+- `STORE_RM*` completes before `ENDI`
+- immediate-to-memory MOV uses `ENDI CM_NOP|CM_EIP`
+- `ENDI` performs normal sequential completion / EIP cleanup only
+- no new memory-store commit mask was added
+- no new frozen-spec field was added
+- no new opcode class was added
+- no new service ID was added
+- no new microinstruction was added
+- no commit-time memory-store policy was added
 
 Implemented Pass 6B-1 forms:
 
@@ -115,12 +157,17 @@ required: the committed Pass 2 implementation already satisfies the bounded
 Pass 3 target for the `B8-BF` `MOV r32, imm32` GPR/commit proof.
 
 This is not full Rung 6 completion.
-This does not claim full Pass 6A.
 This does not claim the full Appendix D MOV matrix.
-This confirms only bounded Pass 6B-1 memory-destination absolute disp32
-support, plus the previously recorded bounded Pass 6A-1, Pass 4B, Pass 5A, and
-Pass 5B support:
+This confirms only bounded Pass 6C-1 immediate-to-memory absolute disp32
+support, plus the previously recorded bounded Pass 6B-1, Pass 6A-1, Pass 4B,
+Pass 5A, and Pass 5B support:
 
+- `C6 /0 ib` `MOV r/m8, imm8`, memory destination only, direct absolute disp32
+  only
+- `C7 /0 id` `MOV r/m32, imm32`, memory destination only, direct absolute
+  disp32 only
+- `0x66` + `C7 /0 iw` `MOV r/m16, imm16`, memory destination only, direct
+  absolute disp32 only
 - `88 /r` `MOV r/m8, r8`, memory destination only, direct absolute disp32 only
 - `89 /r` `MOV r/m32, r32`, memory destination only, direct absolute disp32 only
 - `0x66` + `89 /r` `MOV r/m16, r16`, memory destination only, direct absolute
@@ -177,6 +224,108 @@ Results:
 Existing Icarus/Iverilog warnings about constant selects, time units, and
 ignored `unique` case qualities were present during simulation builds. They did
 not fail the commands.
+
+Rung 5 regression still passes at this committed state.
+Rung 7 remains blocked.
+
+## Pass 6C-1 Evidence
+
+Date recorded: 2026-05-08 UTC.
+
+Commands run after commit `ba37a22bd4c38e940e385c08c7a087127f2dfd86`:
+
+```sh
+make codegen
+make ucode
+make rung5-regress
+make rung6-pass2-sim
+make rung6-pass4a-sim
+make rung6-pass4b-sim
+make rung6-pass5a-sim
+make rung6-pass5b-sim
+make rung6-pass6a1-sim
+make rung6-pass6b1-sim
+make rung6-pass6c1-sim
+git diff --check
+git status --short
+```
+
+Run state:
+
+- tested implementation commit:
+  `ba37a22bd4c38e940e385c08c7a087127f2dfd86`
+- verification was run after that implementation commit
+- final `git status --short` from the run was clean
+- this documentation update is separate from the tested implementation commit
+
+Results:
+
+| Command | Result |
+|---|---|
+| `make codegen` | PASS |
+| `make ucode` | PASS |
+| `make rung5-regress` | PASS |
+| `make rung6-pass2-sim` | PASS |
+| `make rung6-pass4a-sim` | PASS |
+| `make rung6-pass4b-sim` | PASS |
+| `make rung6-pass5a-sim` | PASS |
+| `make rung6-pass5b-sim` | PASS |
+| `make rung6-pass6a1-sim` | PASS |
+| `make rung6-pass6b1-sim` | PASS |
+| `make rung6-pass6c1-sim` | PASS |
+| `git diff --check` | PASS |
+| `git status --short` | PASS, clean output |
+
+Existing Icarus/Iverilog warnings about time units, constant selects, and
+ignored `unique` case qualities were present during simulation builds. They did
+not fail the commands.
+
+The bounded Rung 6 Pass 6C-1 simulation proves only the authorized
+immediate-to-memory absolute-disp32 slice:
+
+- `C6 /0 ib` byte immediate stores to absolute disp32 memory destination pass
+- `C7 /0 id` dword immediate stores to absolute disp32 memory destination pass
+- `0x66` + `C7 /0 iw` word immediate stores to absolute disp32 memory
+  destination pass
+- `FETCH_IMM8` is issued for the authorized `C6 /0 ib` form
+- `FETCH_IMM32` is issued for the authorized `C7 /0 id` form
+- `FETCH_IMM16` is issued for the authorized `0x66` + `C7 /0 iw` form
+- `EA_CALC_32` is issued once per authorized immediate-to-memory MOV and is
+  bounded to direct absolute disp32 only
+- `STORE_RM8`, `STORE_RM16`, and `STORE_RM32` are issued for the authorized
+  immediate-to-memory write widths only
+- `STORE_RM*` completes before `ENDI`
+- immediate-to-memory MOV uses `ENDI CM_NOP|CM_EIP`, not `CM_MOV_REG`
+- no new memory-store commit mask, frozen-spec field, opcode class, service ID,
+  microinstruction, or commit-time memory-store policy is used
+- final memory values match the expected byte, word, and dword immediate stores
+- EFLAGS remain unchanged
+- no unintended GPR changes occur for immediate-to-memory MOV
+- final EIP matches fall-through for the bounded Pass 6C-1 instruction sequence
+- `C6/C7` register-destination forms with `ModRM.mod=11` remain unsupported
+- `C6/C7` non-`/0` extensions remain unsupported
+- no SIB, base/index/scale, disp8, `mod=01`, or `mod=10` memory addressing is
+  implemented
+- no `0x67` or 16-bit addressing behavior is implemented
+- no `EA_CALC_16` is implemented
+- no protected-mode/page/segment behavior is implemented
+- no fault occurs during the authorized bounded Pass 6C-1 immediate-to-memory
+  MOV sequence
+
+The existing Pass 2, Pass 4A, Pass 4B, Pass 5A, Pass 5B, Pass 6A-1, and
+Pass 6B-1 simulations still prove preservation of:
+
+- `B8-BF` `MOV r32, imm32`
+- `B0-B7` `MOV r8, imm8`
+- `0x66` + `B8-BF` `MOV r16, imm16`
+- `88/89/8A/8B` register-register `r8/r32` with `ModRM.mod=11` only
+- `0x66` + `89/8B` register-register `r16` with `ModRM.mod=11` only
+- `8A /r` byte loads from absolute disp32 memory source
+- `8B /r` dword loads from absolute disp32 memory source
+- `0x66` + `8B /r` word loads from absolute disp32 memory source
+- `88 /r` byte stores to absolute disp32 memory destination
+- `89 /r` dword stores to absolute disp32 memory destination
+- `0x66` + `89 /r` word stores to absolute disp32 memory destination
 
 Rung 5 regression still passes at this committed state.
 Rung 7 remains blocked.
@@ -572,13 +721,16 @@ This verification record does not claim:
 - `0x67` address-size override behavior
 - `88/89` memory-destination addressing beyond direct absolute disp32
 - `8A/8B` memory-source addressing beyond direct absolute disp32
-- `C6/C7` support
-- immediate-to-memory MOV support
+- `C6/C7` immediate-to-memory addressing beyond direct absolute disp32
+- `C6/C7` register-destination forms with `ModRM.mod=11`
+- `C6/C7` non-`/0` opcode-extension forms
+- `C6/C7` behavior without the tested immediate fetch, direct absolute
+  disp32 `EA_CALC_32`, `STORE_RM*`, and `ENDI CM_NOP|CM_EIP` sequence
 - `EA_CALC_16` support
 - `EA_CALC_32` beyond direct absolute disp32
 - `LOAD_RM*` beyond bounded memory-source reads for direct absolute disp32
 - `STORE_RM*` beyond bounded memory-destination writes for direct absolute
-  disp32 MOV
+  disp32 MOV, including bounded immediate-to-memory writes
 - general-purpose `LOAD_REG_META` or `STORE_REG_META` completion beyond the
   bounded Pass 5A/5B register-register MOV and Pass 6B-1 memory-destination MOV
   metadata use
@@ -591,8 +743,8 @@ This verification record does not claim:
 
 Remaining Rung 6 blockers include:
 
-- `C6/C7`
-- immediate-to-memory MOV
+- `C6/C7` register-destination forms
+- `C6/C7` non-`/0` extensions
 - `STORE_RM*` beyond bounded memory-destination direct absolute disp32 MOV
 - SIB/base/index/scale effective-address calculation
 - disp8, `mod=01`, and `mod=10` memory addressing
