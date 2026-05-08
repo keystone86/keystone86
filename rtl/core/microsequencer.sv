@@ -96,6 +96,7 @@ module microsequencer (
     input  logic [7:0]  meta_opcode_class_in,
     input  logic [1:0]  meta_opsz_in,
     input  logic [2:0]  meta_imm_class_in,
+    input  logic [3:0]  meta_modrm_class_in,
     input  logic [2:0]  meta_reg_dst_in,
     output logic [31:0] meta_next_eip,
     output logic [3:0]  meta_cond_code,
@@ -116,6 +117,7 @@ module microsequencer (
     localparam logic [3:0] UOP_EXT   = 4'hF;
 
     localparam logic [9:0] MF_OPSZ         = 10'h001;
+    localparam logic [9:0] MF_MODRM_CLASS  = 10'h003;
     localparam logic [9:0] MF_IMM_CLASS    = 10'h004;
     localparam logic [9:0] MF_OPCODE_CLASS = 10'h006;
     localparam logic [9:0] MF_REG_DST      = 10'h009;
@@ -147,6 +149,7 @@ module microsequencer (
     logic [7:0]  meta_opcode_class_r;
     logic [1:0]  meta_opsz_r;
     logic [2:0]  meta_imm_class_r;
+    logic [3:0]  meta_modrm_class_r;
     logic [2:0]  meta_reg_dst_r;
 
     assign upc            = upc_r;
@@ -188,6 +191,7 @@ module microsequencer (
     function automatic logic [31:0] extract_value(input logic [9:0] field_id);
         case (field_id)
             MF_OPSZ:         return {30'h0, meta_opsz_r};
+            MF_MODRM_CLASS:  return {28'h0, meta_modrm_class_r};
             MF_IMM_CLASS:    return {29'h0, meta_imm_class_r};
             MF_OPCODE_CLASS: return {24'h0, meta_opcode_class_r};
             MF_REG_DST:      return {29'h0, meta_reg_dst_r};
@@ -253,6 +257,7 @@ module microsequencer (
             meta_opcode_class_r   <= 8'h00;
             meta_opsz_r           <= 2'h0;
             meta_imm_class_r      <= 3'h0;
+            meta_modrm_class_r    <= 4'hF;
             meta_reg_dst_r        <= 3'h0;
         end else begin
             state <= state_next;
@@ -273,6 +278,7 @@ module microsequencer (
                         meta_opcode_class_r  <= meta_opcode_class_in;
                         meta_opsz_r          <= meta_opsz_in;
                         meta_imm_class_r     <= meta_imm_class_in;
+                        meta_modrm_class_r   <= meta_modrm_class_in;
                         meta_reg_dst_r       <= meta_reg_dst_in;
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
                         is_jcc_r             <= (entry_id_in == ENTRY_JCC);

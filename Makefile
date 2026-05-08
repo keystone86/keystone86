@@ -23,6 +23,7 @@ HOST_GID := $(shell id -g)
         rung6-pass5a-sim rung6-pass5a-clean \
         rung6-pass4b-sim rung6-pass4b-clean \
         rung6-pass5b-sim rung6-pass5b-clean \
+        rung6-pass6a1-sim rung6-pass6a1-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -112,6 +113,8 @@ help:
 	@echo "  make rung6-pass4b-clean    - remove Rung 6 Pass 4B simulation artifacts"
 	@echo "  make rung6-pass5b-sim      - compile and run bounded Rung 6 Pass 5B MOV reg/reg16 simulation"
 	@echo "  make rung6-pass5b-clean    - remove Rung 6 Pass 5B simulation artifacts"
+	@echo "  make rung6-pass6a1-sim     - compile and run bounded Rung 6 Pass 6A-1 MOV mem-source disp32 simulation"
+	@echo "  make rung6-pass6a1-clean   - remove Rung 6 Pass 6A-1 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -274,6 +277,7 @@ RTL_SOURCES_COMMON = \
   rtl/core/commit_engine.sv \
   rtl/core/services/fetch_engine.sv \
   rtl/core/services/flow_control.sv \
+  rtl/core/services/ea_calc.sv \
   rtl/core/services/operand_engine.sv \
   rtl/core/services/load_store.sv \
   rtl/core/services/stack_engine.sv \
@@ -646,6 +650,28 @@ rung6-pass5b-sim: require-container ucode
 rung6-pass5b-clean: require-container
 	@rm -rf build/sim/rung6_pass5b
 	@echo "Rung 6 Pass 5B build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 6A-1 — bounded MOV memory-source direct disp32 slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS6A1 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_mem_src_disp32.sv
+
+rung6-pass6a1-sim: require-container ucode
+	@echo "--- Rung 6 Pass 6A-1: compiling bounded MOV mem-source disp32 RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass6a1
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass6a1/tb_rung6_mov_mem_src_disp32.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS6A1)
+	@echo "--- Rung 6 Pass 6A-1: running bounded MOV mem-source disp32 simulation ---"
+	vvp build/sim/rung6_pass6a1/tb_rung6_mov_mem_src_disp32.vvp
+
+rung6-pass6a1-clean: require-container
+	@rm -rf build/sim/rung6_pass6a1
+	@echo "Rung 6 Pass 6A-1 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

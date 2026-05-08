@@ -6,12 +6,15 @@
 //   - svc_id remains stable while the microsequencer waits.
 //   - Done/status are routed from the selected service based on svc_id,
 //     independent of whether svc_req is still high.
+//   - LOAD_RM32 remains routed to operand_engine for the older CALL path unless
+//     MOV memory-source metadata selects the Rung 6 load_store path.
 
 import keystone86_pkg::*;
 
 module service_dispatch (
     input  logic [7:0] svc_id,
     input  logic       svc_req,
+    input  logic       mov_rm_service_select,
     output logic       svc_done,
     output logic [1:0] svc_sr,
 
@@ -29,6 +32,11 @@ module service_dispatch (
     output logic       op_svc_req,
     input  logic       op_svc_done,
     input  logic [1:0] op_svc_sr,
+
+    output logic [7:0] ea_svc_id,
+    output logic       ea_svc_req,
+    input  logic       ea_svc_done,
+    input  logic [1:0] ea_svc_sr,
 
     output logic [7:0] ls_svc_id,
     output logic       ls_svc_req,
@@ -49,6 +57,7 @@ module service_dispatch (
     logic use_fetch;
     logic use_flow;
     logic use_operand;
+    logic use_ea;
     logic use_load_store;
     logic use_stack;
     logic use_interrupt;
@@ -60,6 +69,8 @@ module service_dispatch (
         fc_svc_req = 1'b0;
         op_svc_id  = svc_id;
         op_svc_req = 1'b0;
+        ea_svc_id  = svc_id;
+        ea_svc_req = 1'b0;
         ls_svc_id  = svc_id;
         ls_svc_req = 1'b0;
         se_svc_id  = svc_id;
@@ -70,6 +81,7 @@ module service_dispatch (
         use_fetch  = 1'b0;
         use_flow   = 1'b0;
         use_operand= 1'b0;
+        use_ea     = 1'b0;
         use_load_store = 1'b0;
         use_stack  = 1'b0;
         use_interrupt = 1'b0;
@@ -90,9 +102,20 @@ module service_dispatch (
                 use_flow = 1'b1;
             end
 
-            LOAD_RM16,
             LOAD_RM32: begin
-                use_operand = 1'b1;
+                if (mov_rm_service_select)
+                    use_load_store = 1'b1;
+                else
+                    use_operand = 1'b1;
+            end
+
+            EA_CALC_32: begin
+                use_ea = 1'b1;
+            end
+
+            LOAD_RM16,
+            LOAD_RM8: begin
+                use_load_store = 1'b1;
             end
 
             LOAD_REG_META,
@@ -116,6 +139,7 @@ module service_dispatch (
                 use_fetch     = 1'b0;
                 use_flow      = 1'b0;
                 use_operand   = 1'b0;
+                use_ea        = 1'b0;
                 use_load_store = 1'b0;
                 use_stack     = 1'b0;
                 use_interrupt = 1'b0;
@@ -129,6 +153,8 @@ module service_dispatch (
                 fc_svc_req = 1'b1;
             else if (use_operand)
                 op_svc_req = 1'b1;
+            else if (use_ea)
+                ea_svc_req = 1'b1;
             else if (use_load_store)
                 ls_svc_req = 1'b1;
             else if (use_stack)
@@ -146,6 +172,9 @@ module service_dispatch (
         end else if (use_operand) begin
             svc_done = op_svc_done;
             svc_sr   = op_svc_sr;
+        end else if (use_ea) begin
+            svc_done = ea_svc_done;
+            svc_sr   = ea_svc_sr;
         end else if (use_load_store) begin
             svc_done = ls_svc_done;
             svc_sr   = ls_svc_sr;
