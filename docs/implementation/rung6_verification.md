@@ -7,21 +7,57 @@ This document records verification evidence for committed Rung 6 work.
 Current recorded implementation commit:
 
 ```text
-ba37a22bd4c38e940e385c08c7a087127f2dfd86
+3ea9e52c02af79c62b9499d122e1cf7eef0a6e26
 ```
 
 Short commit:
 
 ```text
-ba37a22
+3ea9e52
 ```
 
 Recorded scope:
 
 ```text
-Bounded Rung 6 Pass 6C-1 only:
-C6/C7 immediate-to-memory MOV using default 32-bit addressing, absolute disp32 only
+Bounded Rung 6 Pass 6D-1 only:
+C6/C7 immediate-to-register MOV using ModRM.mod=11 only
 ```
+
+Implemented Pass 6D-1 forms:
+
+- `C6 /0 ib` `MOV r/m8, imm8`, register destination only
+- `C7 /0 id` `MOV r/m32, imm32`, register destination only
+- `0x66` + `C7 /0 iw` `MOV r/m16, imm16`, register destination only
+
+Implemented Pass 6D-1 destination subset:
+
+- register destination only
+- `ModRM.mod = 11`
+- `ModRM.reg/opcode extension = /0` only
+- no memory addressing
+- no `EA_CALC`
+- no `LOAD_RM`
+- no `STORE_RM`
+- no memory bus behavior
+- no SIB
+- no displacement
+- no `0x67`
+
+Implemented Pass 6D-1 immediate-to-register behavior:
+
+- reuses `FETCH_IMM8` for `C6 /0 ib`
+- reuses `FETCH_IMM32` for `C7 /0 id`
+- reuses `FETCH_IMM16` for `0x66` + `C7 /0 iw`
+- reuses `STAGE_GPR` with `T4`
+- reuses `ENDI CM_MOV_REG` for architectural GPR visibility
+- reuses existing byte-register commit behavior, including high-byte registers
+  for `r8`
+- reuses existing 16-bit low-word merge behavior for `0x66` + `C7`
+- no new commit mask was added
+- no new frozen-spec field was added
+- no new opcode class was added
+- no new service ID was added
+- no new microinstruction was added
 
 Implemented Pass 6C-1 forms:
 
@@ -158,10 +194,16 @@ Pass 3 target for the `B8-BF` `MOV r32, imm32` GPR/commit proof.
 
 This is not full Rung 6 completion.
 This does not claim the full Appendix D MOV matrix.
-This confirms only bounded Pass 6C-1 immediate-to-memory absolute disp32
-support, plus the previously recorded bounded Pass 6B-1, Pass 6A-1, Pass 4B,
-Pass 5A, and Pass 5B support:
+This confirms only bounded Pass 6D-1 immediate-to-register `ModRM.mod=11`
+support, plus the previously recorded bounded Pass 6C-1, Pass 6B-1,
+Pass 6A-1, Pass 4B, Pass 5A, and Pass 5B support:
 
+- `C6 /0 ib` `MOV r/m8, imm8`, register destination only, `ModRM.mod=11`
+  only
+- `C7 /0 id` `MOV r/m32, imm32`, register destination only, `ModRM.mod=11`
+  only
+- `0x66` + `C7 /0 iw` `MOV r/m16, imm16`, register destination only,
+  `ModRM.mod=11` only
 - `C6 /0 ib` `MOV r/m8, imm8`, memory destination only, direct absolute disp32
   only
 - `C7 /0 id` `MOV r/m32, imm32`, memory destination only, direct absolute
@@ -326,6 +368,117 @@ Pass 6B-1 simulations still prove preservation of:
 - `88 /r` byte stores to absolute disp32 memory destination
 - `89 /r` dword stores to absolute disp32 memory destination
 - `0x66` + `89 /r` word stores to absolute disp32 memory destination
+
+Rung 5 regression still passes at this committed state.
+Rung 7 remains blocked.
+
+## Pass 6D-1 Evidence
+
+Date recorded: 2026-05-09 UTC.
+
+Commands run after commit `3ea9e52c02af79c62b9499d122e1cf7eef0a6e26`:
+
+```sh
+make codegen
+make ucode
+make rung5-regress
+make rung6-pass2-sim
+make rung6-pass4a-sim
+make rung6-pass4b-sim
+make rung6-pass5a-sim
+make rung6-pass5b-sim
+make rung6-pass6a1-sim
+make rung6-pass6b1-sim
+make rung6-pass6c1-sim
+make rung6-pass6d1-sim
+git diff --check
+git status --short
+```
+
+Run state:
+
+- tested implementation commit:
+  `3ea9e52c02af79c62b9499d122e1cf7eef0a6e26`
+- verification was run after that implementation commit
+- final `git status --short` from the run was clean
+- this documentation update is separate from the tested implementation commit
+
+Results:
+
+| Command | Result |
+|---|---|
+| `make codegen` | PASS |
+| `make ucode` | PASS |
+| `make rung5-regress` | PASS |
+| `make rung6-pass2-sim` | PASS |
+| `make rung6-pass4a-sim` | PASS |
+| `make rung6-pass4b-sim` | PASS |
+| `make rung6-pass5a-sim` | PASS |
+| `make rung6-pass5b-sim` | PASS |
+| `make rung6-pass6a1-sim` | PASS |
+| `make rung6-pass6b1-sim` | PASS |
+| `make rung6-pass6c1-sim` | PASS |
+| `make rung6-pass6d1-sim` | PASS |
+| `git diff --check` | PASS |
+| `git status --short` | PASS, clean output |
+
+Existing Icarus/Iverilog warnings about time units, constant selects, and
+ignored `unique` case qualities were present during simulation builds. They did
+not fail the commands.
+
+The bounded Rung 6 Pass 6D-1 simulation proves only the authorized
+immediate-to-register `ModRM.mod=11` slice:
+
+- `C6 /0 ib` byte immediate writes to register destination pass
+- `C7 /0 id` dword immediate writes to register destination pass
+- `0x66` + `C7 /0 iw` word immediate writes to register destination pass
+- `FETCH_IMM8` is issued for the authorized `C6 /0 ib` form
+- `FETCH_IMM32` is issued for the authorized `C7 /0 id` form
+- `FETCH_IMM16` is issued for the authorized `0x66` + `C7 /0 iw` form
+- `STAGE_GPR` is issued with `T4`
+- `ENDI CM_MOV_REG` is used for architectural GPR visibility
+- architectural GPR visibility remains commit-only through `CM_MOV_REG`
+- existing byte-register commit behavior is preserved, including high-byte
+  registers for `r8`
+- existing 16-bit low-word merge behavior is preserved for `0x66` + `C7`
+- no new commit mask, frozen-spec field, opcode class, service ID, or
+  microinstruction is used
+- no `EA_CALC_32`, `LOAD_RM*`, `STORE_RM*`, or memory bus behavior occurs for
+  register-destination `C6/C7`
+- EFLAGS remain unchanged
+- no unintended memory writes occur for immediate-to-register MOV
+- final EIP matches fall-through for the bounded Pass 6D-1 instruction sequence
+- `C6/C7` non-`/0` extensions remain unsupported
+- `C6/C7` memory addressing beyond already verified direct absolute disp32
+  remains unsupported
+- no SIB, base/index/scale, disp8, `mod=01`, or `mod=10` memory addressing is
+  implemented
+- no `0x67` or 16-bit addressing behavior is implemented
+- no `EA_CALC_16` is implemented
+- no protected-mode/page/segment behavior is implemented
+- no fault occurs during the authorized bounded Pass 6D-1 immediate-to-register
+  MOV sequence
+
+The existing Pass 2, Pass 4A, Pass 4B, Pass 5A, Pass 5B, Pass 6A-1,
+Pass 6B-1, and Pass 6C-1 simulations still prove preservation of:
+
+- `B8-BF` `MOV r32, imm32`
+- `B0-B7` `MOV r8, imm8`
+- `0x66` + `B8-BF` `MOV r16, imm16`
+- `88/89/8A/8B` register-register `r8/r32` with `ModRM.mod=11` only
+- `0x66` + `89/8B` register-register `r16` with `ModRM.mod=11` only
+- `8A /r` byte loads from absolute disp32 memory source
+- `8B /r` dword loads from absolute disp32 memory source
+- `0x66` + `8B /r` word loads from absolute disp32 memory source
+- `88 /r` byte stores to absolute disp32 memory destination
+- `89 /r` dword stores to absolute disp32 memory destination
+- `0x66` + `89 /r` word stores to absolute disp32 memory destination
+- `C6 /0 ib` immediate-to-memory byte stores to absolute disp32 memory
+  destination
+- `C7 /0 id` immediate-to-memory dword stores to absolute disp32 memory
+  destination
+- `0x66` + `C7 /0 iw` immediate-to-memory word stores to absolute disp32
+  memory destination
 
 Rung 5 regression still passes at this committed state.
 Rung 7 remains blocked.
@@ -722,10 +875,11 @@ This verification record does not claim:
 - `88/89` memory-destination addressing beyond direct absolute disp32
 - `8A/8B` memory-source addressing beyond direct absolute disp32
 - `C6/C7` immediate-to-memory addressing beyond direct absolute disp32
-- `C6/C7` register-destination forms with `ModRM.mod=11`
+- `C6/C7` register-destination forms beyond `ModRM.mod=11` and `/0`
 - `C6/C7` non-`/0` opcode-extension forms
 - `C6/C7` behavior without the tested immediate fetch, direct absolute
-  disp32 `EA_CALC_32`, `STORE_RM*`, and `ENDI CM_NOP|CM_EIP` sequence
+  disp32 `EA_CALC_32`, `STORE_RM*`, `STAGE_GPR`, `ENDI CM_NOP|CM_EIP`, or
+  `ENDI CM_MOV_REG` sequence
 - `EA_CALC_16` support
 - `EA_CALC_32` beyond direct absolute disp32
 - `LOAD_RM*` beyond bounded memory-source reads for direct absolute disp32
@@ -743,8 +897,9 @@ This verification record does not claim:
 
 Remaining Rung 6 blockers include:
 
-- `C6/C7` register-destination forms
+- broader EA/addressing support
 - `C6/C7` non-`/0` extensions
+- `C6/C7` memory addressing beyond already verified direct absolute disp32
 - `STORE_RM*` beyond bounded memory-destination direct absolute disp32 MOV
 - SIB/base/index/scale effective-address calculation
 - disp8, `mod=01`, and `mod=10` memory addressing
