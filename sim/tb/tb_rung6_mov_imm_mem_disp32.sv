@@ -7,11 +7,11 @@
 //   C7 /0 id      mod=00 r/m=101 disp32 -> MOV dword [disp32], imm32
 //   66 C7 /0 iw   mod=00 r/m=101 disp32 -> MOV word [disp32], imm16
 //
-// This test intentionally does not exercise register-destination C6/C7,
-// non-/0 extensions, SIB, base/index/scale, disp8, mod=01/10, 0x67
-// address-size behavior, EA_CALC_16, 16-bit addressing, protected/page/segment
-// behavior, segment/control/debug/test-register MOV, string MOVS, or flags
-// production.
+// This test intentionally does not exercise register-destination C6/C7
+// behavior, which is covered by Pass 6D-1. It also does not exercise non-/0
+// extensions, SIB, base/index/scale, disp8, mod=01/10, 0x67 address-size
+// behavior, EA_CALC_16, 16-bit addressing, protected/page/segment behavior,
+// segment/control/debug/test-register MOV, string MOVS, or flags production.
 
 `timescale 1ns/1ps
 
@@ -541,12 +541,6 @@ module tb_rung6_mov_imm_mem_disp32;
         run_unsupported_form(10, 8'hC7, 8'h0D, 8'h00, 8'h51, 8'h00, 8'h00,
                              8'h78, 8'h56, 8'h34, 8'h12,
                              "C7 non-/0 immediate-to-memory", 1'b0);
-        run_unsupported_form(3, 8'hC6, 8'hC0, 8'h12, 8'h00, 8'h00, 8'h00,
-                             8'h00, 8'h00, 8'h00, 8'h00,
-                             "C6 mod=11 register destination", 1'b0);
-        run_unsupported_form(6, 8'hC7, 8'hC0, 8'h78, 8'h56, 8'h34, 8'h12,
-                             8'h00, 8'h00, 8'h00, 8'h00,
-                             "C7 mod=11 register destination", 1'b0);
         run_unsupported_form(4, 8'hC6, 8'h45, 8'h00, 8'h12, 8'h00, 8'h00,
                              8'h00, 8'h00, 8'h00, 8'h00,
                              "C6 mod=01 disp8 immediate-to-memory", 1'b0);

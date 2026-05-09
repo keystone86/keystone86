@@ -1,6 +1,6 @@
 .entry ENTRY_MOV, 0x01
 
-; Rung 6 Pass 6C-1 bounded MOV slice:
+; Rung 6 Pass 6D-1 bounded MOV slice:
 ;   B0-B7 MOV r8, imm8
 ;   B8-BF MOV r32, imm32
 ;   66+B8-BF MOV r16, imm16
@@ -10,6 +10,7 @@
 ;   88/89 and 66+89 memory-destination only for ModRM.mod=00, r/m=101 disp32
 ;   C6/C7 /0 and 66+C7 /0 immediate-to-memory only for ModRM.mod=00,
 ;     r/m=101 disp32
+;   C6/C7 /0 and 66+C7 /0 immediate-to-register only for ModRM.mod=11
 ; Decoder supplies OC_MOV_R_IMM, M_OPSZ, and raw M_REG_DST from opcode[2:0].
 ; For 88/89/8A/8B it supplies OC_MOV_RM_R or OC_MOV_R_RM, M_REG_SRC,
 ; M_REG_RM, and M_REG_DST. LOAD_REG_META/STORE_REG_META are bounded to
@@ -18,14 +19,19 @@
 ; memory-destination path uses EA_CALC_32, LOAD_REG_META, and STORE_RM8/16/32
 ; before ENDI CM_NOP|CM_EIP. The Pass 6C-1 immediate-to-memory path uses
 ; FETCH_IMM*, EA_CALC_32, and STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP.
+; The Pass 6D-1 immediate-to-register path uses FETCH_IMM*, STAGE_GPR, and
+; ENDI CM_MOV_REG without EA_CALC_32, LOAD_RM*, STORE_RM*, or bus writes.
 ; ENDI CM_MOV_REG remains the only architectural GPR visibility boundary.
 ENTRY_MOV:
     EXTRACT T3, M_OPCODE_CLASS
     BR C_T3Z, .mov_rm_r
     EXTRACT T3, M_IMM_CLASS
     BR C_T3Z, .mov_r_rm
+    EXTRACT T3, M_MODRM_CLASS
+    BR C_T3Z, .mov_imm_reg_dispatch
     EXTRACT T3, M_REG_RM
     BR C_T3NZ, .mov_rm_imm
+.mov_imm_reg_dispatch:
     BR C_W8, .mov_imm8
     BR C_W16, .mov_imm16
     SVCW FETCH_IMM32

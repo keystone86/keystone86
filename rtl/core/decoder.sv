@@ -28,8 +28,10 @@
 //     register-base, disp8, mod=01/10, and 0x67 remain unsupported.
 //   - For the bounded Pass 6C-1 immediate-to-memory slice, accept only C6/C7
 //     /0 with ModRM.mod=00 and r/m=101, consume the disp32 absolute address,
-//     and report M_NEXT_EIP after the immediate. FETCH_IMM* remains the
-//     microcode-called service that consumes the immediate payload.
+//     and report M_NEXT_EIP after the immediate. For Pass 6D-1, also accept
+//     C6/C7 /0 with ModRM.mod=11 as register-destination MOV and report
+//     M_NEXT_EIP after the immediate. FETCH_IMM* remains the microcode-called
+//     service that consumes the immediate payload.
 //   - Leave target computation, condition evaluation, interrupt policy, and
 //     stack effects to services/microcode.
 //   - Hold decode results stable until dec_ack or committed-boundary squash.
@@ -528,6 +530,24 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_rm_imm_reg_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic       pref66
+    );
+        logic reg_group0;
+        begin
+            reg_group0 = (m[7:6] == 2'b11) && (m[5:3] == 3'b000);
+            if (!reg_group0)
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'hC7);
+
+            return (op == 8'hC6) || (op == 8'hC7);
+        end
+    endfunction
+
     function automatic logic [7:0] classify_opcode(
         input logic [7:0] op,
         input logic       ff2,
@@ -535,6 +555,7 @@ module decoder (
         input logic       mov_mem_src_disp32,
         input logic       mov_mem_dst_disp32,
         input logic       mov_rm_imm_disp32,
+        input logic       mov_rm_imm_reg,
         input logic       pref66
     );
         if (pref66) begin
@@ -543,7 +564,8 @@ module decoder (
                                                                      : ENTRY_NULL;
                 8'h8B: return (mov_modrm_reg || mov_mem_src_disp32) ? ENTRY_MOV
                                                                      : ENTRY_NULL;
-                8'hC7: return mov_rm_imm_disp32 ? ENTRY_MOV : ENTRY_NULL;
+                8'hC7: return (mov_rm_imm_disp32 || mov_rm_imm_reg) ? ENTRY_MOV
+                                                                     : ENTRY_NULL;
                 8'hB8, 8'hB9, 8'hBA, 8'hBB,
                 8'hBC, 8'hBD, 8'hBE, 8'hBF:
                        return ENTRY_MOV;
@@ -566,7 +588,8 @@ module decoder (
                                                                            : ENTRY_NULL;
             8'h8A, 8'h8B:     return (mov_modrm_reg || mov_mem_src_disp32) ? ENTRY_MOV
                                                                             : ENTRY_NULL;
-            8'hC6, 8'hC7:     return mov_rm_imm_disp32 ? ENTRY_MOV : ENTRY_NULL;
+            8'hC6, 8'hC7:     return (mov_rm_imm_disp32 || mov_rm_imm_reg) ? ENTRY_MOV
+                                                                            : ENTRY_NULL;
             8'hC3, 8'hC2:     return ENTRY_RET_NEAR;
             8'hCD:            return ENTRY_INT;
             8'hCF:            return ENTRY_IRET;
@@ -607,6 +630,8 @@ module decoder (
         else if (prefix66_active && is_mov_rm_imm) begin
             if (mov_rm_imm_disp32_form(opcode_byte_latch, modrm_latch, 1'b1))
                 next_eip = opcode_eip_latch + 32'h9;
+            else if (mov_rm_imm_reg_form(opcode_byte_latch, modrm_latch, 1'b1))
+                next_eip = opcode_eip_latch + 32'h5;
             else
                 next_eip = opcode_eip_latch + 32'h3;
         end
@@ -631,6 +656,9 @@ module decoder (
             if (mov_rm_imm_disp32_form(opcode_byte_latch, modrm_latch, 1'b0))
                 next_eip = opcode_eip_latch + ((opcode_byte_latch == 8'hC6) ? 32'h7
                                                                             : 32'hA);
+            else if (mov_rm_imm_reg_form(opcode_byte_latch, modrm_latch, 1'b0))
+                next_eip = opcode_eip_latch + ((opcode_byte_latch == 8'hC6) ? 32'h3
+                                                                            : 32'h6);
             else
                 next_eip = opcode_eip_latch + 32'h2;
         end
@@ -756,6 +784,9 @@ module decoder (
                                               mov_rm_imm_disp32_form(opcode_byte_latch,
                                                                      modrm_latch,
                                                                      prefix66_active),
+                                              mov_rm_imm_reg_form(opcode_byte_latch,
+                                                                  modrm_latch,
+                                                                  prefix66_active),
                                               prefix66_active);
 
                 if (is_call_direct) begin
