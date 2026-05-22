@@ -422,7 +422,7 @@ module tb_rung6_mov_reg_reg;
             end
         end
 
-        run_unsupported_form(8'h88, 8'h00, "88 mod=00");
+        run_unsupported_form(8'h88, 8'h04, "88 SIB memory");
         run_unsupported_form(8'h89, 8'h45, "89 mod=01");
         run_unsupported_form(8'h8A, 8'h85, "8A mod=10");
         run_unsupported_form(8'h8B, 8'h04, "8B SIB memory");

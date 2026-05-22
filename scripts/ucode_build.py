@@ -17,7 +17,7 @@ for i in range(256):
         val = 0x010
         meaning = "ENTRY_NULL"
     elif i == 0x01:
-        val = 0x100       # Rung 6 Pass 6D-1: bounded MOV register/immediate/memory slices
+        val = 0x100       # Rung 6 Pass 6E-1: bounded MOV register/immediate/memory slices
         meaning = "ENTRY_MOV"
     elif i == 0x07:
         val = 0x050       # Rung 2: ENTRY_JMP_NEAR
@@ -275,20 +275,22 @@ rom[0x0A2] = br(C_FAULT, rel10(0x0A2, 0x000))
 rom[0x0A3] = endi(CM_IRET)
 
 # --------------------------------------------------------------------
-# Rung 6 Pass 6D-1: ENTRY_MOV immediate, register-register, bounded
-# memory-source direct-disp32, bounded register-source memory-destination
-# direct-disp32, and bounded immediate-to-memory direct-disp32 slices at 0x100.
+# Rung 6 Pass 6E-1: ENTRY_MOV immediate, register-register, bounded
+# memory-source direct-disp32/base-only, bounded register-source
+# memory-destination direct-disp32/base-only, and bounded immediate-to-memory
+# direct-disp32/base-only slices at 0x100.
 #
 # B0-B7, B8-BF, and 66+B8-BF keep the proven immediate path with width
 # dispatch. 88/89/8A/8B and 66+89/8B use LOAD_REG_META/STORE_REG_META only
-# after decoder has accepted ModRM.mod=11. 8A/8B and 66+8B direct absolute
-# disp32 memory-source forms use EA_CALC_32 and LOAD_RM8/16/32, then publish
-# through the same CM_MOV_REG commit boundary. 88/89 and 66+89 direct absolute
-# disp32 memory-destination forms use EA_CALC_32, LOAD_REG_META, and
-# STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP. C6/C7 /0 and 66+C7 /0 direct
-# absolute disp32 forms use FETCH_IMM8/16/32, EA_CALC_32, and STORE_RM8/16/32
-# before ENDI CM_NOP|CM_EIP. C6/C7 /0 and 66+C7 /0 ModRM.mod=11 forms use
-# FETCH_IMM8/16/32, STAGE_GPR, and ENDI CM_MOV_REG without memory services.
+# after decoder has accepted ModRM.mod=11. 8A/8B and 66+8B memory-source forms
+# use EA_CALC_32 and LOAD_RM8/16/32, then publish through the same CM_MOV_REG
+# commit boundary. 88/89 and 66+89 memory-destination forms use EA_CALC_32,
+# LOAD_REG_META, and STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP. C6/C7 /0 and
+# 66+C7 /0 memory forms use FETCH_IMM8/16/32, EA_CALC_32, and STORE_RM8/16/32
+# before ENDI CM_NOP|CM_EIP. The accepted memory subset is direct absolute
+# disp32 plus Pass 6E-1 default-32 base-only no-displacement r/m!=100/101.
+# C6/C7 /0 and 66+C7 /0 ModRM.mod=11 forms use FETCH_IMM8/16/32, STAGE_GPR,
+# and ENDI CM_MOV_REG without memory services.
 # Other memory forms remain on ENTRY_NULL and are not routed here.
 # --------------------------------------------------------------------
 rom[0x100] = extract(REG_T3, MF_OPCODE_CLASS)
@@ -297,8 +299,7 @@ rom[0x102] = extract(REG_T3, MF_IMM_CLASS)
 rom[0x103] = br(C_T3Z, rel10(0x103, 0x150))
 rom[0x104] = extract(REG_T3, MF_MODRM_CLASS)
 rom[0x105] = br(C_T3Z, rel10(0x105, 0x108))
-rom[0x106] = extract(REG_T3, MF_REG_RM)
-rom[0x107] = br(C_T3NZ, rel10(0x107, 0x180))
+rom[0x106] = br(C_ALWAYS, rel10(0x106, 0x180))
 rom[0x108] = br(C_W8, rel10(0x108, 0x10E))
 rom[0x109] = br(C_W16, rel10(0x109, 0x112))
 rom[0x10A] = svcw_small(FETCH_IMM32)
@@ -391,7 +392,7 @@ listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, Rung 4 Jcc,
 ; Rung 5 Pass 2 INT_ENTER path, Pass 3 bounded IRET_FLOW path,
 ; Pass 4 bounded #UD fault delivery through SUB_FAULT_HANDLER,
-; and Rung 6 Pass 6D-1 bounded MOV immediate/register/memory/immediate-to-memory/immediate-to-register slices
+; and Rung 6 Pass 6E-1 bounded MOV immediate/register/memory/immediate-to-memory/immediate-to-register slices
 address  encoding     source
 0x000    {extract(REG_T4, MF_FC_TO_VECTOR)}   SUB_FAULT_HANDLER: EXTRACT T4, MF_FC_TO_VECTOR
 0x001    {ext_word()}   EXT
@@ -461,8 +462,7 @@ address  encoding     source
 0x103    {br(C_T3Z, rel10(0x103, 0x150))}   BR C_T3Z, mov_r_rm
 0x104    {extract(REG_T3, MF_MODRM_CLASS)}   EXTRACT T3, M_MODRM_CLASS
 0x105    {br(C_T3Z, rel10(0x105, 0x108))}   BR C_T3Z, mov_imm_reg_dispatch
-0x106    {extract(REG_T3, MF_REG_RM)}   EXTRACT T3, M_REG_RM
-0x107    {br(C_T3NZ, rel10(0x107, 0x180))}   BR C_T3NZ, mov_rm_imm
+0x106    {br(C_ALWAYS, rel10(0x106, 0x180))}   BR C_ALWAYS, mov_rm_imm
 0x108    {br(C_W8, rel10(0x108, 0x10E))}   mov_imm_reg_dispatch: BR C_W8, mov_imm8
 0x109    {br(C_W16, rel10(0x109, 0x112))}   BR C_W16, mov_imm16
 0x10A    {svcw_small(FETCH_IMM32)}   SVCW FETCH_IMM32
@@ -560,4 +560,4 @@ print(f"  CM_IRET = 0x{CM_IRET:03X}")
 print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 2 INT_ENTER)")
 print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 3 IRET_FLOW)")
 print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
-print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6D-1 MOV immediate/register/memory/immediate-to-memory/immediate-to-register)")
+print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6E-1 MOV immediate/register/memory/immediate-to-memory/immediate-to-register)")

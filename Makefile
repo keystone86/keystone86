@@ -124,6 +124,8 @@ help:
 	@echo "  make rung6-pass6c1-clean   - remove Rung 6 Pass 6C-1 simulation artifacts"
 	@echo "  make rung6-pass6d1-sim     - compile and run bounded Rung 6 Pass 6D-1 MOV imm-to-reg ModRM.mod=11 simulation"
 	@echo "  make rung6-pass6d1-clean   - remove Rung 6 Pass 6D-1 simulation artifacts"
+	@echo "  make rung6-pass6e1-sim     - compile and run bounded Rung 6 Pass 6E-1 MOV base-only no-displacement simulation"
+	@echo "  make rung6-pass6e1-clean   - remove Rung 6 Pass 6E-1 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -747,6 +749,28 @@ rung6-pass6d1-sim: require-container ucode
 rung6-pass6d1-clean: require-container
 	@rm -rf build/sim/rung6_pass6d1
 	@echo "Rung 6 Pass 6D-1 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 6E-1 — bounded MOV base-only no-displacement slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS6E1 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_base_nodisp.sv
+
+rung6-pass6e1-sim: require-container ucode
+	@echo "--- Rung 6 Pass 6E-1: compiling bounded MOV base-only no-displacement RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass6e1
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass6e1/tb_rung6_mov_base_nodisp.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS6E1)
+	@echo "--- Rung 6 Pass 6E-1: running bounded MOV base-only no-displacement simulation ---"
+	vvp build/sim/rung6_pass6e1/tb_rung6_mov_base_nodisp.vvp
+
+rung6-pass6e1-clean: require-container
+	@rm -rf build/sim/rung6_pass6e1
+	@echo "Rung 6 Pass 6E-1 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

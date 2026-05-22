@@ -4,13 +4,14 @@
 // Bounded Rung 6 load/store service.
 //
 // Existing STORE_REG_META behavior remains limited to ModRM.mod=11 MOV
-// register-register forms. Pass 6A-1 adds only memory-source LOAD_RM8/16/32
-// for the direct absolute disp32 form after EA_CALC_32 has staged the
-// effective address in T2. Pass 6B-1 adds only memory-destination STORE_RM*
-// for the same direct absolute disp32 form; LOAD_REG_META may read the source
-// register for that bounded store path, and the memory write is completed
-// before ENDI. Pass 6C-1 reuses STORE_RM* for OC_MOV_RM_IMM after FETCH_IMM*
-// leaves the immediate in T4.
+// register-register forms. Pass 6A-1 adds memory-source LOAD_RM8/16/32 for
+// the direct absolute disp32 form after EA_CALC_32 has staged the effective
+// address in T2. Pass 6B-1 adds memory-destination STORE_RM* for the same
+// direct absolute disp32 form; LOAD_REG_META may read the source register for
+// that bounded store path, and the memory write is completed before ENDI.
+// Pass 6C-1 reuses STORE_RM* for OC_MOV_RM_IMM after FETCH_IMM* leaves the
+// immediate in T4. Pass 6E-1 extends the same LOAD_RM*/STORE_RM* paths only to
+// default-32 base-only no-displacement ModRM.mod=00 r/m!=100/101 forms.
 
 import keystone86_pkg::*;
 
@@ -62,6 +63,7 @@ module load_store (
     localparam logic [7:0] OC_MOV_R_RM = 8'h01;
     localparam logic [7:0] OC_MOV_RM_IMM = 8'h03;
     localparam logic [3:0] MRM_REG     = 4'h0;
+    localparam logic [3:0] MRM_MEM_NO_DISP = 4'h1;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
 
     typedef enum logic [1:0] {
@@ -113,6 +115,17 @@ module load_store (
         return (meta_modrm_class == MRM_MEM_DISP32) &&
                (meta_modrm_byte[7:6] == 2'b00) &&
                (meta_modrm_byte[2:0] == 3'b101);
+    endfunction
+
+    function automatic logic is_base_nodisp_mem_form;
+        return (meta_modrm_class == MRM_MEM_NO_DISP) &&
+               (meta_modrm_byte[7:6] == 2'b00) &&
+               (meta_modrm_byte[2:0] != 3'b100) &&
+               (meta_modrm_byte[2:0] != 3'b101);
+    endfunction
+
+    function automatic logic is_authorized_mem_form;
+        return is_direct_disp32_mem_form() || is_base_nodisp_mem_form();
     endfunction
 
     function automatic logic [3:0] byteen_for_service(input logic [7:0] sid);
@@ -202,7 +215,7 @@ module load_store (
                                 done_r <= 1'b1;
                                 if (!((meta_modrm_class == MRM_REG) ||
                                       ((meta_opcode_class == OC_MOV_RM_R) &&
-                                       is_direct_disp32_mem_form()))) begin
+                                       is_authorized_mem_form()))) begin
                                     sr_r <= SR_FAULT;
                                 end else begin
                                     sr_r         <= SR_OK;
@@ -228,7 +241,7 @@ module load_store (
                             LOAD_RM16,
                             LOAD_RM32: begin
                                 if ((meta_opcode_class == OC_MOV_R_RM) &&
-                                    is_direct_disp32_mem_form() &&
+                                    is_authorized_mem_form() &&
                                     service_width_matches_opsz(svc_id)) begin
                                     state_r         <= LS_MEM_WAIT;
                                     active_svc_id_r <= svc_id;
@@ -245,7 +258,7 @@ module load_store (
                             STORE_RM32: begin
                                 if (((meta_opcode_class == OC_MOV_RM_R) ||
                                      (meta_opcode_class == OC_MOV_RM_IMM)) &&
-                                    is_direct_disp32_mem_form() &&
+                                    is_authorized_mem_form() &&
                                     service_width_matches_opsz(svc_id)) begin
                                     state_r           <= LS_MEM_WAIT;
                                     active_svc_id_r   <= svc_id;

@@ -379,8 +379,8 @@ module tb_rung6_mov_reg_reg16;
         check("final GPR state matches low-word shadow", gprs_match_shadow());
 
         run_unsupported_prefix(8'h88, 8'hC0, 1'b1, "66+88 mod=11");
-        run_unsupported_prefix(8'h89, 8'h00, 1'b1, "66+89 mod=00");
-        run_unsupported_prefix(8'h8B, 8'h00, 1'b1, "66+8B mod=00");
+        run_unsupported_prefix(8'h89, 8'h04, 1'b1, "66+89 SIB memory");
+        run_unsupported_prefix(8'h8B, 8'h04, 1'b1, "66+8B SIB memory");
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 5B MOV register-register16 smoke completed");

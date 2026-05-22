@@ -1,13 +1,13 @@
 // Keystone86 / Aegis
 // rtl/core/services/ea_calc.sv
 //
-// Bounded Rung 6 Pass 6A-1 effective-address service.
+// Bounded Rung 6 Pass 6E-1 effective-address service.
 //
-// This slice implements only EA_CALC_32 for the direct absolute disp32
-// addressing form used by memory-source MOV:
+// This slice implements only EA_CALC_32 for:
 //   ModRM.mod=00, ModRM.r/m=101
+//   ModRM.mod=00, ModRM.r/m!=100/101 base-only no-displacement
 //
-// It does not implement EA_CALC_16, SIB, base/index/scale, disp8, mod=01/10,
+// It does not implement EA_CALC_16, SIB, index/scale, disp8, mod=01/10,
 // 0x67, segment-base addition, protection checks, or memory access.
 
 import keystone86_pkg::*;
@@ -25,10 +25,14 @@ module ea_calc (
     input  logic [3:0]  meta_modrm_class,
     input  logic [31:0] meta_disp_value,
 
+    output logic [2:0]  base_gpr_rd_idx,
+    input  logic [31:0] base_gpr_rd_val,
+
     output logic        t2_wr_en,
     output logic [31:0] t2_wr_data
 );
 
+    localparam logic [3:0] MRM_MEM_NO_DISP = 4'h1;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
 
     logic        done_r;
@@ -42,8 +46,16 @@ module ea_calc (
                (meta_modrm_byte[2:0] == 3'b101);
     endfunction
 
+    function automatic logic is_base_nodisp_mem_form;
+        return (meta_modrm_class == MRM_MEM_NO_DISP) &&
+               (meta_modrm_byte[7:6] == 2'b00) &&
+               (meta_modrm_byte[2:0] != 3'b100) &&
+               (meta_modrm_byte[2:0] != 3'b101);
+    endfunction
+
     assign svc_done   = done_r;
     assign svc_sr     = sr_r;
+    assign base_gpr_rd_idx = meta_modrm_byte[2:0];
     assign t2_wr_en   = t2_wr_en_r;
     assign t2_wr_data = t2_wr_data_r;
 
@@ -65,6 +77,10 @@ module ea_calc (
                     sr_r         <= SR_OK;
                     t2_wr_en_r   <= 1'b1;
                     t2_wr_data_r <= meta_disp_value;
+                end else if ((svc_id == EA_CALC_32) && is_base_nodisp_mem_form()) begin
+                    sr_r         <= SR_OK;
+                    t2_wr_en_r   <= 1'b1;
+                    t2_wr_data_r <= base_gpr_rd_val;
                 end else begin
                     sr_r <= SR_FAULT;
                 end

@@ -2,8 +2,8 @@
 // rtl/core/cpu_top.sv
 //
 // Rung 6 Pass 6B-1 top-level with service-based control-transfer paths,
-// bounded MOV immediate/register-register slices, direct-disp32 memory-source
-// MOV reads, and direct-disp32 memory-destination MOV writes.
+// bounded MOV immediate/register-register slices, direct-disp32 memory MOV,
+// and Pass 6E-1 default-32 base-only no-displacement memory MOV.
 
 import keystone86_pkg::*;
 
@@ -179,7 +179,8 @@ module cpu_top (
     logic        op_mem_rd_ready;
     logic [31:0] op_mem_rd_data;
 
-    // ea_calc side: bounded Pass 6A-1 EA_CALC_32 direct disp32 only
+    // ea_calc side: bounded EA_CALC_32 direct disp32 plus Pass 6E-1
+    // default-32 base-only no-displacement forms.
     logic [7:0]  ea_svc_id;
     logic        ea_svc_req;
     logic        ea_svc_done;
@@ -188,7 +189,7 @@ module cpu_top (
     logic [31:0] ea_t2_wr_data;
 
     // load_store side: register metadata plus bounded memory-source LOAD_RM*
-    // and memory-destination STORE_RM* direct-disp32 operations.
+    // and memory-destination STORE_RM* direct-disp32/base-only operations.
     logic [7:0]  ls_svc_id;
     logic        ls_svc_req;
     logic        ls_svc_done;
@@ -209,6 +210,9 @@ module cpu_top (
     logic [2:0]  ls_pc_gpr_idx;
     logic [1:0]  ls_pc_gpr_opsz;
     logic [31:0] ls_pc_gpr_val;
+    logic [2:0]  ls_gpr_rd_idx;
+    logic [1:0]  ls_gpr_rd_opsz;
+    logic [2:0]  ea_base_gpr_rd_idx;
     logic [2:0]  gpr_rd_idx;
     logic [1:0]  gpr_rd_opsz;
     logic [31:0] gpr_rd_val;
@@ -333,6 +337,14 @@ module cpu_top (
     assign commit_pc_gpr_idx  = ls_pc_gpr_en ? ls_pc_gpr_idx : pc_gpr_idx;
     assign commit_pc_gpr_opsz = ls_pc_gpr_en ? ls_pc_gpr_opsz : pc_gpr_opsz;
     assign commit_pc_gpr_val  = ls_pc_gpr_en ? ls_pc_gpr_val : pc_gpr_val;
+    // EA_CALC_32 needs the committed 32-bit base value only during its
+    // bounded base-only service cycle. LOAD_REG_META uses the same committed
+    // read port in separate microcode cycles, so this mux does not create a
+    // second architectural read owner.
+    assign gpr_rd_idx  = (ea_svc_req && (ea_svc_id == EA_CALC_32)) ? ea_base_gpr_rd_idx :
+                                                                    ls_gpr_rd_idx;
+    assign gpr_rd_opsz = (ea_svc_req && (ea_svc_id == EA_CALC_32)) ? 2'h2 :
+                                                                    ls_gpr_rd_opsz;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -691,6 +703,8 @@ module cpu_top (
         .meta_modrm_byte  (meta_modrm_byte_r),
         .meta_modrm_class (meta_modrm_class_r),
         .meta_disp_value  (meta_disp_value_r),
+        .base_gpr_rd_idx  (ea_base_gpr_rd_idx),
+        .base_gpr_rd_val  (gpr_rd_val),
         .t2_wr_en         (ea_t2_wr_en),
         .t2_wr_data       (ea_t2_wr_data)
     );
@@ -709,8 +723,8 @@ module cpu_top (
         .meta_reg_dst     (meta_reg_dst_r),
         .meta_reg_src     (meta_reg_src_r),
         .meta_reg_rm      (meta_reg_rm_r),
-        .gpr_rd_idx       (gpr_rd_idx),
-        .gpr_rd_opsz      (gpr_rd_opsz),
+        .gpr_rd_idx       (ls_gpr_rd_idx),
+        .gpr_rd_opsz      (ls_gpr_rd_opsz),
         .gpr_rd_val       (gpr_rd_val),
         .t4_in            (t4_r),
         .t2_in            (t2_r),
