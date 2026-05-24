@@ -611,8 +611,8 @@ module tb_rung6_mov_mem_dst_disp32;
                   read_mem32(addr) == expected_mem32[16 + r]);
         end
 
-        run_unsupported_form(3, 8'h88, 8'h45, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
-                             "88 mod=01 disp8 memory destination", 1'b0);
+        run_unsupported_form(6, 8'h88, 8'h85, 8'h00, 8'h40, 8'h00, 8'h00, 8'h00,
+                             "88 mod=10 disp32 memory destination", 1'b0);
         run_unsupported_form(6, 8'h89, 8'h85, 8'h00, 8'h40, 8'h00, 8'h00, 8'h00,
                              "89 mod=10 disp32 memory destination", 1'b0);
         run_unsupported_form(7, 8'h89, 8'h04, 8'h25, 8'h00, 8'h40, 8'h00, 8'h00,

@@ -12,6 +12,8 @@
 // Pass 6C-1 reuses STORE_RM* for OC_MOV_RM_IMM after FETCH_IMM* leaves the
 // immediate in T4. Pass 6E-1 extends the same LOAD_RM*/STORE_RM* paths only to
 // default-32 base-only no-displacement ModRM.mod=00 r/m!=100/101 forms.
+// Pass 6E-2 additionally allows default-32 ModRM.mod=01 r/m!=100 base plus
+// signed disp8 forms after EA_CALC_32 has staged the effective address in T2.
 
 import keystone86_pkg::*;
 
@@ -64,6 +66,7 @@ module load_store (
     localparam logic [7:0] OC_MOV_RM_IMM = 8'h03;
     localparam logic [3:0] MRM_REG     = 4'h0;
     localparam logic [3:0] MRM_MEM_NO_DISP = 4'h1;
+    localparam logic [3:0] MRM_MEM_DISP8 = 4'h2;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
 
     typedef enum logic [1:0] {
@@ -124,8 +127,16 @@ module load_store (
                (meta_modrm_byte[2:0] != 3'b101);
     endfunction
 
+    function automatic logic is_base_disp8_mem_form;
+        return (meta_modrm_class == MRM_MEM_DISP8) &&
+               (meta_modrm_byte[7:6] == 2'b01) &&
+               (meta_modrm_byte[2:0] != 3'b100);
+    endfunction
+
     function automatic logic is_authorized_mem_form;
-        return is_direct_disp32_mem_form() || is_base_nodisp_mem_form();
+        return is_direct_disp32_mem_form() ||
+               is_base_nodisp_mem_form() ||
+               is_base_disp8_mem_form();
     endfunction
 
     function automatic logic [3:0] byteen_for_service(input logic [7:0] sid);

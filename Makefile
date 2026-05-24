@@ -27,6 +27,7 @@ HOST_GID := $(shell id -g)
         rung6-pass6b1-sim rung6-pass6b1-clean \
         rung6-pass6c1-sim rung6-pass6c1-clean \
         rung6-pass6d1-sim rung6-pass6d1-clean \
+        rung6-pass6e2-sim rung6-pass6e2-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -126,6 +127,8 @@ help:
 	@echo "  make rung6-pass6d1-clean   - remove Rung 6 Pass 6D-1 simulation artifacts"
 	@echo "  make rung6-pass6e1-sim     - compile and run bounded Rung 6 Pass 6E-1 MOV base-only no-displacement simulation"
 	@echo "  make rung6-pass6e1-clean   - remove Rung 6 Pass 6E-1 simulation artifacts"
+	@echo "  make rung6-pass6e2-sim     - compile and run bounded Rung 6 Pass 6E-2 MOV base+disp8 simulation"
+	@echo "  make rung6-pass6e2-clean   - remove Rung 6 Pass 6E-2 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -771,6 +774,28 @@ rung6-pass6e1-sim: require-container ucode
 rung6-pass6e1-clean: require-container
 	@rm -rf build/sim/rung6_pass6e1
 	@echo "Rung 6 Pass 6E-1 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 6E-2 — bounded MOV base plus signed disp8 slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS6E2 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_base_disp8.sv
+
+rung6-pass6e2-sim: require-container ucode
+	@echo "--- Rung 6 Pass 6E-2: compiling bounded MOV base+disp8 RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass6e2
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass6e2/tb_rung6_mov_base_disp8.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS6E2)
+	@echo "--- Rung 6 Pass 6E-2: running bounded MOV base+disp8 simulation ---"
+	vvp build/sim/rung6_pass6e2/tb_rung6_mov_base_disp8.vvp
+
+rung6-pass6e2-clean: require-container
+	@rm -rf build/sim/rung6_pass6e2
+	@echo "Rung 6 Pass 6E-2 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

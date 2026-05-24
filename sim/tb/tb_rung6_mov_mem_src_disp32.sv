@@ -510,16 +510,16 @@ module tb_rung6_mov_mem_src_disp32;
             end
         end
 
-        run_unsupported_form(3, 8'h8A, 8'h45, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
-                             "8A mod=01 disp8");
+        run_unsupported_form(6, 8'h8A, 8'h85, 8'h00, 8'h30, 8'h00, 8'h00, 8'h00,
+                             "8A mod=10 disp32");
         run_unsupported_form(6, 8'h8B, 8'h85, 8'h00, 8'h30, 8'h00, 8'h00, 8'h00,
                              "8B mod=10 disp32");
         run_unsupported_form(7, 8'h8B, 8'h04, 8'h25, 8'h00, 8'h30, 8'h00, 8'h00,
                              "8B SIB direct-like form");
         run_unsupported_form(7, 8'h66, 8'h8A, 8'h05, 8'h00, 8'h30, 8'h00, 8'h00,
                              "66+8A memory-source byte");
-        run_unsupported_form(4, 8'h66, 8'h8B, 8'h45, 8'h00, 8'h00, 8'h00, 8'h00,
-                             "66+8B mod=01 disp8");
+        run_unsupported_form(7, 8'h66, 8'h8B, 8'h85, 8'h00, 8'h30, 8'h00, 8'h00,
+                             "66+8B mod=10 disp32");
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 6A-1 MOV mem-source disp32 smoke completed");
