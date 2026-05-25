@@ -14,6 +14,8 @@
 // default-32 base-only no-displacement ModRM.mod=00 r/m!=100/101 forms.
 // Pass 6E-2 additionally allows default-32 ModRM.mod=01 r/m!=100 base plus
 // signed disp8 forms after EA_CALC_32 has staged the effective address in T2.
+// Pass 6E-3 additionally allows default-32 ModRM.mod=10 r/m!=100 base plus
+// signed disp32 forms through the same EA_CALC_32/T2 path.
 
 import keystone86_pkg::*;
 
@@ -133,10 +135,17 @@ module load_store (
                (meta_modrm_byte[2:0] != 3'b100);
     endfunction
 
+    function automatic logic is_base_disp32_mem_form;
+        return (meta_modrm_class == MRM_MEM_DISP32) &&
+               (meta_modrm_byte[7:6] == 2'b10) &&
+               (meta_modrm_byte[2:0] != 3'b100);
+    endfunction
+
     function automatic logic is_authorized_mem_form;
         return is_direct_disp32_mem_form() ||
                is_base_nodisp_mem_form() ||
-               is_base_disp8_mem_form();
+               is_base_disp8_mem_form() ||
+               is_base_disp32_mem_form();
     endfunction
 
     function automatic logic [3:0] byteen_for_service(input logic [7:0] sid);

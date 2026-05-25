@@ -8,8 +8,8 @@
 //   66 8B /r   mod=00 r/m=101 disp32 -> MOV r16, [disp32]
 //
 // This test intentionally does not exercise SIB, base/index/scale, disp8,
-// mod=01/10, 0x67, STORE_RM, or C6/C7. Pass 6B-1 covers the newly-authorized
-// direct-disp32 memory-destination MOV forms in a separate testbench.
+// base+disp8/base+disp32, 0x67, STORE_RM, or C6/C7. Later Pass 6 tests cover
+// those newly-authorized bounded MOV memory forms in separate testbenches.
 
 `timescale 1ns/1ps
 
@@ -510,16 +510,16 @@ module tb_rung6_mov_mem_src_disp32;
             end
         end
 
-        run_unsupported_form(6, 8'h8A, 8'h85, 8'h00, 8'h30, 8'h00, 8'h00, 8'h00,
-                             "8A mod=10 disp32");
-        run_unsupported_form(6, 8'h8B, 8'h85, 8'h00, 8'h30, 8'h00, 8'h00, 8'h00,
-                             "8B mod=10 disp32");
+        run_unsupported_form(7, 8'h8A, 8'h84, 8'h25, 8'h00, 8'h30, 8'h00, 8'h00,
+                             "8A SIB mod=10 disp32");
+        run_unsupported_form(7, 8'h8B, 8'h84, 8'h25, 8'h00, 8'h30, 8'h00, 8'h00,
+                             "8B SIB mod=10 disp32");
         run_unsupported_form(7, 8'h8B, 8'h04, 8'h25, 8'h00, 8'h30, 8'h00, 8'h00,
                              "8B SIB direct-like form");
         run_unsupported_form(7, 8'h66, 8'h8A, 8'h05, 8'h00, 8'h30, 8'h00, 8'h00,
                              "66+8A memory-source byte");
-        run_unsupported_form(7, 8'h66, 8'h8B, 8'h85, 8'h00, 8'h30, 8'h00, 8'h00,
-                             "66+8B mod=10 disp32");
+        run_unsupported_form(8, 8'h66, 8'h8B, 8'h84, 8'h25, 8'h00, 8'h30, 8'h00,
+                             "66+8B SIB mod=10 disp32");
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 6A-1 MOV mem-source disp32 smoke completed");

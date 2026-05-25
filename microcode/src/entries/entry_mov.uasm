@@ -1,6 +1,6 @@
 .entry ENTRY_MOV, 0x01
 
-; Rung 6 Pass 6E-2 bounded MOV slice:
+; Rung 6 Pass 6E-3 bounded MOV slice:
 ;   B0-B7 MOV r8, imm8
 ;   B8-BF MOV r32, imm32
 ;   66+B8-BF MOV r16, imm16
@@ -8,20 +8,24 @@
 ;   66+89/8B register-register only when ModRM.mod=11
 ;   8A/8B and 66+8B memory-source for ModRM.mod=00 r/m=101 disp32 and
 ;     Pass 6E-1 default-32 base-only no-displacement r/m!=100/101, plus
-;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8
+;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8, plus
+;     Pass 6E-3 default-32 mod=10 non-SIB signed disp32
 ;   88/89 and 66+89 memory-destination for ModRM.mod=00 r/m=101 disp32 and
 ;     Pass 6E-1 default-32 base-only no-displacement r/m!=100/101, plus
-;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8
+;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8, plus
+;     Pass 6E-3 default-32 mod=10 non-SIB signed disp32
 ;   C6/C7 /0 and 66+C7 /0 immediate-to-memory only for ModRM.mod=00,
 ;     r/m=101 disp32, Pass 6E-1 base-only no-displacement r/m!=100/101, or
-;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8
+;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8, or Pass 6E-3
+;     default-32 mod=10 non-SIB signed disp32
 ;   C6/C7 /0 and 66+C7 /0 immediate-to-register only for ModRM.mod=11
 ; Decoder supplies OC_MOV_R_IMM, M_OPSZ, and raw M_REG_DST from opcode[2:0].
 ; For 88/89/8A/8B it supplies OC_MOV_RM_R or OC_MOV_R_RM, M_REG_SRC,
 ; M_REG_RM, and M_REG_DST. LOAD_REG_META/STORE_REG_META are bounded to
 ; ModRM.mod=11 metadata. The memory-source path uses EA_CALC_32 and
 ; LOAD_RM8/16/32 only for direct absolute disp32 and Pass 6E-1 base-only
-; no-displacement forms, plus Pass 6E-2 signed disp8 forms. The
+; no-displacement forms, plus Pass 6E-2 signed disp8 and Pass 6E-3 signed
+; disp32 forms. The
 ; memory-destination path uses EA_CALC_32, LOAD_REG_META, and STORE_RM8/16/32
 ; before ENDI CM_NOP|CM_EIP. The immediate-to-memory path uses FETCH_IMM*,
 ; EA_CALC_32, and STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP.

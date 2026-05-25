@@ -1,14 +1,15 @@
 // Keystone86 / Aegis
 // rtl/core/services/ea_calc.sv
 //
-// Bounded Rung 6 Pass 6E-2 effective-address service.
+// Bounded Rung 6 Pass 6E-3 effective-address service.
 //
 // This slice implements only EA_CALC_32 for:
 //   ModRM.mod=00, ModRM.r/m=101
 //   ModRM.mod=00, ModRM.r/m!=100/101 base-only no-displacement
 //   ModRM.mod=01, ModRM.r/m!=100 base plus signed disp8
+//   ModRM.mod=10, ModRM.r/m!=100 base plus signed disp32
 //
-// It does not implement EA_CALC_16, SIB, index/scale, mod=10, 0x67,
+// It does not implement EA_CALC_16, SIB, index/scale, 0x67,
 // segment-base addition, protection checks, or memory access.
 
 import keystone86_pkg::*;
@@ -61,6 +62,12 @@ module ea_calc (
                (meta_modrm_byte[2:0] != 3'b100);
     endfunction
 
+    function automatic logic is_base_disp32_mem_form;
+        return (meta_modrm_class == MRM_MEM_DISP32) &&
+               (meta_modrm_byte[7:6] == 2'b10) &&
+               (meta_modrm_byte[2:0] != 3'b100);
+    endfunction
+
     assign svc_done   = done_r;
     assign svc_sr     = sr_r;
     assign base_gpr_rd_idx = meta_modrm_byte[2:0];
@@ -90,6 +97,10 @@ module ea_calc (
                     t2_wr_en_r   <= 1'b1;
                     t2_wr_data_r <= base_gpr_rd_val;
                 end else if ((svc_id == EA_CALC_32) && is_base_disp8_mem_form()) begin
+                    sr_r         <= SR_OK;
+                    t2_wr_en_r   <= 1'b1;
+                    t2_wr_data_r <= base_gpr_rd_val + meta_disp_value;
+                end else if ((svc_id == EA_CALC_32) && is_base_disp32_mem_form()) begin
                     sr_r         <= SR_OK;
                     t2_wr_en_r   <= 1'b1;
                     t2_wr_data_r <= base_gpr_rd_val + meta_disp_value;

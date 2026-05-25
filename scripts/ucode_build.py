@@ -17,7 +17,7 @@ for i in range(256):
         val = 0x010
         meaning = "ENTRY_NULL"
     elif i == 0x01:
-        val = 0x100       # Rung 6 Pass 6E-2: bounded MOV register/immediate/memory slices
+        val = 0x100       # Rung 6 Pass 6E-3: bounded MOV register/immediate/memory slices
         meaning = "ENTRY_MOV"
     elif i == 0x07:
         val = 0x050       # Rung 2: ENTRY_JMP_NEAR
@@ -275,10 +275,11 @@ rom[0x0A2] = br(C_FAULT, rel10(0x0A2, 0x000))
 rom[0x0A3] = endi(CM_IRET)
 
 # --------------------------------------------------------------------
-# Rung 6 Pass 6E-2: ENTRY_MOV immediate, register-register, bounded
-# memory-source direct-disp32/base-only/base+disp8, bounded register-source
-# memory-destination direct-disp32/base-only/base+disp8, and bounded immediate-to-memory
-# direct-disp32/base-only/base+disp8 slices at 0x100.
+# Rung 6 Pass 6E-3: ENTRY_MOV immediate, register-register, bounded
+# memory-source direct-disp32/base-only/base+disp8/base+disp32, bounded
+# register-source memory-destination direct-disp32/base-only/base+disp8/
+# base+disp32, and bounded immediate-to-memory direct-disp32/base-only/
+# base+disp8/base+disp32 slices at 0x100.
 #
 # B0-B7, B8-BF, and 66+B8-BF keep the proven immediate path with width
 # dispatch. 88/89/8A/8B and 66+89/8B use LOAD_REG_META/STORE_REG_META only
@@ -288,8 +289,9 @@ rom[0x0A3] = endi(CM_IRET)
 # LOAD_REG_META, and STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP. C6/C7 /0 and
 # 66+C7 /0 memory forms use FETCH_IMM8/16/32, EA_CALC_32, and STORE_RM8/16/32
 # before ENDI CM_NOP|CM_EIP. The accepted memory subset is direct absolute
-# disp32, Pass 6E-1 default-32 base-only no-displacement r/m!=100/101, and
-# Pass 6E-2 default-32 mod=01 non-SIB signed disp8.
+# disp32, Pass 6E-1 default-32 base-only no-displacement r/m!=100/101,
+# Pass 6E-2 default-32 mod=01 non-SIB signed disp8, and Pass 6E-3 default-32
+# mod=10 non-SIB signed disp32.
 # C6/C7 /0 and 66+C7 /0 ModRM.mod=11 forms use FETCH_IMM8/16/32, STAGE_GPR,
 # and ENDI CM_MOV_REG without memory services.
 # Other memory forms remain on ENTRY_NULL and are not routed here.
@@ -393,7 +395,7 @@ listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, Rung 4 Jcc,
 ; Rung 5 Pass 2 INT_ENTER path, Pass 3 bounded IRET_FLOW path,
 ; Pass 4 bounded #UD fault delivery through SUB_FAULT_HANDLER,
-; and Rung 6 Pass 6E-2 bounded MOV immediate/register/memory/immediate-to-memory/immediate-to-register slices
+; and Rung 6 Pass 6E-3 bounded MOV immediate/register/memory/immediate-to-memory/immediate-to-register slices
 address  encoding     source
 0x000    {extract(REG_T4, MF_FC_TO_VECTOR)}   SUB_FAULT_HANDLER: EXTRACT T4, MF_FC_TO_VECTOR
 0x001    {ext_word()}   EXT
@@ -561,4 +563,4 @@ print(f"  CM_IRET = 0x{CM_IRET:03X}")
 print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 2 INT_ENTER)")
 print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 3 IRET_FLOW)")
 print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
-print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6E-2 MOV immediate/register/memory/immediate-to-memory/immediate-to-register)")
+print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6E-3 MOV immediate/register/memory/immediate-to-memory/immediate-to-register)")

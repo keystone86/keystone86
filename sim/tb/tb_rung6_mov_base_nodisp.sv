@@ -11,7 +11,7 @@
 //   C6/C7/66+C7 /0 immediate-to-memory, including [EAX]
 //
 // This test intentionally does not exercise index, scale, non-SIB signed
-// disp8, mod=10, 0x67 address-size behavior, EA_CALC_16, 16-bit addressing,
+// disp8/base+disp32, 0x67 address-size behavior, EA_CALC_16, 16-bit addressing,
 // protected/page/segment behavior, flags production, segment/control/debug/
 // test-register MOV, string MOVS, or Rung 7 behavior. SIB is checked only as
 // an unsupported adjacent form.
@@ -409,8 +409,8 @@ module tb_rung6_mov_base_nodisp;
                              "SIB r/m=100", 1'b0);
         run_unsupported_form(4, 8'h8B, 8'h44, 8'h24, 8'h00, 8'h00, 8'h00,
                              "mod=01 SIB disp8", 1'b0);
-        run_unsupported_form(6, 8'h8B, 8'h80, 8'h00, 8'h00, 8'h00, 8'h00,
-                             "mod=10 disp32", 1'b0);
+        run_unsupported_form(6, 8'h8B, 8'h84, 8'h24, 8'h00, 8'h00, 8'h00,
+                             "mod=10 SIB disp32", 1'b0);
         // The current Rung 6 decoder exposes 0x67 only as a standalone
         // ENTRY_PREFIX_ONLY byte; this check intentionally does not claim the
         // following 8B 00 bytes are consumed as one unsupported prefixed MOV.

@@ -8,7 +8,7 @@
 //   66 89 /r   mod=00 r/m=101 disp32 -> MOV [disp32], r16
 //
 // This test intentionally does not exercise C6/C7, SIB, base/index/scale,
-// disp8, mod=01/10, 0x67 address-size behavior, EA_CALC_16, 16-bit
+// disp8, base+disp8/base+disp32, 0x67 address-size behavior, EA_CALC_16, 16-bit
 // addressing, protected/page/segment behavior, or flags production.
 
 `timescale 1ns/1ps
@@ -611,10 +611,10 @@ module tb_rung6_mov_mem_dst_disp32;
                   read_mem32(addr) == expected_mem32[16 + r]);
         end
 
-        run_unsupported_form(6, 8'h88, 8'h85, 8'h00, 8'h40, 8'h00, 8'h00, 8'h00,
-                             "88 mod=10 disp32 memory destination", 1'b0);
-        run_unsupported_form(6, 8'h89, 8'h85, 8'h00, 8'h40, 8'h00, 8'h00, 8'h00,
-                             "89 mod=10 disp32 memory destination", 1'b0);
+        run_unsupported_form(7, 8'h88, 8'h84, 8'h25, 8'h00, 8'h40, 8'h00, 8'h00,
+                             "88 SIB mod=10 memory destination", 1'b0);
+        run_unsupported_form(7, 8'h89, 8'h84, 8'h25, 8'h00, 8'h40, 8'h00, 8'h00,
+                             "89 SIB mod=10 memory destination", 1'b0);
         run_unsupported_form(7, 8'h89, 8'h04, 8'h25, 8'h00, 8'h40, 8'h00, 8'h00,
                              "89 SIB memory destination", 1'b0);
         run_unsupported_form(7, 8'h66, 8'h88, 8'h05, 8'h00, 8'h40, 8'h00, 8'h00,

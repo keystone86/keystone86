@@ -1,9 +1,10 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 6 Pass 6B-1 top-level with service-based control-transfer paths,
+// Rung 6 Pass 6E-3 top-level with service-based control-transfer paths,
 // bounded MOV immediate/register-register slices, direct-disp32 memory MOV,
-// and Pass 6E-1 default-32 base-only no-displacement memory MOV.
+// base-only no-displacement memory MOV, signed-disp8 memory MOV, and signed
+// disp32 base memory MOV.
 
 import keystone86_pkg::*;
 
@@ -179,8 +180,8 @@ module cpu_top (
     logic        op_mem_rd_ready;
     logic [31:0] op_mem_rd_data;
 
-    // ea_calc side: bounded EA_CALC_32 direct disp32 plus Pass 6E-1
-    // default-32 base-only no-displacement forms.
+    // ea_calc side: bounded EA_CALC_32 direct disp32 plus default-32
+    // base-only, base+disp8, and base+disp32 non-SIB forms.
     logic [7:0]  ea_svc_id;
     logic        ea_svc_req;
     logic        ea_svc_done;
@@ -189,7 +190,8 @@ module cpu_top (
     logic [31:0] ea_t2_wr_data;
 
     // load_store side: register metadata plus bounded memory-source LOAD_RM*
-    // and memory-destination STORE_RM* direct-disp32/base-only operations.
+    // and memory-destination STORE_RM* direct-disp32/base-only/base+disp8/
+    // base+disp32 operations.
     logic [7:0]  ls_svc_id;
     logic        ls_svc_req;
     logic        ls_svc_done;
@@ -338,7 +340,7 @@ module cpu_top (
     assign commit_pc_gpr_opsz = ls_pc_gpr_en ? ls_pc_gpr_opsz : pc_gpr_opsz;
     assign commit_pc_gpr_val  = ls_pc_gpr_en ? ls_pc_gpr_val : pc_gpr_val;
     // EA_CALC_32 needs the committed 32-bit base value only during its
-    // bounded base-only service cycle. LOAD_REG_META uses the same committed
+    // bounded base-relative service cycle. LOAD_REG_META uses the same committed
     // read port in separate microcode cycles, so this mux does not create a
     // second architectural read owner.
     assign gpr_rd_idx  = (ea_svc_req && (ea_svc_id == EA_CALC_32)) ? ea_base_gpr_rd_idx :
