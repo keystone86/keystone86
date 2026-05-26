@@ -514,8 +514,6 @@ module tb_rung6_mov_mem_src_disp32;
                              "8A SIB mod=10 index!=100");
         run_unsupported_form(7, 8'h8B, 8'h84, 8'h0D, 8'h00, 8'h30, 8'h00, 8'h00,
                              "8B SIB mod=10 index!=100");
-        run_unsupported_form(7, 8'h8B, 8'h04, 8'h25, 8'h00, 8'h30, 8'h00, 8'h00,
-                             "8B SIB direct-like form");
         run_unsupported_form(7, 8'h66, 8'h8A, 8'h05, 8'h00, 8'h30, 8'h00, 8'h00,
                              "66+8A memory-source byte");
         run_unsupported_form(8, 8'h66, 8'h8B, 8'h84, 8'h0D, 8'h00, 8'h30, 8'h00,

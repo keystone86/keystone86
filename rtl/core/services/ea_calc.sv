@@ -1,18 +1,20 @@
 // Keystone86 / Aegis
 // rtl/core/services/ea_calc.sv
 //
-// Bounded Rung 6 Pass 6F-1 effective-address service.
+// Bounded Rung 6 Pass 6F-2 effective-address service.
 //
 // This slice implements only EA_CALC_32 for:
 //   ModRM.mod=00, ModRM.r/m=101
 //   ModRM.mod=00, ModRM.r/m!=100/101 base-only no-displacement
 //   ModRM.mod=01, ModRM.r/m!=100 base plus signed disp8
 //   ModRM.mod=10, ModRM.r/m!=100 base plus signed disp32
-//   ModRM.r/m=100 SIB forms with SIB.index=100 and base-only addressing:
-//     mod=00 base!=101, mod=01 any base + disp8, mod=10 any base + disp32
+//   ModRM.r/m=100 SIB forms with SIB.index=100:
+//     mod=00 base!=101 base-only, mod=01 any base + disp8,
+//     mod=10 any base + disp32, and Pass 6F-2 ModRM.mod=00,
+//     ModRM.r/m=100, SIB.index=100, SIB.base=101 no-base disp32 with EA=disp32
 //
 // It does not implement EA_CALC_16, SIB.index!=100, index/scale, 0x67,
-// segment-base addition, protection checks, or memory access.
+// segment-base addition, protection checks, memory access, or Rung 7 behavior.
 
 import keystone86_pkg::*;
 
@@ -89,6 +91,14 @@ module ea_calc (
                (meta_modrm_byte[2:0] == 3'b100) &&
                sib_index_none() &&
                (meta_sib_byte[2:0] != 3'b101);
+    endfunction
+
+    function automatic logic is_sib_nobase_disp32_mem_form;
+        return (meta_modrm_class == MRM_SIB) &&
+               (meta_modrm_byte[7:6] == 2'b00) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               sib_index_none() &&
+               (meta_sib_byte[2:0] == 3'b101);
     endfunction
 
     function automatic logic is_sib_disp8_mem_form;
@@ -173,6 +183,10 @@ module ea_calc (
                     sr_r         <= SR_OK;
                     t2_wr_en_r   <= 1'b1;
                     t2_wr_data_r <= base_gpr_rd_val;
+                end else if ((svc_id == EA_CALC_32) && is_sib_nobase_disp32_mem_form()) begin
+                    sr_r         <= SR_OK;
+                    t2_wr_en_r   <= 1'b1;
+                    t2_wr_data_r <= meta_disp_value;
                 end else if ((svc_id == EA_CALC_32) && is_sib_disp8_mem_form()) begin
                     sr_r         <= SR_OK;
                     t2_wr_en_r   <= 1'b1;

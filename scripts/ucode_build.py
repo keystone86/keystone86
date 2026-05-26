@@ -17,7 +17,12 @@ for i in range(256):
         val = 0x010
         meaning = "ENTRY_NULL"
     elif i == 0x01:
-        val = 0x100       # Rung 6 Pass 6F-1: bounded MOV register/immediate/memory/SIB-base slices
+        # Rung 6 Pass 6F-2 bounded MOV: existing immediate/register,
+        # direct-disp32, non-SIB, and base-only-SIB coverage plus the
+        # default-32 ModRM.mod=00 ModRM.r/m=100 SIB.index=100 SIB.base=101
+        # no-base-SIB disp32 special case with EA=disp32. No index read path,
+        # scale arithmetic, 0x67, EA_CALC_16, or Rung 7 behavior.
+        val = 0x100
         meaning = "ENTRY_MOV"
     elif i == 0x07:
         val = 0x050       # Rung 2: ENTRY_JMP_NEAR
@@ -275,11 +280,11 @@ rom[0x0A2] = br(C_FAULT, rel10(0x0A2, 0x000))
 rom[0x0A3] = endi(CM_IRET)
 
 # --------------------------------------------------------------------
-# Rung 6 Pass 6F-1: ENTRY_MOV immediate, register-register, bounded
+# Rung 6 Pass 6F-2: ENTRY_MOV immediate, register-register, bounded
 # memory-source direct-disp32/base-only/base+disp8/base+disp32, bounded
 # register-source memory-destination direct-disp32/base-only/base+disp8/
 # base+disp32, and bounded immediate-to-memory direct-disp32/base-only/
-# base+disp8/base+disp32/base-only-SIB slices at 0x100.
+# base+disp8/base+disp32/base-only-SIB/no-base-SIB-disp32 slices at 0x100.
 #
 # B0-B7, B8-BF, and 66+B8-BF keep the proven immediate path with width
 # dispatch. 88/89/8A/8B and 66+89/8B use LOAD_REG_META/STORE_REG_META only
@@ -292,7 +297,8 @@ rom[0x0A3] = endi(CM_IRET)
 # disp32, Pass 6E-1 default-32 base-only no-displacement r/m!=100/101,
 # Pass 6E-2 default-32 mod=01 non-SIB signed disp8, and Pass 6E-3 default-32
 # mod=10 non-SIB signed disp32, plus Pass 6F-1 base-only SIB forms with
-# SIB.index=100 and no mod=00 base=101 no-base special case.
+# SIB.index=100 and Pass 6F-2 mod=00 SIB.index=100 SIB.base=101 no-base
+# disp32.
 # C6/C7 /0 and 66+C7 /0 ModRM.mod=11 forms use FETCH_IMM8/16/32, STAGE_GPR,
 # and ENDI CM_MOV_REG without memory services.
 # Other memory forms remain on ENTRY_NULL and are not routed here.
@@ -396,7 +402,11 @@ listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; Rung 2 service-based JMP, Rung 3 service-based CALL/RET, Rung 4 Jcc,
 ; Rung 5 Pass 2 INT_ENTER path, Pass 3 bounded IRET_FLOW path,
 ; Pass 4 bounded #UD fault delivery through SUB_FAULT_HANDLER,
-; and Rung 6 Pass 6F-1 bounded MOV immediate/register/memory/immediate-to-memory/immediate-to-register/SIB-base slices
+; and Rung 6 Pass 6F-2 bounded MOV immediate/register/direct-disp32,
+; non-SIB, and base-only-SIB coverage plus the default-32
+; ModRM.mod=00 ModRM.r/m=100 SIB.index=100 SIB.base=101
+; no-base-SIB disp32 special case with EA=disp32
+; no index read path, scale arithmetic, 0x67, EA_CALC_16, or Rung 7
 address  encoding     source
 0x000    {extract(REG_T4, MF_FC_TO_VECTOR)}   SUB_FAULT_HANDLER: EXTRACT T4, MF_FC_TO_VECTOR
 0x001    {ext_word()}   EXT
@@ -564,4 +574,4 @@ print(f"  CM_IRET = 0x{CM_IRET:03X}")
 print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 2 INT_ENTER)")
 print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 3 IRET_FLOW)")
 print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
-print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6F-1 MOV immediate/register/memory/immediate-to-memory/immediate-to-register/SIB-base)")
+print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6F-2 MOV immediate/register/memory/immediate-to-memory/immediate-to-register/SIB-base/SIB-no-base)")

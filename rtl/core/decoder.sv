@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through Rung 6 Pass 6F-1:
+// Decoder role through bounded Rung 6 Pass 6F-2:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -27,8 +27,11 @@
 //     displacement. Pass 6E-2 additionally accepts default-32 ModRM.mod=01
 //     non-SIB forms with one signed disp8. Pass 6E-3 additionally accepts
 //     default-32 ModRM.mod=10 non-SIB forms with four signed disp32 bytes.
-//     Pass 6F-1 additionally accepts base-only SIB with SIB.index=100,
-//     rejecting index paths and the mod=00 base=101 no-base special case.
+//     Pass 6F-1 additionally accepts base-only SIB with SIB.index=100.
+//     Pass 6F-2 additionally accepts only the ModRM.mod=00, ModRM.r/m=100,
+//     SIB.index=100, SIB.base=101 no-base disp32 special case, where
+//     EA=disp32. Index paths, scale arithmetic, 0x67, EA_CALC_16, and
+//     Rung 7 behavior remain unsupported.
 //   - For the bounded Pass 6B-1 memory-destination slice, accept only 88/89
 //     and 66+89 with ModRM.mod=00 and r/m=101, consume the disp32 absolute
 //     address, and report M_NEXT_EIP after that displacement. Pass 6E-1
@@ -37,7 +40,9 @@
 //     default-32 ModRM.mod=01 non-SIB forms with one signed disp8. Pass 6E-3
 //     additionally accepts default-32 ModRM.mod=10 non-SIB forms with four
 //     signed disp32 bytes. Pass 6F-1 additionally accepts the same bounded
-//     base-only SIB subset. Other SIB forms and 0x67 remain unsupported.
+//     base-only SIB subset. Pass 6F-2 additionally accepts only the mod=00
+//     SIB.index=100 SIB.base=101 no-base disp32 special case. Other SIB
+//     forms and 0x67 remain unsupported.
 //   - For the bounded Pass 6C-1 immediate-to-memory slice, accept only C6/C7
 //     /0 with ModRM.mod=00 and r/m=101, consume the disp32 absolute address,
 //     and report M_NEXT_EIP after the immediate. Pass 6E-1 additionally
@@ -46,6 +51,8 @@
 //     ModRM.mod=01 non-SIB forms with one signed disp8, or Pass 6E-3
 //     default-32 ModRM.mod=10 non-SIB forms with four signed disp32 bytes.
 //     Pass 6F-1 additionally accepts the same bounded base-only SIB subset.
+//     Pass 6F-2 additionally accepts only the mod=00 SIB.index=100
+//     SIB.base=101 no-base disp32 special case.
 //     For Pass 6D-1, also accept C6/C7 /0 with ModRM.mod=11 as
 //     register-destination MOV and report M_NEXT_EIP after the immediate.
 //     FETCH_IMM* remains the microcode-called service that consumes the
@@ -552,6 +559,16 @@ module decoder (
                (s[2:0] != 3'b101);
     endfunction
 
+    function automatic logic sib_nobase_disp32_form(
+        input logic [7:0] m,
+        input logic [7:0] s
+    );
+        return (m[7:6] == 2'b00) &&
+               (m[2:0] == 3'b100) &&
+               sib_index_none(s) &&
+               (s[2:0] == 3'b101);
+    endfunction
+
     function automatic logic sib_disp8_32_form(
         input logic [7:0] m,
         input logic [7:0] s
@@ -612,6 +629,23 @@ module decoder (
     );
         begin
             if (!sib_nodisp32_form(m, s))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h8B);
+
+            return (op == 8'h8A) || (op == 8'h8B);
+        end
+    endfunction
+
+    function automatic logic mov_mem_src_sib_nobase_disp32_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_nobase_disp32_form(m, s))
                 return 1'b0;
 
             if (pref66)
@@ -729,6 +763,23 @@ module decoder (
     );
         begin
             if (!sib_nodisp32_form(m, s))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h89);
+
+            return (op == 8'h88) || (op == 8'h89);
+        end
+    endfunction
+
+    function automatic logic mov_mem_dst_sib_nobase_disp32_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_nobase_disp32_form(m, s))
                 return 1'b0;
 
             if (pref66)
@@ -857,6 +908,23 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_rm_imm_sib_nobase_disp32_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_nobase_disp32_form(m, s) || (m[5:3] != 3'b000))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'hC7);
+
+            return (op == 8'hC6) || (op == 8'hC7);
+        end
+    endfunction
+
     function automatic logic mov_rm_imm_base_disp8_form(
         input logic [7:0] op,
         input logic [7:0] m,
@@ -934,6 +1002,7 @@ module decoder (
                mov_mem_src_base_disp8_form(op, m, pref66) ||
                mov_mem_src_base_disp32_form(op, m, pref66) ||
                mov_mem_src_sib_nodisp_form(op, m, s, pref66) ||
+               mov_mem_src_sib_nobase_disp32_form(op, m, s, pref66) ||
                mov_mem_src_sib_disp8_form(op, m, s, pref66) ||
                mov_mem_src_sib_disp32_form(op, m, s, pref66);
     endfunction
@@ -949,6 +1018,7 @@ module decoder (
                mov_mem_dst_base_disp8_form(op, m, pref66) ||
                mov_mem_dst_base_disp32_form(op, m, pref66) ||
                mov_mem_dst_sib_nodisp_form(op, m, s, pref66) ||
+               mov_mem_dst_sib_nobase_disp32_form(op, m, s, pref66) ||
                mov_mem_dst_sib_disp8_form(op, m, s, pref66) ||
                mov_mem_dst_sib_disp32_form(op, m, s, pref66);
     endfunction
@@ -964,6 +1034,7 @@ module decoder (
                mov_rm_imm_base_disp8_form(op, m, pref66) ||
                mov_rm_imm_base_disp32_form(op, m, pref66) ||
                mov_rm_imm_sib_nodisp_form(op, m, s, pref66) ||
+               mov_rm_imm_sib_nobase_disp32_form(op, m, s, pref66) ||
                mov_rm_imm_sib_disp8_form(op, m, s, pref66) ||
                mov_rm_imm_sib_disp32_form(op, m, s, pref66);
     endfunction
