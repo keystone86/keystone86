@@ -1,26 +1,27 @@
 // Keystone86 / Aegis
-// sim/tb/tb_rung6_mov_base_disp8.sv
-// Bounded Rung 6 Pass 6E-2 smoke: default-32 base + signed disp8 MOV forms.
+// sim/tb/tb_rung6_mov_sib_base.sv
+// Bounded Rung 6 Pass 6F-1 smoke: default-32 base-only SIB MOV forms.
 //
 // Authorized addressing subset:
-//   ModRM.mod=01, r/m!=100, no SIB, signed disp8
+//   ModRM.r/m=100, SIB.index=100 only
+//   mod=00 base!=101, no displacement
+//   mod=01 any base plus signed disp8
+//   mod=10 any base plus disp32
 //
-// Authorized forms covered here:
-//   8A/8B/66+8B memory-source
-//   88/89/66+89 memory-destination
-//   C6/C7/66+C7 /0 immediate-to-memory
-//
-// This test intentionally does not exercise SIB, index, scale, base+disp32,
-// 0x67 address-size behavior, EA_CALC_16, 16-bit addressing,
-// protected/page/segment behavior, flags production,
-// segment/control/debug/test-register MOV, string MOVS, or Rung 7 behavior.
+// Pass 6F-1 supports only base-only SIB with SIB.index=100. SIB.index!=100,
+// mod=00 base=101 no-base disp32, and 0x67 are used here only as negative
+// unsupported-adjacent probes, never as supported behavior. Index read
+// plumbing, scale arithmetic, mod=00 base=101 no-base disp32, 0x67,
+// EA_CALC_16, 16-bit addressing, protected/page/segment behavior, flags
+// production, segment/control/debug/test-register MOV, string MOVS, and
+// Rung 7 behavior remain unsupported.
 
 `timescale 1ns/1ps
 
-module tb_rung6_mov_base_disp8;
+module tb_rung6_mov_sib_base;
 
     localparam int CLK_HALF_PERIOD = 5;
-    localparam int TIMEOUT         = 260000;
+    localparam int TIMEOUT         = 240000;
 
     localparam logic [7:0]  ENTRY_NULL_ID      = 8'h00;
     localparam logic [7:0]  ENTRY_PREFIX_ID    = 8'h12;
@@ -93,6 +94,8 @@ module tb_rung6_mov_base_disp8;
     int cycles;
     int mov_endi_count;
     int ea_calc32_count;
+    int sib_ea_count;
+    int sib_index_bad_count;
     int load_rm8_count;
     int load_rm16_count;
     int load_rm32_count;
@@ -158,6 +161,10 @@ module tb_rung6_mov_base_disp8;
             end
             return ok;
         end
+    endfunction
+
+    function automatic logic is_sib_class(input logic [3:0] cls);
+        return (cls == 4'h5) || (cls == 4'h6) || (cls == 4'h7);
     endfunction
 
     always_ff @(posedge clk or negedge reset_n) begin
@@ -235,6 +242,16 @@ module tb_rung6_mov_base_disp8;
         end
     endtask
 
+    task automatic append_disp32(input logic signed [31:0] disp);
+        begin
+            mem[pa16(program_pc + 32'd0)] = disp[7:0];
+            mem[pa16(program_pc + 32'd1)] = disp[15:8];
+            mem[pa16(program_pc + 32'd2)] = disp[23:16];
+            mem[pa16(program_pc + 32'd3)] = disp[31:24];
+            program_pc += 32'd4;
+        end
+    endtask
+
     task automatic append_mov32_imm(input logic [2:0] dst, input logic [31:0] imm);
         begin
             mem[pa16(program_pc + 32'd0)] = 8'hB8 | {5'h0, dst};
@@ -247,113 +264,133 @@ module tb_rung6_mov_base_disp8;
         end
     endtask
 
-    task automatic append_mov8_disp8(input logic [2:0] dst, input logic [2:0] base,
-                                     input logic signed [7:0] disp,
-                                     input logic [7:0] val);
+    task automatic append_sib(input logic [1:0] mod_bits,
+                              input logic [2:0] reg_bits,
+                              input logic [2:0] base_bits);
         begin
-            mem[pa16(program_pc + 32'd0)] = 8'h8A;
-            mem[pa16(program_pc + 32'd1)] = {2'b01, dst, base};
-            mem[pa16(program_pc + 32'd2)] = disp;
+            mem[pa16(program_pc + 32'd0)] = {mod_bits, reg_bits, 3'b100};
+            mem[pa16(program_pc + 32'd1)] = {2'b00, 3'b100, base_bits};
+            program_pc += 32'd2;
+        end
+    endtask
+
+    task automatic append_disp8(input logic signed [7:0] disp);
+        begin
+            mem[pa16(program_pc)] = disp[7:0];
+            program_pc += 32'd1;
+        end
+    endtask
+
+    task automatic append_mov8_sib_nodisp(input logic [2:0] dst,
+                                          input logic [2:0] base,
+                                          input logic [7:0] val);
+        begin
+            mem[pa16(program_pc++)] = 8'h8A;
+            append_sib(2'b00, dst, base);
             expected_gpr[{1'b0, dst[1:0]}] =
                 merge_byte(expected_gpr[{1'b0, dst[1:0]}], dst, val);
-            program_pc += 32'd3;
         end
     endtask
 
-    task automatic append_mov32_disp8(input logic [2:0] dst, input logic [2:0] base,
-                                      input logic signed [7:0] disp,
-                                      input logic [31:0] val);
+    task automatic append_mov32_sib_nodisp(input logic [2:0] dst,
+                                           input logic [2:0] base,
+                                           input logic [31:0] val);
         begin
-            mem[pa16(program_pc + 32'd0)] = 8'h8B;
-            mem[pa16(program_pc + 32'd1)] = {2'b01, dst, base};
-            mem[pa16(program_pc + 32'd2)] = disp;
+            mem[pa16(program_pc++)] = 8'h8B;
+            append_sib(2'b00, dst, base);
             expected_gpr[dst] = val;
-            program_pc += 32'd3;
         end
     endtask
 
-    task automatic append_mov16_disp8(input logic [2:0] dst, input logic [2:0] base,
-                                      input logic signed [7:0] disp,
-                                      input logic [15:0] val);
+    task automatic append_mov16_sib_disp8(input logic [2:0] dst,
+                                          input logic [2:0] base,
+                                          input logic signed [7:0] disp,
+                                          input logic [15:0] val);
         begin
-            mem[pa16(program_pc + 32'd0)] = 8'h66;
-            mem[pa16(program_pc + 32'd1)] = 8'h8B;
-            mem[pa16(program_pc + 32'd2)] = {2'b01, dst, base};
-            mem[pa16(program_pc + 32'd3)] = disp;
+            mem[pa16(program_pc++)] = 8'h66;
+            mem[pa16(program_pc++)] = 8'h8B;
+            append_sib(2'b01, dst, base);
+            append_disp8(disp);
             expected_gpr[dst] = merge_word(expected_gpr[dst], val);
+        end
+    endtask
+
+    task automatic append_mov32_sib_disp32(input logic [2:0] dst,
+                                           input logic [2:0] base,
+                                           input logic signed [31:0] disp,
+                                           input logic [31:0] val);
+        begin
+            mem[pa16(program_pc++)] = 8'h8B;
+            append_sib(2'b10, dst, base);
+            append_disp32(disp);
+            expected_gpr[dst] = val;
+        end
+    endtask
+
+    task automatic append_store8_sib_nodisp(input logic [2:0] src,
+                                            input logic [2:0] base);
+        begin
+            mem[pa16(program_pc++)] = 8'h88;
+            append_sib(2'b00, src, base);
+        end
+    endtask
+
+    task automatic append_store32_sib_disp8(input logic [2:0] src,
+                                            input logic [2:0] base,
+                                            input logic signed [7:0] disp);
+        begin
+            mem[pa16(program_pc++)] = 8'h89;
+            append_sib(2'b01, src, base);
+            append_disp8(disp);
+        end
+    endtask
+
+    task automatic append_store16_sib_disp32(input logic [2:0] src,
+                                             input logic [2:0] base,
+                                             input logic signed [31:0] disp);
+        begin
+            mem[pa16(program_pc++)] = 8'h66;
+            mem[pa16(program_pc++)] = 8'h89;
+            append_sib(2'b10, src, base);
+            append_disp32(disp);
+        end
+    endtask
+
+    task automatic append_imm8_sib_nodisp(input logic [2:0] base,
+                                          input logic [7:0] imm);
+        begin
+            mem[pa16(program_pc++)] = 8'hC6;
+            append_sib(2'b00, 3'b000, base);
+            mem[pa16(program_pc++)] = imm;
+        end
+    endtask
+
+    task automatic append_imm32_sib_disp8(input logic [2:0] base,
+                                          input logic signed [7:0] disp,
+                                          input logic [31:0] imm);
+        begin
+            mem[pa16(program_pc++)] = 8'hC7;
+            append_sib(2'b01, 3'b000, base);
+            append_disp8(disp);
+            mem[pa16(program_pc + 32'd0)] = imm[7:0];
+            mem[pa16(program_pc + 32'd1)] = imm[15:8];
+            mem[pa16(program_pc + 32'd2)] = imm[23:16];
+            mem[pa16(program_pc + 32'd3)] = imm[31:24];
             program_pc += 32'd4;
         end
     endtask
 
-    task automatic append_store8_disp8(input logic [2:0] src, input logic [2:0] base,
-                                       input logic signed [7:0] disp);
+    task automatic append_imm16_sib_disp32(input logic [2:0] base,
+                                           input logic signed [31:0] disp,
+                                           input logic [15:0] imm);
         begin
-            mem[pa16(program_pc + 32'd0)] = 8'h88;
-            mem[pa16(program_pc + 32'd1)] = {2'b01, src, base};
-            mem[pa16(program_pc + 32'd2)] = disp;
-            program_pc += 32'd3;
-        end
-    endtask
-
-    task automatic append_store32_disp8(input logic [2:0] src, input logic [2:0] base,
-                                        input logic signed [7:0] disp);
-        begin
-            mem[pa16(program_pc + 32'd0)] = 8'h89;
-            mem[pa16(program_pc + 32'd1)] = {2'b01, src, base};
-            mem[pa16(program_pc + 32'd2)] = disp;
-            program_pc += 32'd3;
-        end
-    endtask
-
-    task automatic append_store16_disp8(input logic [2:0] src, input logic [2:0] base,
-                                        input logic signed [7:0] disp);
-        begin
-            mem[pa16(program_pc + 32'd0)] = 8'h66;
-            mem[pa16(program_pc + 32'd1)] = 8'h89;
-            mem[pa16(program_pc + 32'd2)] = {2'b01, src, base};
-            mem[pa16(program_pc + 32'd3)] = disp;
-            program_pc += 32'd4;
-        end
-    endtask
-
-    task automatic append_imm8_disp8(input logic [2:0] base,
-                                     input logic signed [7:0] disp,
-                                     input logic [7:0] imm);
-        begin
-            mem[pa16(program_pc + 32'd0)] = 8'hC6;
-            mem[pa16(program_pc + 32'd1)] = {2'b01, 3'b000, base};
-            mem[pa16(program_pc + 32'd2)] = disp;
-            mem[pa16(program_pc + 32'd3)] = imm;
-            program_pc += 32'd4;
-        end
-    endtask
-
-    task automatic append_imm32_disp8(input logic [2:0] base,
-                                      input logic signed [7:0] disp,
-                                      input logic [31:0] imm);
-        begin
-            mem[pa16(program_pc + 32'd0)] = 8'hC7;
-            mem[pa16(program_pc + 32'd1)] = {2'b01, 3'b000, base};
-            mem[pa16(program_pc + 32'd2)] = disp;
-            mem[pa16(program_pc + 32'd3)] = imm[7:0];
-            mem[pa16(program_pc + 32'd4)] = imm[15:8];
-            mem[pa16(program_pc + 32'd5)] = imm[23:16];
-            mem[pa16(program_pc + 32'd6)] = imm[31:24];
-            program_pc += 32'd7;
-        end
-    endtask
-
-    task automatic append_imm16_disp8(input logic [2:0] base,
-                                      input logic signed [7:0] disp,
-                                      input logic [15:0] imm);
-        begin
-            mem[pa16(program_pc + 32'd0)] = 8'h66;
-            mem[pa16(program_pc + 32'd1)] = 8'hC7;
-            mem[pa16(program_pc + 32'd2)] = {2'b01, 3'b000, base};
-            mem[pa16(program_pc + 32'd3)] = disp;
-            mem[pa16(program_pc + 32'd4)] = imm[7:0];
-            mem[pa16(program_pc + 32'd5)] = imm[15:8];
-            program_pc += 32'd6;
+            mem[pa16(program_pc++)] = 8'h66;
+            mem[pa16(program_pc++)] = 8'hC7;
+            append_sib(2'b10, 3'b000, base);
+            append_disp32(disp);
+            mem[pa16(program_pc + 32'd0)] = imm[7:0];
+            mem[pa16(program_pc + 32'd1)] = imm[15:8];
+            program_pc += 32'd2;
         end
     endtask
 
@@ -365,6 +402,7 @@ module tb_rung6_mov_base_disp8;
         input logic [7:0] b3,
         input logic [7:0] b4,
         input logic [7:0] b5,
+        input logic [7:0] b6,
         input string name,
         input logic expect_prefix_only
     );
@@ -379,6 +417,7 @@ module tb_rung6_mov_base_disp8;
             if (len > 3) mem[pa16(RESET_EIP + 32'd3)] = b3;
             if (len > 4) mem[pa16(RESET_EIP + 32'd4)] = b4;
             if (len > 5) mem[pa16(RESET_EIP + 32'd5)] = b5;
+            if (len > 6) mem[pa16(RESET_EIP + 32'd6)] = b6;
 
             saw_expected_dispatch = 1'b0;
             saw_mov_endi = 1'b0;
@@ -387,7 +426,7 @@ module tb_rung6_mov_base_disp8;
             reset_cpu();
 
             begin : wait_unsupported
-                for (int c = 0; c < 900; c++) begin
+                for (int c = 0; c < 1000; c++) begin
                     @(posedge clk);
                     #1;
                     if (bus_wr)
@@ -405,10 +444,8 @@ module tb_rung6_mov_base_disp8;
 
             check({name, expect_prefix_only ? " routes as prefix-only" :
                   " routes to ENTRY_NULL"}, saw_expected_dispatch);
-            check({name, expect_prefix_only ? " does not ENDI as MOV before prefix dispatch" :
-                  " does not ENDI as MOV before unsupported dispatch"}, !saw_mov_endi);
-            check({name, expect_prefix_only ? " issues no bus write before prefix dispatch" :
-                  " issues no bus write before unsupported dispatch"}, !saw_bus_wr);
+            check({name, " does not ENDI as MOV before unsupported dispatch"}, !saw_mov_endi);
+            check({name, " issues no bus write before unsupported dispatch"}, !saw_bus_wr);
         end
     endtask
 
@@ -425,17 +462,14 @@ module tb_rung6_mov_base_disp8;
 
         clear_memory();
 
-        run_unsupported_form(4, 8'h8B, 8'h44, 8'h0C, 8'h00, 8'h00, 8'h00,
-                             "SIB index!=100 with disp8", 1'b0);
-        run_unsupported_form(7, 8'h8B, 8'h84, 8'h0C, 8'h00, 8'h00, 8'h00,
-                             "SIB index!=100 with disp32", 1'b0);
-        // The current Rung 6 decoder exposes 0x67 only as a standalone
-        // ENTRY_PREFIX_ONLY byte; this check intentionally does not claim the
-        // following 8B 40 01 bytes are consumed as one unsupported instruction.
-        run_unsupported_form(1, 8'h67, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
+        run_unsupported_form(3, 8'h8B, 8'h04, 8'h0C, 8'h00, 8'h00, 8'h00, 8'h00,
+                             "SIB.index!=100", 1'b0);
+        run_unsupported_form(7, 8'h8B, 8'h04, 8'h25, 8'h00, 8'h20, 8'h00, 8'h00,
+                             "SIB mod=00 base=101", 1'b0);
+        run_unsupported_form(1, 8'h67, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
                              "0x67 prefix byte", 1'b1);
-        run_unsupported_form(4, 8'hC7, 8'h48, 8'h01, 8'h78, 8'h56, 8'h00,
-                             "C7 mod=01 non-/0", 1'b0);
+        run_unsupported_form(4, 8'hC7, 8'h4C, 8'h24, 8'h00, 8'h00, 8'h00, 8'h00,
+                             "C7 SIB non-/0", 1'b0);
 
         clear_memory();
         for (int i = 0; i < 8; i++)
@@ -443,6 +477,8 @@ module tb_rung6_mov_base_disp8;
 
         mov_endi_count = 0;
         ea_calc32_count = 0;
+        sib_ea_count = 0;
+        sib_index_bad_count = 0;
         load_rm8_count = 0;
         load_rm16_count = 0;
         load_rm32_count = 0;
@@ -461,91 +497,61 @@ module tb_rung6_mov_base_disp8;
 
         program_pc = RESET_EIP;
 
-        write_mem32(32'h00003004, 32'hA1A2A3A4);
-        write_mem32(32'h00003018, 32'hB1B25A5A);
-        write_mem32(32'h00003030, 32'hC1C2C3C4);
-        write_mem32(32'h00003047, 32'hD1D2BEEF);
-        write_mem32(32'h00003053, 32'hE1E2C3E4);
-        write_mem32(32'h0000306C, 32'hF1F2F3F4);
-        write_mem32(32'h0000308C, 32'h0102CAFE);
+        append_mov32_imm(3'h0, 32'h00001000); // EAX base
+        append_mov32_imm(3'h1, 32'h00001100); // ECX base
+        append_mov32_imm(3'h2, 32'h00001200); // EDX base
+        append_mov32_imm(3'h3, 32'h00001300); // EBX base
+        append_mov32_imm(3'h4, 32'h00001400); // ESP base
+        append_mov32_imm(3'h5, 32'h00001500); // EBP base
+        append_mov32_imm(3'h6, 32'h00001600); // ESI base
+        append_mov32_imm(3'h7, 32'h00001700); // EDI base
 
-        append_mov32_imm(3'h0, 32'h00003000); // EAX, +4
-        append_mov32_imm(3'h1, 32'h00003020); // ECX, -8
-        append_mov32_imm(3'h3, 32'h00003040); // EBX, -16
-        append_mov32_imm(3'h2, 32'h00003040); // EDX, +7
-        append_mov32_imm(3'h5, 32'h00003050); // EBP, +3
-        append_mov32_imm(3'h7, 32'h00003060); // EDI, +12
-        append_mov32_imm(3'h6, 32'h00003090); // ESI, -4
-        append_mov32_disp8(3'h4, 3'h0, 8'sd4, 32'hA1A2A3A4);   // ESP <- [EAX+4]
-        append_mov32_disp8(3'h4, 3'h3, -8'sd16, 32'hC1C2C3C4); // ESP <- [EBX-16]
-        append_mov16_disp8(3'h3, 3'h2, 8'sd7, 16'hBEEF);       // BX <- [EDX+7]
-        append_mov8_disp8(3'h2, 3'h5, 8'sd3, 8'hC3);           // DL <- [EBP+3]
-        append_mov8_disp8(3'h0, 3'h1, -8'sd8, 8'h5A);          // AL <- [ECX-8]
-        append_mov32_disp8(3'h5, 3'h7, 8'sd12, 32'hF1F2F3F4);  // EBP <- [EDI+12]
-        append_mov16_disp8(3'h7, 3'h6, -8'sd4, 16'hCAFE);      // DI <- [ESI-4]
+        write_mem32(32'h00001000, 32'hA1A2A3A4);
+        append_mov32_sib_nodisp(3'h6, 3'h0, 32'hA1A2A3A4);
+        write_mem32(32'h00001400, 32'hB1B2B35A);
+        append_mov8_sib_nodisp(3'h1, 3'h4, 8'h5A);
+        write_mem32(32'h000014FC, 32'hC1C2BEEF);
+        append_mov16_sib_disp8(3'h3, 3'h5, -8'sd4, 16'hBEEF);
+        write_mem32(32'h00001250, 32'hD1D2D3D4);
+        append_mov32_sib_disp32(3'h7, 3'h2, 32'sd80, 32'hD1D2D3D4);
 
-        write_mem32(32'h00004005, 32'h11111111);
-        append_mov32_imm(3'h0, 32'h00004000);
-        append_mov32_imm(3'h1, 32'h000000AA);
-        append_store8_disp8(3'h1, 3'h0, 8'sd5);                // [EAX+5] <- CL
+        append_mov32_imm(3'h0, 32'h000000AA);
+        append_mov32_imm(3'h7, 32'h00001700);
+        write_mem32(32'h00001700, 32'h11111111);
+        append_store8_sib_nodisp(3'h0, 3'h7);
 
-        write_mem32(32'h0000401C, 32'h22222222);
-        append_mov32_imm(3'h1, 32'h00004020);
-        append_mov32_imm(3'h5, 32'h55667788);
-        append_store32_disp8(3'h5, 3'h1, -8'sd4);              // [ECX-4] <- EBP
+        append_mov32_imm(3'h3, 32'h00001300);
+        append_mov32_imm(3'h2, 32'h55667788);
+        write_mem32(32'h00001308, 32'h22222222);
+        append_store32_sib_disp8(3'h2, 3'h3, 8'sd8);
 
-        write_mem32(32'h00004039, 32'h33333333);
-        append_mov32_imm(3'h2, 32'h00004030);
-        append_mov32_imm(3'h5, 32'hAABBCCDD);
-        append_store16_disp8(3'h5, 3'h2, 8'sd9);               // [EDX+9] <- BP
+        append_mov32_imm(3'h6, 32'h0000CAFE);
+        write_mem32(32'h00001520, 32'h33333333);
+        append_store16_sib_disp32(3'h6, 3'h5, 32'sd32);
 
-        write_mem32(32'h00004049, 32'h44444444);
-        append_mov32_imm(3'h3, 32'h00004050);
-        append_mov32_imm(3'h2, 32'h00000012);
-        append_store8_disp8(3'h2, 3'h3, -8'sd7);               // [EBX-7] <- DL
+        append_mov32_imm(3'h6, 32'h00001600);
+        write_mem32(32'h00001600, 32'h44444444);
+        append_imm8_sib_nodisp(3'h6, 8'h5A);
 
-        write_mem32(32'h00004062, 32'h55555555);
-        append_mov32_imm(3'h5, 32'h00004060);
-        append_mov32_imm(3'h4, 32'hDEADBEEF);
-        append_store32_disp8(3'h4, 3'h5, 8'sd2);               // [EBP+2] <- ESP
+        write_mem32(32'h000014F8, 32'h55555555);
+        append_imm32_sib_disp8(3'h5, -8'sd8, 32'h11223344);
 
-        write_mem32(32'h0000407D, 32'h66666666);
-        append_mov32_imm(3'h6, 32'h00004080);
-        append_mov32_imm(3'h5, 32'hFACECAFE);
-        append_store16_disp8(3'h5, 3'h6, -8'sd3);              // [ESI-3] <- BP
+        append_mov32_imm(3'h1, 32'h00001100);
+        write_mem32(32'h00001130, 32'h66666666);
+        append_imm16_sib_disp32(3'h1, 32'sd48, 16'hBEEF);
 
-        write_mem32(32'h00004096, 32'h77777777);
-        append_mov32_imm(3'h7, 32'h00004090);
-        append_mov32_imm(3'h3, 32'h12345678);
-        append_store32_disp8(3'h3, 3'h7, 8'sd6);               // [EDI+6] <- EBX
-
-        write_mem32(32'h00005001, 32'h88888888);
-        append_mov32_imm(3'h0, 32'h00005000);
-        append_imm8_disp8(3'h0, 8'sd1, 8'h5A);                 // C6 [EAX+1], imm8
-
-        write_mem32(32'h00005018, 32'h99999999);
-        append_mov32_imm(3'h1, 32'h00005020);
-        append_imm32_disp8(3'h1, -8'sd8, 32'h11223344);        // C7 [ECX-8], imm32
-
-        write_mem32(32'h00005047, 32'hAAAAAAAA);
-        append_mov32_imm(3'h2, 32'h00005040);
-        append_imm16_disp8(3'h2, 8'sd7, 16'hBEEF);             // 66 C7 [EDX+7], imm16
-
-        write_mem32(32'h0000505C, 32'hBBBBBBBB);
-        append_mov32_imm(3'h3, 32'h00005060);
-        append_imm8_disp8(3'h3, -8'sd4, 8'hA5);                // C6 [EBX-4], imm8
-
-        write_mem32(32'h00005072, 32'hCCCCCCCC);
-        append_mov32_imm(3'h5, 32'h00005070);
-        append_imm32_disp8(3'h5, 8'sd2, 32'h89ABCDEF);         // C7 [EBP+2], imm32
-
-        write_mem32(32'h0000507E, 32'hDDDDDDDD);
-        append_mov32_imm(3'h6, 32'h00005080);
-        append_imm16_disp8(3'h6, -8'sd2, 16'hCAFE);            // 66 C7 [ESI-2], imm16
-
-        write_mem32(32'h00005096, 32'hEEEEEEEE);
-        append_mov32_imm(3'h7, 32'h00005090);
-        append_imm8_disp8(3'h7, 8'sd6, 8'h3C);                 // C6 [EDI+6], imm8
+        append_mov32_imm(3'h0, 32'h00001800);
+        append_mov32_imm(3'h4, 32'h00001900);
+        append_mov32_imm(3'h5, 32'h00001A00);
+        append_mov32_imm(3'h2, 32'h00001B00);
+        write_mem32(32'h00001800, 32'hA1A2A3A4);
+        append_mov32_sib_nodisp(3'h6, 3'h0, 32'hA1A2A3A4);
+        write_mem32(32'h00001900, 32'hB1B2B35A);
+        append_mov8_sib_nodisp(3'h1, 3'h4, 8'h5A);
+        write_mem32(32'h000019FC, 32'hC1C2BEEF);
+        append_mov16_sib_disp8(3'h3, 3'h5, -8'sd4, 16'hBEEF);
+        write_mem32(32'h00001B50, 32'hD1D2D3D4);
+        append_mov32_sib_disp32(3'h7, 3'h2, 32'sd80, 32'hD1D2D3D4);
 
         mem[pa16(program_pc)] = 8'h90;
         program_end_eip = program_pc + 32'd1;
@@ -561,7 +567,14 @@ module tb_rung6_mov_base_disp8;
                     SVC_FETCH_IMM8:  fetch_imm8_count++;
                     SVC_FETCH_IMM16: fetch_imm16_count++;
                     SVC_FETCH_IMM32: fetch_imm32_count++;
-                    SVC_EA_CALC_32:  ea_calc32_count++;
+                    SVC_EA_CALC_32: begin
+                        ea_calc32_count++;
+                        if (is_sib_class(dut.meta_modrm_class_r)) begin
+                            sib_ea_count++;
+                            if (dut.meta_sib_byte_r[5:3] != 3'b100)
+                                sib_index_bad_count++;
+                        end
+                    end
                     SVC_LOAD_RM8:    load_rm8_count++;
                     SVC_LOAD_RM16:   load_rm16_count++;
                     SVC_LOAD_RM32:   load_rm32_count++;
@@ -598,43 +611,41 @@ module tb_rung6_mov_base_disp8;
         if (cycles >= TIMEOUT)
             timed_out = 1'b1;
 
-        $display("Rung 6 Pass 6E-2 MOV base+signed-disp8 checks");
+        $display("Rung 6 Pass 6F-1 MOV base-only SIB checks");
 
         check("simulation completed before timeout", !timed_out);
         check("final EIP reached NOP fall-through", dbg_eip == program_end_eip);
         check("no fault pending", !dbg_fault_pending);
         check("EFLAGS unchanged", dut.u_commit.eflags_r == 32'h00000002);
-        check("EA_CALC_32 issued for each disp8 memory MOV", ea_calc32_count == 21);
-        check("LOAD_RM8 issued for disp8 memory-source", load_rm8_count == 2);
-        check("LOAD_RM16 issued for disp8 memory-source", load_rm16_count == 2);
-        check("LOAD_RM32 issued for disp8 memory-source", load_rm32_count == 3);
-        check("STORE_RM8 issued for disp8 stores", store_rm8_count == 5);
-        check("STORE_RM16 issued for disp8 stores", store_rm16_count == 4);
-        check("STORE_RM32 issued for disp8 stores", store_rm32_count == 5);
-        check("FETCH_IMM8 issued for C6 disp8 forms", fetch_imm8_count == 3);
-        check("FETCH_IMM16 issued for 66+C7 disp8 forms", fetch_imm16_count == 2);
-        check("FETCH_IMM32 issued for C7 disp8 and setup", fetch_imm32_count == 30);
-        check("CM_MOV_REG used for register destinations", cm_mov_reg_count == 35);
-        check("CM_NOP|CM_EIP used for memory destinations", cm_nop_eip_count >= 14);
-        check("STORE_RM8 byte enable observed", byteen_0001_count >= 5);
-        check("STORE_RM16 byte enable observed", byteen_0011_count >= 4);
-        check("STORE_RM32 byte enable observed", byteen_1111_count >= 5);
+        check("EA_CALC_32 issued for each SIB memory MOV", ea_calc32_count == 14);
+        check("all EA_CALC_32 forms were SIB forms", sib_ea_count == 14);
+        check("accepted SIB forms used index=100 only", sib_index_bad_count == 0);
+        check("LOAD_RM8 issued for SIB memory-source", load_rm8_count == 2);
+        check("LOAD_RM16 issued for SIB memory-source", load_rm16_count == 2);
+        check("LOAD_RM32 issued for SIB memory-source", load_rm32_count == 4);
+        check("STORE_RM8 issued for SIB stores", store_rm8_count == 2);
+        check("STORE_RM16 issued for SIB stores", store_rm16_count == 2);
+        check("STORE_RM32 issued for SIB stores", store_rm32_count == 2);
+        check("FETCH_IMM8 issued for C6 SIB form", fetch_imm8_count >= 1);
+        check("FETCH_IMM16 issued for 66+C7 SIB form", fetch_imm16_count >= 1);
+        check("FETCH_IMM32 issued for C7 SIB form and setup", fetch_imm32_count >= 1);
+        check("CM_MOV_REG used for register destinations", cm_mov_reg_count >= 12);
+        check("CM_NOP|CM_EIP used for memory destinations", cm_nop_eip_count >= 6);
+        check("STORE_RM8 byte enable observed", byteen_0001_count >= 2);
+        check("STORE_RM16 byte enable observed", byteen_0011_count >= 2);
+        check("STORE_RM32 byte enable observed", byteen_1111_count >= 2);
 
         check("final GPR state matches expected", gprs_match_expected());
-        check("88 [EAX+5], CL wrote byte", read_mem32(32'h00004005) == 32'h111111AA);
-        check("89 [ECX-4], EBP wrote dword", read_mem32(32'h0000401C) == 32'h55667788);
-        check("66 89 [EDX+9], BP wrote word", read_mem32(32'h00004039) == 32'h3333CCDD);
-        check("88 [EBX-7], DL wrote byte", read_mem32(32'h00004049) == 32'h44444412);
-        check("89 [EBP+2], ESP wrote dword", read_mem32(32'h00004062) == 32'hDEADBEEF);
-        check("66 89 [ESI-3], BP wrote word", read_mem32(32'h0000407D) == 32'h6666CAFE);
-        check("89 [EDI+6], EBX wrote dword", read_mem32(32'h00004096) == 32'h12345678);
-        check("C6 [EAX+1], imm8 wrote byte", read_mem32(32'h00005001) == 32'h8888885A);
-        check("C7 [ECX-8], imm32 wrote dword", read_mem32(32'h00005018) == 32'h11223344);
-        check("66 C7 [EDX+7], imm16 wrote word", read_mem32(32'h00005047) == 32'hAAAABEEF);
-        check("C6 [EBX-4], imm8 wrote byte", read_mem32(32'h0000505C) == 32'hBBBBBBA5);
-        check("C7 [EBP+2], imm32 wrote dword", read_mem32(32'h00005072) == 32'h89ABCDEF);
-        check("66 C7 [ESI-2], imm16 wrote word", read_mem32(32'h0000507E) == 32'hDDDDCAFE);
-        check("C6 [EDI+6], imm8 wrote byte", read_mem32(32'h00005096) == 32'hEEEEEE3C);
+        check("8B r32,[SIB EAX] loaded dword", dut.u_commit.gpr_r[3'h6] == 32'hA1A2A3A4);
+        check("8A r8,[SIB ESP] loaded byte", dut.u_commit.gpr_r[3'h1] == 32'h0000115A);
+        check("66 8B r16,[SIB EBP-4] loaded word", dut.u_commit.gpr_r[3'h3] == 32'h0000BEEF);
+        check("8B r32,[SIB EDX+80] loaded dword", dut.u_commit.gpr_r[3'h7] == 32'hD1D2D3D4);
+        check("88 [SIB EDI], AL wrote byte", read_mem32(32'h00001700) == 32'h111111AA);
+        check("89 [SIB EBX+8], EDX wrote dword", read_mem32(32'h00001308) == 32'h55667788);
+        check("66 89 [SIB EBP+32], SI wrote word", read_mem32(32'h00001520) == 32'h3333CAFE);
+        check("C6 [SIB ESI], imm8 wrote byte", read_mem32(32'h00001600) == 32'h4444445A);
+        check("C7 [SIB EBP-8], imm32 wrote dword", read_mem32(32'h000014F8) == 32'h11223344);
+        check("66 C7 [SIB ECX+48], imm16 wrote word", read_mem32(32'h00001130) == 32'h6666BEEF);
 
         if (failures == 0) begin
             $display("RESULT: ALL TESTS PASSED");

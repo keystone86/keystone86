@@ -15,7 +15,9 @@
 // Pass 6E-2 additionally allows default-32 ModRM.mod=01 r/m!=100 base plus
 // signed disp8 forms after EA_CALC_32 has staged the effective address in T2.
 // Pass 6E-3 additionally allows default-32 ModRM.mod=10 r/m!=100 base plus
-// signed disp32 forms through the same EA_CALC_32/T2 path.
+// signed disp32 forms through the same EA_CALC_32/T2 path. Pass 6F-1
+// additionally allows only base-only SIB forms with SIB.index=100, no index
+// path, and no mod=00 base=101 no-base special case.
 
 import keystone86_pkg::*;
 
@@ -31,6 +33,7 @@ module load_store (
     input  logic [7:0]  meta_opcode_class,
     input  logic [1:0]  meta_opsz,
     input  logic [7:0]  meta_modrm_byte,
+    input  logic [7:0]  meta_sib_byte,
     input  logic [3:0]  meta_modrm_class,
     input  logic [2:0]  meta_reg_dst,
     input  logic [2:0]  meta_reg_src,
@@ -70,6 +73,9 @@ module load_store (
     localparam logic [3:0] MRM_MEM_NO_DISP = 4'h1;
     localparam logic [3:0] MRM_MEM_DISP8 = 4'h2;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
+    localparam logic [3:0] MRM_SIB = 4'h5;
+    localparam logic [3:0] MRM_SIB_DISP8 = 4'h6;
+    localparam logic [3:0] MRM_SIB_DISP32 = 4'h7;
 
     typedef enum logic [1:0] {
         LS_IDLE     = 2'h0,
@@ -141,11 +147,40 @@ module load_store (
                (meta_modrm_byte[2:0] != 3'b100);
     endfunction
 
+    function automatic logic sib_index_none;
+        return (meta_sib_byte[5:3] == 3'b100);
+    endfunction
+
+    function automatic logic is_sib_nodisp_mem_form;
+        return (meta_modrm_class == MRM_SIB) &&
+               (meta_modrm_byte[7:6] == 2'b00) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               sib_index_none() &&
+               (meta_sib_byte[2:0] != 3'b101);
+    endfunction
+
+    function automatic logic is_sib_disp8_mem_form;
+        return (meta_modrm_class == MRM_SIB_DISP8) &&
+               (meta_modrm_byte[7:6] == 2'b01) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               sib_index_none();
+    endfunction
+
+    function automatic logic is_sib_disp32_mem_form;
+        return (meta_modrm_class == MRM_SIB_DISP32) &&
+               (meta_modrm_byte[7:6] == 2'b10) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               sib_index_none();
+    endfunction
+
     function automatic logic is_authorized_mem_form;
         return is_direct_disp32_mem_form() ||
                is_base_nodisp_mem_form() ||
                is_base_disp8_mem_form() ||
-               is_base_disp32_mem_form();
+               is_base_disp32_mem_form() ||
+               is_sib_nodisp_mem_form() ||
+               is_sib_disp8_mem_form() ||
+               is_sib_disp32_mem_form();
     endfunction
 
     function automatic logic [3:0] byteen_for_service(input logic [7:0] sid);

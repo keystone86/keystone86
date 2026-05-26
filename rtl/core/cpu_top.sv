@@ -1,10 +1,10 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 6 Pass 6E-3 top-level with service-based control-transfer paths,
+// Rung 6 Pass 6F-1 top-level with service-based control-transfer paths,
 // bounded MOV immediate/register-register slices, direct-disp32 memory MOV,
-// base-only no-displacement memory MOV, signed-disp8 memory MOV, and signed
-// disp32 base memory MOV.
+// base-only no-displacement memory MOV, signed-disp8 memory MOV, signed
+// disp32 base memory MOV, and bounded base-only SIB memory MOV.
 
 import keystone86_pkg::*;
 
@@ -181,7 +181,7 @@ module cpu_top (
     logic [31:0] op_mem_rd_data;
 
     // ea_calc side: bounded EA_CALC_32 direct disp32 plus default-32
-    // base-only, base+disp8, and base+disp32 non-SIB forms.
+    // base-only, base+disp8, base+disp32 non-SIB forms, and base-only SIB.
     logic [7:0]  ea_svc_id;
     logic        ea_svc_req;
     logic        ea_svc_done;
@@ -191,7 +191,7 @@ module cpu_top (
 
     // load_store side: register metadata plus bounded memory-source LOAD_RM*
     // and memory-destination STORE_RM* direct-disp32/base-only/base+disp8/
-    // base+disp32 operations.
+    // base+disp32 operations, plus the bounded base-only SIB subset.
     logic [7:0]  ls_svc_id;
     logic        ls_svc_req;
     logic        ls_svc_done;
@@ -340,9 +340,9 @@ module cpu_top (
     assign commit_pc_gpr_opsz = ls_pc_gpr_en ? ls_pc_gpr_opsz : pc_gpr_opsz;
     assign commit_pc_gpr_val  = ls_pc_gpr_en ? ls_pc_gpr_val : pc_gpr_val;
     // EA_CALC_32 needs the committed 32-bit base value only during its
-    // bounded base-relative service cycle. LOAD_REG_META uses the same committed
-    // read port in separate microcode cycles, so this mux does not create a
-    // second architectural read owner.
+    // bounded base-relative service cycle. For authorized Pass 6F-1 SIB forms
+    // ea_calc selects SIB.base as that single base index; no index read path or
+    // second architectural read owner is introduced.
     assign gpr_rd_idx  = (ea_svc_req && (ea_svc_id == EA_CALC_32)) ? ea_base_gpr_rd_idx :
                                                                     ls_gpr_rd_idx;
     assign gpr_rd_opsz = (ea_svc_req && (ea_svc_id == EA_CALC_32)) ? 2'h2 :
@@ -703,6 +703,7 @@ module cpu_top (
         .svc_done         (ea_svc_done),
         .svc_sr           (ea_svc_sr),
         .meta_modrm_byte  (meta_modrm_byte_r),
+        .meta_sib_byte    (meta_sib_byte_r),
         .meta_modrm_class (meta_modrm_class_r),
         .meta_disp_value  (meta_disp_value_r),
         .base_gpr_rd_idx  (ea_base_gpr_rd_idx),
@@ -721,6 +722,7 @@ module cpu_top (
         .meta_opcode_class(meta_opcode_class_r),
         .meta_opsz        (meta_opsz_r),
         .meta_modrm_byte  (meta_modrm_byte_r),
+        .meta_sib_byte    (meta_sib_byte_r),
         .meta_modrm_class (meta_modrm_class_r),
         .meta_reg_dst     (meta_reg_dst_r),
         .meta_reg_src     (meta_reg_src_r),

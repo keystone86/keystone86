@@ -1,15 +1,17 @@
 // Keystone86 / Aegis
 // rtl/core/services/ea_calc.sv
 //
-// Bounded Rung 6 Pass 6E-3 effective-address service.
+// Bounded Rung 6 Pass 6F-1 effective-address service.
 //
 // This slice implements only EA_CALC_32 for:
 //   ModRM.mod=00, ModRM.r/m=101
 //   ModRM.mod=00, ModRM.r/m!=100/101 base-only no-displacement
 //   ModRM.mod=01, ModRM.r/m!=100 base plus signed disp8
 //   ModRM.mod=10, ModRM.r/m!=100 base plus signed disp32
+//   ModRM.r/m=100 SIB forms with SIB.index=100 and base-only addressing:
+//     mod=00 base!=101, mod=01 any base + disp8, mod=10 any base + disp32
 //
-// It does not implement EA_CALC_16, SIB, index/scale, 0x67,
+// It does not implement EA_CALC_16, SIB.index!=100, index/scale, 0x67,
 // segment-base addition, protection checks, or memory access.
 
 import keystone86_pkg::*;
@@ -24,6 +26,7 @@ module ea_calc (
     output logic [1:0]  svc_sr,
 
     input  logic [7:0]  meta_modrm_byte,
+    input  logic [7:0]  meta_sib_byte,
     input  logic [3:0]  meta_modrm_class,
     input  logic [31:0] meta_disp_value,
 
@@ -37,11 +40,19 @@ module ea_calc (
     localparam logic [3:0] MRM_MEM_NO_DISP = 4'h1;
     localparam logic [3:0] MRM_MEM_DISP8 = 4'h2;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
+    localparam logic [3:0] MRM_SIB = 4'h5;
+    localparam logic [3:0] MRM_SIB_DISP8 = 4'h6;
+    localparam logic [3:0] MRM_SIB_DISP32 = 4'h7;
 
     logic        done_r;
     logic [1:0]  sr_r;
     logic        t2_wr_en_r;
     logic [31:0] t2_wr_data_r;
+    logic        sib_index_none_w;
+    logic        sib_nodisp_mem_form_w;
+    logic        sib_disp8_mem_form_w;
+    logic        sib_disp32_mem_form_w;
+    logic        authorized_sib_mem_form_w;
 
     function automatic logic is_direct_disp32_mem_form;
         return (meta_modrm_class == MRM_MEM_DISP32) &&
@@ -68,9 +79,63 @@ module ea_calc (
                (meta_modrm_byte[2:0] != 3'b100);
     endfunction
 
+    function automatic logic sib_index_none;
+        return (meta_sib_byte[5:3] == 3'b100);
+    endfunction
+
+    function automatic logic is_sib_nodisp_mem_form;
+        return (meta_modrm_class == MRM_SIB) &&
+               (meta_modrm_byte[7:6] == 2'b00) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               sib_index_none() &&
+               (meta_sib_byte[2:0] != 3'b101);
+    endfunction
+
+    function automatic logic is_sib_disp8_mem_form;
+        return (meta_modrm_class == MRM_SIB_DISP8) &&
+               (meta_modrm_byte[7:6] == 2'b01) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               sib_index_none();
+    endfunction
+
+    function automatic logic is_sib_disp32_mem_form;
+        return (meta_modrm_class == MRM_SIB_DISP32) &&
+               (meta_modrm_byte[7:6] == 2'b10) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               sib_index_none();
+    endfunction
+
+    function automatic logic is_authorized_sib_mem_form;
+        return is_sib_nodisp_mem_form() ||
+               is_sib_disp8_mem_form() ||
+               is_sib_disp32_mem_form();
+    endfunction
+
+    assign sib_index_none_w = (meta_sib_byte[5:3] == 3'b100);
+    assign sib_nodisp_mem_form_w =
+        (meta_modrm_class == MRM_SIB) &&
+        (meta_modrm_byte[7:6] == 2'b00) &&
+        (meta_modrm_byte[2:0] == 3'b100) &&
+        sib_index_none_w &&
+        (meta_sib_byte[2:0] != 3'b101);
+    assign sib_disp8_mem_form_w =
+        (meta_modrm_class == MRM_SIB_DISP8) &&
+        (meta_modrm_byte[7:6] == 2'b01) &&
+        (meta_modrm_byte[2:0] == 3'b100) &&
+        sib_index_none_w;
+    assign sib_disp32_mem_form_w =
+        (meta_modrm_class == MRM_SIB_DISP32) &&
+        (meta_modrm_byte[7:6] == 2'b10) &&
+        (meta_modrm_byte[2:0] == 3'b100) &&
+        sib_index_none_w;
+    assign authorized_sib_mem_form_w = sib_nodisp_mem_form_w ||
+                                       sib_disp8_mem_form_w ||
+                                       sib_disp32_mem_form_w;
+
     assign svc_done   = done_r;
     assign svc_sr     = sr_r;
-    assign base_gpr_rd_idx = meta_modrm_byte[2:0];
+    assign base_gpr_rd_idx = authorized_sib_mem_form_w ? meta_sib_byte[2:0] :
+                                                         meta_modrm_byte[2:0];
     assign t2_wr_en   = t2_wr_en_r;
     assign t2_wr_data = t2_wr_data_r;
 
@@ -101,6 +166,18 @@ module ea_calc (
                     t2_wr_en_r   <= 1'b1;
                     t2_wr_data_r <= base_gpr_rd_val + meta_disp_value;
                 end else if ((svc_id == EA_CALC_32) && is_base_disp32_mem_form()) begin
+                    sr_r         <= SR_OK;
+                    t2_wr_en_r   <= 1'b1;
+                    t2_wr_data_r <= base_gpr_rd_val + meta_disp_value;
+                end else if ((svc_id == EA_CALC_32) && is_sib_nodisp_mem_form()) begin
+                    sr_r         <= SR_OK;
+                    t2_wr_en_r   <= 1'b1;
+                    t2_wr_data_r <= base_gpr_rd_val;
+                end else if ((svc_id == EA_CALC_32) && is_sib_disp8_mem_form()) begin
+                    sr_r         <= SR_OK;
+                    t2_wr_en_r   <= 1'b1;
+                    t2_wr_data_r <= base_gpr_rd_val + meta_disp_value;
+                end else if ((svc_id == EA_CALC_32) && is_sib_disp32_mem_form()) begin
                     sr_r         <= SR_OK;
                     t2_wr_en_r   <= 1'b1;
                     t2_wr_data_r <= base_gpr_rd_val + meta_disp_value;

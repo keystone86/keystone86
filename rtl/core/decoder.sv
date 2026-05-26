@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through Rung 6 Pass 6E-3:
+// Decoder role through Rung 6 Pass 6F-1:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -27,6 +27,8 @@
 //     displacement. Pass 6E-2 additionally accepts default-32 ModRM.mod=01
 //     non-SIB forms with one signed disp8. Pass 6E-3 additionally accepts
 //     default-32 ModRM.mod=10 non-SIB forms with four signed disp32 bytes.
+//     Pass 6F-1 additionally accepts base-only SIB with SIB.index=100,
+//     rejecting index paths and the mod=00 base=101 no-base special case.
 //   - For the bounded Pass 6B-1 memory-destination slice, accept only 88/89
 //     and 66+89 with ModRM.mod=00 and r/m=101, consume the disp32 absolute
 //     address, and report M_NEXT_EIP after that displacement. Pass 6E-1
@@ -34,7 +36,8 @@
 //     r/m!=100/101 and no displacement. Pass 6E-2 additionally accepts
 //     default-32 ModRM.mod=01 non-SIB forms with one signed disp8. Pass 6E-3
 //     additionally accepts default-32 ModRM.mod=10 non-SIB forms with four
-//     signed disp32 bytes. SIB and 0x67 remain unsupported.
+//     signed disp32 bytes. Pass 6F-1 additionally accepts the same bounded
+//     base-only SIB subset. Other SIB forms and 0x67 remain unsupported.
 //   - For the bounded Pass 6C-1 immediate-to-memory slice, accept only C6/C7
 //     /0 with ModRM.mod=00 and r/m=101, consume the disp32 absolute address,
 //     and report M_NEXT_EIP after the immediate. Pass 6E-1 additionally
@@ -42,6 +45,7 @@
 //     no displacement. Pass 6E-2 additionally accepts /0 default-32
 //     ModRM.mod=01 non-SIB forms with one signed disp8, or Pass 6E-3
 //     default-32 ModRM.mod=10 non-SIB forms with four signed disp32 bytes.
+//     Pass 6F-1 additionally accepts the same bounded base-only SIB subset.
 //     For Pass 6D-1, also accept C6/C7 /0 with ModRM.mod=11 as
 //     register-destination MOV and report M_NEXT_EIP after the immediate.
 //     FETCH_IMM* remains the microcode-called service that consumes the
@@ -308,7 +312,7 @@ module decoder (
                 end
 
                 DEC_SIB: begin
-                    if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h2)) begin
+                    if (q_valid && (q_fetch_eip == opcode_eip_latch + sib_offset())) begin
                         sib_latch  <= q_data;
                         disp_total <= disp_bytes_for_modrm(modrm_latch, q_data, 1'b1);
                     end
@@ -387,6 +391,9 @@ module decoder (
                         state_next = DEC_SIB;
                     else if (is_call_ff && ff_is_call_near && (disp_total != 3'd0))
                         state_next = DEC_DISP;
+                    else if ((is_mov_modrm || is_mov_rm_imm) &&
+                             modrm_needs_sib(modrm_latch))
+                        state_next = DEC_SIB;
                     else if (is_mov_modrm &&
                              (mov_mem_src_disp32_form(opcode_byte_latch,
                                                        modrm_latch,
@@ -428,7 +435,7 @@ module decoder (
             end
 
             DEC_SIB: begin
-                if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h2)) begin
+                if (q_valid && (q_fetch_eip == opcode_eip_latch + sib_offset())) begin
                     if (disp_bytes_for_modrm(modrm_latch, q_data, 1'b1) != 3'd0)
                         state_next = DEC_DISP;
                     else
@@ -492,6 +499,10 @@ module decoder (
         return prefix66_active ? 32'd2 : 32'd1;
     endfunction
 
+    function automatic logic [31:0] sib_offset();
+        return modrm_offset() + 32'd1;
+    endfunction
+
     function automatic logic [3:0] classify_modrm(input logic [7:0] m);
         if (m[7:6] == 2'b11)
             return 4'h0; // MRM_REG
@@ -525,6 +536,38 @@ module decoder (
     function automatic logic base_disp32_32_form(input logic [7:0] m);
         return (m[7:6] == 2'b10) &&
                (m[2:0] != 3'b100);
+    endfunction
+
+    function automatic logic sib_index_none(input logic [7:0] s);
+        return (s[5:3] == 3'b100);
+    endfunction
+
+    function automatic logic sib_nodisp32_form(
+        input logic [7:0] m,
+        input logic [7:0] s
+    );
+        return (m[7:6] == 2'b00) &&
+               (m[2:0] == 3'b100) &&
+               sib_index_none(s) &&
+               (s[2:0] != 3'b101);
+    endfunction
+
+    function automatic logic sib_disp8_32_form(
+        input logic [7:0] m,
+        input logic [7:0] s
+    );
+        return (m[7:6] == 2'b01) &&
+               (m[2:0] == 3'b100) &&
+               sib_index_none(s);
+    endfunction
+
+    function automatic logic sib_disp32_32_form(
+        input logic [7:0] m,
+        input logic [7:0] s
+    );
+        return (m[7:6] == 2'b10) &&
+               (m[2:0] == 3'b100) &&
+               sib_index_none(s);
     endfunction
 
     function automatic logic mov_mem_src_disp32_form(
@@ -561,6 +604,23 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_mem_src_sib_nodisp_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_nodisp32_form(m, s))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h8B);
+
+            return (op == 8'h8A) || (op == 8'h8B);
+        end
+    endfunction
+
     function automatic logic mov_mem_src_base_disp8_form(
         input logic [7:0] op,
         input logic [7:0] m,
@@ -577,6 +637,23 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_mem_src_sib_disp8_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_disp8_32_form(m, s))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h8B);
+
+            return (op == 8'h8A) || (op == 8'h8B);
+        end
+    endfunction
+
     function automatic logic mov_mem_src_base_disp32_form(
         input logic [7:0] op,
         input logic [7:0] m,
@@ -584,6 +661,23 @@ module decoder (
     );
         begin
             if (!base_disp32_32_form(m))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h8B);
+
+            return (op == 8'h8A) || (op == 8'h8B);
+        end
+    endfunction
+
+    function automatic logic mov_mem_src_sib_disp32_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_disp32_32_form(m, s))
                 return 1'b0;
 
             if (pref66)
@@ -627,6 +721,23 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_mem_dst_sib_nodisp_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_nodisp32_form(m, s))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h89);
+
+            return (op == 8'h88) || (op == 8'h89);
+        end
+    endfunction
+
     function automatic logic mov_mem_dst_base_disp8_form(
         input logic [7:0] op,
         input logic [7:0] m,
@@ -643,6 +754,23 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_mem_dst_sib_disp8_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_disp8_32_form(m, s))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h89);
+
+            return (op == 8'h88) || (op == 8'h89);
+        end
+    endfunction
+
     function automatic logic mov_mem_dst_base_disp32_form(
         input logic [7:0] op,
         input logic [7:0] m,
@@ -650,6 +778,23 @@ module decoder (
     );
         begin
             if (!base_disp32_32_form(m))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'h89);
+
+            return (op == 8'h88) || (op == 8'h89);
+        end
+    endfunction
+
+    function automatic logic mov_mem_dst_sib_disp32_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_disp32_32_form(m, s))
                 return 1'b0;
 
             if (pref66)
@@ -695,6 +840,23 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_rm_imm_sib_nodisp_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_nodisp32_form(m, s) || (m[5:3] != 3'b000))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'hC7);
+
+            return (op == 8'hC6) || (op == 8'hC7);
+        end
+    endfunction
+
     function automatic logic mov_rm_imm_base_disp8_form(
         input logic [7:0] op,
         input logic [7:0] m,
@@ -702,6 +864,23 @@ module decoder (
     );
         begin
             if (!base_disp8_32_form(m) || (m[5:3] != 3'b000))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'hC7);
+
+            return (op == 8'hC6) || (op == 8'hC7);
+        end
+    endfunction
+
+    function automatic logic mov_rm_imm_sib_disp8_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_disp8_32_form(m, s) || (m[5:3] != 3'b000))
                 return 1'b0;
 
             if (pref66)
@@ -727,6 +906,68 @@ module decoder (
         end
     endfunction
 
+    function automatic logic mov_rm_imm_sib_disp32_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        begin
+            if (!sib_disp32_32_form(m, s) || (m[5:3] != 3'b000))
+                return 1'b0;
+
+            if (pref66)
+                return (op == 8'hC7);
+
+            return (op == 8'hC6) || (op == 8'hC7);
+        end
+    endfunction
+
+    function automatic logic mov_mem_src_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        return mov_mem_src_disp32_form(op, m, pref66) ||
+               mov_mem_src_base_nodisp_form(op, m, pref66) ||
+               mov_mem_src_base_disp8_form(op, m, pref66) ||
+               mov_mem_src_base_disp32_form(op, m, pref66) ||
+               mov_mem_src_sib_nodisp_form(op, m, s, pref66) ||
+               mov_mem_src_sib_disp8_form(op, m, s, pref66) ||
+               mov_mem_src_sib_disp32_form(op, m, s, pref66);
+    endfunction
+
+    function automatic logic mov_mem_dst_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        return mov_mem_dst_disp32_form(op, m, pref66) ||
+               mov_mem_dst_base_nodisp_form(op, m, pref66) ||
+               mov_mem_dst_base_disp8_form(op, m, pref66) ||
+               mov_mem_dst_base_disp32_form(op, m, pref66) ||
+               mov_mem_dst_sib_nodisp_form(op, m, s, pref66) ||
+               mov_mem_dst_sib_disp8_form(op, m, s, pref66) ||
+               mov_mem_dst_sib_disp32_form(op, m, s, pref66);
+    endfunction
+
+    function automatic logic mov_rm_imm_mem_form(
+        input logic [7:0] op,
+        input logic [7:0] m,
+        input logic [7:0] s,
+        input logic       pref66
+    );
+        return mov_rm_imm_disp32_form(op, m, pref66) ||
+               mov_rm_imm_base_nodisp_form(op, m, pref66) ||
+               mov_rm_imm_base_disp8_form(op, m, pref66) ||
+               mov_rm_imm_base_disp32_form(op, m, pref66) ||
+               mov_rm_imm_sib_nodisp_form(op, m, s, pref66) ||
+               mov_rm_imm_sib_disp8_form(op, m, s, pref66) ||
+               mov_rm_imm_sib_disp32_form(op, m, s, pref66);
+    endfunction
+
     function automatic logic mov_rm_imm_reg_form(
         input logic [7:0] op,
         input logic [7:0] m,
@@ -745,41 +986,44 @@ module decoder (
         end
     endfunction
 
+    function automatic logic [31:0] mov_modrm_length();
+        return modrm_offset() + 32'd1 +
+               (modrm_needs_sib(modrm_latch) ? 32'd1 : 32'd0) +
+               {29'h0, disp_total};
+    endfunction
+
+    function automatic logic [31:0] mov_rm_imm_length();
+        logic [31:0] imm_len;
+        begin
+            if (opcode_byte_latch == 8'hC6)
+                imm_len = 32'd1;
+            else if (prefix66_active)
+                imm_len = 32'd2;
+            else
+                imm_len = 32'd4;
+
+            return mov_modrm_length() + imm_len;
+        end
+    endfunction
+
     function automatic logic [7:0] classify_opcode(
         input logic [7:0] op,
         input logic       ff2,
-        input logic       mov_modrm_reg,
-        input logic       mov_mem_src_disp32,
-        input logic       mov_mem_src_base_nodisp,
-        input logic       mov_mem_src_base_disp8,
-        input logic       mov_mem_src_base_disp32,
-        input logic       mov_mem_dst_disp32,
-        input logic       mov_mem_dst_base_nodisp,
-        input logic       mov_mem_dst_base_disp8,
-        input logic       mov_mem_dst_base_disp32,
-        input logic       mov_rm_imm_disp32,
-        input logic       mov_rm_imm_base_nodisp,
-        input logic       mov_rm_imm_base_disp8,
-        input logic       mov_rm_imm_base_disp32,
-        input logic       mov_rm_imm_reg,
+        input logic [7:0] m,
+        input logic [7:0] s,
         input logic       pref66
     );
         if (pref66) begin
             case (op)
-                8'h89: return (mov_modrm_reg || mov_mem_dst_disp32 ||
-                                mov_mem_dst_base_nodisp ||
-                                mov_mem_dst_base_disp8 ||
-                                mov_mem_dst_base_disp32) ? ENTRY_MOV
-                                                         : ENTRY_NULL;
-                8'h8B: return (mov_modrm_reg || mov_mem_src_disp32 ||
-                                mov_mem_src_base_nodisp ||
-                                mov_mem_src_base_disp8 ||
-                                mov_mem_src_base_disp32) ? ENTRY_MOV
-                                                         : ENTRY_NULL;
-                8'hC7: return (mov_rm_imm_disp32 || mov_rm_imm_base_nodisp ||
-                                mov_rm_imm_base_disp8 ||
-                                mov_rm_imm_base_disp32 || mov_rm_imm_reg)
-                                ? ENTRY_MOV : ENTRY_NULL;
+                8'h89: return ((m[7:6] == 2'b11) ||
+                                mov_mem_dst_form(op, m, s, pref66)) ? ENTRY_MOV
+                                                                     : ENTRY_NULL;
+                8'h8B: return ((m[7:6] == 2'b11) ||
+                                mov_mem_src_form(op, m, s, pref66)) ? ENTRY_MOV
+                                                                     : ENTRY_NULL;
+                8'hC7: return (mov_rm_imm_mem_form(op, m, s, pref66) ||
+                                mov_rm_imm_reg_form(op, m, pref66))
+                               ? ENTRY_MOV : ENTRY_NULL;
                 8'hB8, 8'hB9, 8'hBA, 8'hBB,
                 8'hBC, 8'hBD, 8'hBE, 8'hBF:
                        return ENTRY_MOV;
@@ -798,19 +1042,14 @@ module decoder (
             8'hE8:            return ENTRY_CALL_NEAR;
             8'hFF:            return ff2 ? ENTRY_CALL_NEAR : ENTRY_NULL;
             8'h88, 8'h89:
-                              return (mov_modrm_reg || mov_mem_dst_disp32 ||
-                                      mov_mem_dst_base_nodisp ||
-                                      mov_mem_dst_base_disp8 ||
-                                      mov_mem_dst_base_disp32) ? ENTRY_MOV
-                                                               : ENTRY_NULL;
-            8'h8A, 8'h8B:     return (mov_modrm_reg || mov_mem_src_disp32 ||
-                                      mov_mem_src_base_nodisp ||
-                                      mov_mem_src_base_disp8 ||
-                                      mov_mem_src_base_disp32) ? ENTRY_MOV
-                                                               : ENTRY_NULL;
-            8'hC6, 8'hC7:     return (mov_rm_imm_disp32 || mov_rm_imm_base_nodisp ||
-                                      mov_rm_imm_base_disp8 ||
-                                      mov_rm_imm_base_disp32 || mov_rm_imm_reg)
+                              return ((m[7:6] == 2'b11) ||
+                                      mov_mem_dst_form(op, m, s, pref66))
+                                      ? ENTRY_MOV : ENTRY_NULL;
+            8'h8A, 8'h8B:     return ((m[7:6] == 2'b11) ||
+                                      mov_mem_src_form(op, m, s, pref66))
+                                      ? ENTRY_MOV : ENTRY_NULL;
+            8'hC6, 8'hC7:     return (mov_rm_imm_mem_form(op, m, s, pref66) ||
+                                      mov_rm_imm_reg_form(op, m, pref66))
                                       ? ENTRY_MOV : ENTRY_NULL;
             8'hC3, 8'hC2:     return ENTRY_RET_NEAR;
             8'hCD:            return ENTRY_INT;
@@ -842,29 +1081,15 @@ module decoder (
         // Architectural M_NEXT_EIP
         if (prefix66_active && is_mov_r_imm32)
             next_eip = opcode_eip_latch + 32'h4;
-        else if (prefix66_active && is_mov_modrm) begin
-            if (mov_mem_src_disp32_form(opcode_byte_latch, modrm_latch, 1'b1) ||
-                mov_mem_src_base_disp32_form(opcode_byte_latch, modrm_latch, 1'b1) ||
-                mov_mem_dst_disp32_form(opcode_byte_latch, modrm_latch, 1'b1) ||
-                mov_mem_dst_base_disp32_form(opcode_byte_latch, modrm_latch, 1'b1))
-                next_eip = opcode_eip_latch + 32'h7;
-            else if (mov_mem_src_base_disp8_form(opcode_byte_latch, modrm_latch, 1'b1) ||
-                     mov_mem_dst_base_disp8_form(opcode_byte_latch, modrm_latch, 1'b1))
-                next_eip = opcode_eip_latch + 32'h4;
-            else
-                next_eip = opcode_eip_latch + 32'h3;
-        end
+        else if (prefix66_active && is_mov_modrm)
+            next_eip = opcode_eip_latch + mov_modrm_length();
         else if (prefix66_active && is_mov_rm_imm) begin
-            if (mov_rm_imm_disp32_form(opcode_byte_latch, modrm_latch, 1'b1) ||
-                mov_rm_imm_base_disp32_form(opcode_byte_latch, modrm_latch, 1'b1))
-                next_eip = opcode_eip_latch + 32'h9;
-            else if (mov_rm_imm_base_disp8_form(opcode_byte_latch, modrm_latch, 1'b1))
-                next_eip = opcode_eip_latch + 32'h6;
-            else if (mov_rm_imm_reg_form(opcode_byte_latch, modrm_latch, 1'b1) ||
-                     mov_rm_imm_base_nodisp_form(opcode_byte_latch, modrm_latch, 1'b1))
-                next_eip = opcode_eip_latch + 32'h5;
+            if (mov_rm_imm_mem_form(opcode_byte_latch, modrm_latch,
+                                    sib_latch, 1'b1) ||
+                mov_rm_imm_reg_form(opcode_byte_latch, modrm_latch, 1'b1))
+                next_eip = opcode_eip_latch + mov_rm_imm_length();
             else
-                next_eip = opcode_eip_latch + 32'h3;
+                next_eip = opcode_eip_latch + mov_modrm_length();
         end
         else if (prefix66_active)
             next_eip = opcode_eip_latch + 32'h2;
@@ -876,32 +1101,15 @@ module decoder (
             next_eip = opcode_eip_latch + 32'h2;
         else if (is_mov_r_imm32)
             next_eip = opcode_eip_latch + 32'h5;
-        else if (is_mov_modrm) begin
-            if (mov_mem_src_disp32_form(opcode_byte_latch, modrm_latch, 1'b0) ||
-                mov_mem_src_base_disp32_form(opcode_byte_latch, modrm_latch, 1'b0) ||
-                mov_mem_dst_disp32_form(opcode_byte_latch, modrm_latch, 1'b0) ||
-                mov_mem_dst_base_disp32_form(opcode_byte_latch, modrm_latch, 1'b0))
-                next_eip = opcode_eip_latch + 32'h6;
-            else if (mov_mem_src_base_disp8_form(opcode_byte_latch, modrm_latch, 1'b0) ||
-                     mov_mem_dst_base_disp8_form(opcode_byte_latch, modrm_latch, 1'b0))
-                next_eip = opcode_eip_latch + 32'h3;
-            else
-                next_eip = opcode_eip_latch + 32'h2;
-        end
+        else if (is_mov_modrm)
+            next_eip = opcode_eip_latch + mov_modrm_length();
         else if (is_mov_rm_imm) begin
-            if (mov_rm_imm_disp32_form(opcode_byte_latch, modrm_latch, 1'b0) ||
-                mov_rm_imm_base_disp32_form(opcode_byte_latch, modrm_latch, 1'b0))
-                next_eip = opcode_eip_latch + ((opcode_byte_latch == 8'hC6) ? 32'h7
-                                                                            : 32'hA);
-            else if (mov_rm_imm_base_disp8_form(opcode_byte_latch, modrm_latch, 1'b0))
-                next_eip = opcode_eip_latch + ((opcode_byte_latch == 8'hC6) ? 32'h4
-                                                                            : 32'h7);
-            else if (mov_rm_imm_reg_form(opcode_byte_latch, modrm_latch, 1'b0) ||
-                     mov_rm_imm_base_nodisp_form(opcode_byte_latch, modrm_latch, 1'b0))
-                next_eip = opcode_eip_latch + ((opcode_byte_latch == 8'hC6) ? 32'h3
-                                                                            : 32'h6);
+            if (mov_rm_imm_mem_form(opcode_byte_latch, modrm_latch,
+                                    sib_latch, 1'b0) ||
+                mov_rm_imm_reg_form(opcode_byte_latch, modrm_latch, 1'b0))
+                next_eip = opcode_eip_latch + mov_rm_imm_length();
             else
-                next_eip = opcode_eip_latch + 32'h2;
+                next_eip = opcode_eip_latch + mov_modrm_length();
         end
         else if (is_call_ff)
             next_eip = opcode_eip_latch + 32'h2 +
@@ -1008,7 +1216,7 @@ module decoder (
             end
 
             DEC_SIB: begin
-                if (q_valid && (q_fetch_eip == opcode_eip_latch + 32'h2))
+                if (q_valid && (q_fetch_eip == opcode_eip_latch + sib_offset()))
                     q_consume = 1'b1;
             end
 
@@ -1021,46 +1229,8 @@ module decoder (
             DEC_DONE: begin
                 decode_done = 1'b1;
                 entry_id    = classify_opcode(opcode_byte_latch, ff_is_call_near,
-                                              (modrm_latch[7:6] == 2'b11),
-                                              mov_mem_src_disp32_form(opcode_byte_latch,
-                                                                       modrm_latch,
-                                                                       prefix66_active),
-                                              mov_mem_src_base_nodisp_form(opcode_byte_latch,
-                                                                           modrm_latch,
-                                                                           prefix66_active),
-                                              mov_mem_src_base_disp8_form(opcode_byte_latch,
-                                                                          modrm_latch,
-                                                                          prefix66_active),
-                                              mov_mem_src_base_disp32_form(opcode_byte_latch,
-                                                                           modrm_latch,
-                                                                          prefix66_active),
-                                              mov_mem_dst_disp32_form(opcode_byte_latch,
-                                                                       modrm_latch,
-                                                                       prefix66_active),
-                                              mov_mem_dst_base_nodisp_form(opcode_byte_latch,
-                                                                           modrm_latch,
-                                                                           prefix66_active),
-                                              mov_mem_dst_base_disp8_form(opcode_byte_latch,
-                                                                          modrm_latch,
-                                                                          prefix66_active),
-                                              mov_mem_dst_base_disp32_form(opcode_byte_latch,
-                                                                           modrm_latch,
-                                                                           prefix66_active),
-                                              mov_rm_imm_disp32_form(opcode_byte_latch,
-                                                                     modrm_latch,
-                                                                     prefix66_active),
-                                              mov_rm_imm_base_nodisp_form(opcode_byte_latch,
-                                                                          modrm_latch,
-                                                                          prefix66_active),
-                                              mov_rm_imm_base_disp8_form(opcode_byte_latch,
-                                                                         modrm_latch,
-                                                                         prefix66_active),
-                                              mov_rm_imm_base_disp32_form(opcode_byte_latch,
-                                                                          modrm_latch,
-                                                                         prefix66_active),
-                                              mov_rm_imm_reg_form(opcode_byte_latch,
-                                                                  modrm_latch,
-                                                                  prefix66_active),
+                                              modrm_latch,
+                                              sib_latch,
                                               prefix66_active);
 
                 if (is_call_direct) begin
