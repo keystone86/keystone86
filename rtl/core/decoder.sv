@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through bounded Rung 6 Pass 6F-2:
+// Decoder role through bounded Rung 6 Pass 6G-1:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -30,8 +30,9 @@
 //     Pass 6F-1 additionally accepts base-only SIB with SIB.index=100.
 //     Pass 6F-2 additionally accepts only the ModRM.mod=00, ModRM.r/m=100,
 //     SIB.index=100, SIB.base=101 no-base disp32 special case, where
-//     EA=disp32. Index paths, scale arithmetic, 0x67, EA_CALC_16, and
-//     Rung 7 behavior remain unsupported.
+//     EA=disp32. Pass 6G-1 additionally accepts base-present indexed SIB
+//     forms. No-base indexed SIB, 0x67, EA_CALC_16, and Rung 7 behavior
+//     remain unsupported.
 //   - For the bounded Pass 6B-1 memory-destination slice, accept only 88/89
 //     and 66+89 with ModRM.mod=00 and r/m=101, consume the disp32 absolute
 //     address, and report M_NEXT_EIP after that displacement. Pass 6E-1
@@ -41,8 +42,9 @@
 //     additionally accepts default-32 ModRM.mod=10 non-SIB forms with four
 //     signed disp32 bytes. Pass 6F-1 additionally accepts the same bounded
 //     base-only SIB subset. Pass 6F-2 additionally accepts only the mod=00
-//     SIB.index=100 SIB.base=101 no-base disp32 special case. Other SIB
-//     forms and 0x67 remain unsupported.
+//     SIB.index=100 SIB.base=101 no-base disp32 special case. Pass 6G-1
+//     additionally accepts base-present indexed SIB. No-base indexed SIB and
+//     0x67 remain unsupported.
 //   - For the bounded Pass 6C-1 immediate-to-memory slice, accept only C6/C7
 //     /0 with ModRM.mod=00 and r/m=101, consume the disp32 absolute address,
 //     and report M_NEXT_EIP after the immediate. Pass 6E-1 additionally
@@ -52,7 +54,8 @@
 //     default-32 ModRM.mod=10 non-SIB forms with four signed disp32 bytes.
 //     Pass 6F-1 additionally accepts the same bounded base-only SIB subset.
 //     Pass 6F-2 additionally accepts only the mod=00 SIB.index=100
-//     SIB.base=101 no-base disp32 special case.
+//     SIB.base=101 no-base disp32 special case. Pass 6G-1 additionally
+//     accepts base-present indexed SIB only.
 //     For Pass 6D-1, also accept C6/C7 /0 with ModRM.mod=11 as
 //     register-destination MOV and report M_NEXT_EIP after the immediate.
 //     FETCH_IMM* remains the microcode-called service that consumes the
@@ -555,7 +558,6 @@ module decoder (
     );
         return (m[7:6] == 2'b00) &&
                (m[2:0] == 3'b100) &&
-               sib_index_none(s) &&
                (s[2:0] != 3'b101);
     endfunction
 
@@ -574,8 +576,7 @@ module decoder (
         input logic [7:0] s
     );
         return (m[7:6] == 2'b01) &&
-               (m[2:0] == 3'b100) &&
-               sib_index_none(s);
+               (m[2:0] == 3'b100);
     endfunction
 
     function automatic logic sib_disp32_32_form(
@@ -583,8 +584,7 @@ module decoder (
         input logic [7:0] s
     );
         return (m[7:6] == 2'b10) &&
-               (m[2:0] == 3'b100) &&
-               sib_index_none(s);
+               (m[2:0] == 3'b100);
     endfunction
 
     function automatic logic mov_mem_src_disp32_form(

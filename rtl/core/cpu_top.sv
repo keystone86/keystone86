@@ -1,11 +1,11 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 6 Pass 6F-2 top-level with service-based control-transfer paths,
+// Rung 6 Pass 6G-1 top-level with service-based control-transfer paths,
 // bounded MOV immediate/register-register slices, direct-disp32 memory MOV,
 // base-only no-displacement memory MOV, signed-disp8 memory MOV, signed
-// disp32 base memory MOV, bounded base-only SIB memory MOV, and bounded
-// no-base SIB disp32 MOV.
+// disp32 base memory MOV, bounded base-only SIB memory MOV, bounded no-base
+// SIB disp32 MOV, and bounded base-present indexed SIB MOV.
 
 import keystone86_pkg::*;
 
@@ -182,8 +182,8 @@ module cpu_top (
     logic [31:0] op_mem_rd_data;
 
     // ea_calc side: bounded EA_CALC_32 direct disp32 plus default-32
-    // base-only, base+disp8, base+disp32 non-SIB forms, base-only SIB, and
-    // no-base SIB disp32.
+    // base-only, base+disp8, base+disp32 non-SIB forms, base-only SIB,
+    // no-base SIB disp32, and base-present indexed SIB.
     logic [7:0]  ea_svc_id;
     logic        ea_svc_req;
     logic        ea_svc_done;
@@ -193,8 +193,8 @@ module cpu_top (
 
     // load_store side: register metadata plus bounded memory-source LOAD_RM*
     // and memory-destination STORE_RM* direct-disp32/base-only/base+disp8/
-    // base+disp32 operations, plus the bounded base-only and no-base SIB
-    // subsets.
+    // base+disp32 operations, plus the bounded base-only, no-base, and
+    // base-present indexed SIB subsets.
     logic [7:0]  ls_svc_id;
     logic        ls_svc_req;
     logic        ls_svc_done;
@@ -342,16 +342,15 @@ module cpu_top (
     assign commit_pc_gpr_idx  = ls_pc_gpr_en ? ls_pc_gpr_idx : pc_gpr_idx;
     assign commit_pc_gpr_opsz = ls_pc_gpr_en ? ls_pc_gpr_opsz : pc_gpr_opsz;
     assign commit_pc_gpr_val  = ls_pc_gpr_en ? ls_pc_gpr_val : pc_gpr_val;
-    // EA_CALC_32 needs the committed 32-bit base value only during its
-    // bounded base-relative service cycle. For authorized base-only SIB forms,
-    // ea_calc selects SIB.base as that single base index. For the Pass 6F-2
-    // no-base SIB disp32 special case, ea_calc ignores this read value and
-    // uses the displacement metadata. No index read path or second
-    // architectural read owner is introduced.
-    assign gpr_rd_idx  = (ea_svc_req && (ea_svc_id == EA_CALC_32)) ? ea_base_gpr_rd_idx :
-                                                                    ls_gpr_rd_idx;
-    assign gpr_rd_opsz = (ea_svc_req && (ea_svc_id == EA_CALC_32)) ? 2'h2 :
-                                                                    ls_gpr_rd_opsz;
+    // EA_CALC_32 owns selection of the one committed-GPR read index. Base-only
+    // forms select the base register; Pass 6G-1 indexed SIB forms first select
+    // SIB.base, then SIB.index on a wait cycle. The Pass 6F-2 no-base SIB
+    // disp32 special case ignores this read value and uses displacement
+    // metadata. No second architectural read owner is introduced.
+    assign gpr_rd_idx  = (ea_svc_id == EA_CALC_32) ? ea_base_gpr_rd_idx :
+                                                        ls_gpr_rd_idx;
+    assign gpr_rd_opsz = (ea_svc_id == EA_CALC_32) ? 2'h2 :
+                                                        ls_gpr_rd_opsz;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin

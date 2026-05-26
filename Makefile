@@ -31,6 +31,7 @@ HOST_GID := $(shell id -g)
         rung6-pass6e3-sim rung6-pass6e3-clean \
         rung6-pass6f1-sim rung6-pass6f1-clean \
         rung6-pass6f2-sim rung6-pass6f2-clean \
+        rung6-pass6g1-sim rung6-pass6g1-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -138,6 +139,8 @@ help:
 	@echo "  make rung6-pass6f1-clean   - remove Rung 6 Pass 6F-1 simulation artifacts"
 	@echo "  make rung6-pass6f2-sim     - compile and run bounded Rung 6 Pass 6F-2 MOV no-base SIB disp32 simulation"
 	@echo "  make rung6-pass6f2-clean   - remove Rung 6 Pass 6F-2 simulation artifacts"
+	@echo "  make rung6-pass6g1-sim     - compile and run bounded Rung 6 Pass 6G-1 MOV base-present indexed SIB simulation"
+	@echo "  make rung6-pass6g1-clean   - remove Rung 6 Pass 6G-1 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -871,6 +874,28 @@ rung6-pass6f2-sim: require-container ucode
 rung6-pass6f2-clean: require-container
 	@rm -rf build/sim/rung6_pass6f2
 	@echo "Rung 6 Pass 6F-2 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 6G-1 — bounded MOV base-present indexed SIB slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS6G1 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_sib_index_base.sv
+
+rung6-pass6g1-sim: require-container ucode
+	@echo "--- Rung 6 Pass 6G-1: compiling bounded MOV base-present indexed SIB RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass6g1
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass6g1/tb_rung6_mov_sib_index_base.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS6G1)
+	@echo "--- Rung 6 Pass 6G-1: running bounded MOV base-present indexed SIB simulation ---"
+	vvp build/sim/rung6_pass6g1/tb_rung6_mov_sib_index_base.vvp
+
+rung6-pass6g1-clean: require-container
+	@rm -rf build/sim/rung6_pass6g1
+	@echo "Rung 6 Pass 6G-1 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

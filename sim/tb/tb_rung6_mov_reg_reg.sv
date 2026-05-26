@@ -257,6 +257,7 @@ module tb_rung6_mov_reg_reg;
 
     task automatic run_unsupported_form(input logic [7:0] opcode,
                                         input logic [7:0] modrm,
+                                        input logic [7:0] sib,
                                         input string name);
         logic saw_entry_null;
         logic saw_mov_endi;
@@ -265,6 +266,11 @@ module tb_rung6_mov_reg_reg;
             clear_memory();
             mem[pa16(RESET_EIP + 32'd0)] = opcode;
             mem[pa16(RESET_EIP + 32'd1)] = modrm;
+            mem[pa16(RESET_EIP + 32'd2)] = sib;
+            mem[pa16(RESET_EIP + 32'd3)] = 8'h00;
+            mem[pa16(RESET_EIP + 32'd4)] = 8'h20;
+            mem[pa16(RESET_EIP + 32'd5)] = 8'h00;
+            mem[pa16(RESET_EIP + 32'd6)] = 8'h00;
             saw_entry_null = 1'b0;
             saw_mov_endi   = 1'b0;
             saw_bus_wr     = 1'b0;
@@ -422,10 +428,10 @@ module tb_rung6_mov_reg_reg;
             end
         end
 
-        run_unsupported_form(8'h88, 8'h04, "88 SIB memory");
-        run_unsupported_form(8'h89, 8'h84, "89 SIB mod=10 memory");
-        run_unsupported_form(8'h8A, 8'h84, "8A SIB mod=10 memory");
-        run_unsupported_form(8'h8B, 8'h04, "8B SIB memory");
+        run_unsupported_form(8'h88, 8'h04, 8'h05, "88 no-base indexed SIB memory");
+        run_unsupported_form(8'h89, 8'h04, 8'h05, "89 no-base indexed SIB memory");
+        run_unsupported_form(8'h8A, 8'h04, 8'h05, "8A no-base indexed SIB memory");
+        run_unsupported_form(8'h8B, 8'h04, 8'h05, "8B no-base indexed SIB memory");
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 5A MOV register-register smoke completed");

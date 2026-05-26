@@ -16,9 +16,10 @@
 // signed disp8 forms after EA_CALC_32 has staged the effective address in T2.
 // Pass 6E-3 additionally allows default-32 ModRM.mod=10 r/m!=100 base plus
 // signed disp32 forms through the same EA_CALC_32/T2 path. Pass 6F-1
-// additionally allows only base-only SIB forms with SIB.index=100, no index
-// path. Pass 6F-2 additionally allows only the mod=00 SIB.index=100
-// SIB.base=101 no-base disp32 special case.
+// additionally allows base-only SIB forms with SIB.index=100. Pass 6F-2
+// additionally allows only the mod=00 SIB.index=100
+// SIB.base=101 no-base disp32 special case. Pass 6G-1 additionally allows
+// base-present indexed SIB forms; no-base indexed SIB remains unsupported.
 
 import keystone86_pkg::*;
 
@@ -156,7 +157,6 @@ module load_store (
         return (meta_modrm_class == MRM_SIB) &&
                (meta_modrm_byte[7:6] == 2'b00) &&
                (meta_modrm_byte[2:0] == 3'b100) &&
-               sib_index_none() &&
                (meta_sib_byte[2:0] != 3'b101);
     endfunction
 
@@ -171,15 +171,13 @@ module load_store (
     function automatic logic is_sib_disp8_mem_form;
         return (meta_modrm_class == MRM_SIB_DISP8) &&
                (meta_modrm_byte[7:6] == 2'b01) &&
-               (meta_modrm_byte[2:0] == 3'b100) &&
-               sib_index_none();
+               (meta_modrm_byte[2:0] == 3'b100);
     endfunction
 
     function automatic logic is_sib_disp32_mem_form;
         return (meta_modrm_class == MRM_SIB_DISP32) &&
                (meta_modrm_byte[7:6] == 2'b10) &&
-               (meta_modrm_byte[2:0] == 3'b100) &&
-               sib_index_none();
+               (meta_modrm_byte[2:0] == 3'b100);
     endfunction
 
     function automatic logic is_authorized_mem_form;

@@ -234,6 +234,8 @@ module tb_rung6_mov_reg_reg16;
     task automatic run_unsupported_prefix(input logic [7:0] opcode,
                                           input logic [7:0] modrm,
                                           input bit has_modrm,
+                                          input bit has_sib,
+                                          input logic [7:0] sib,
                                           input string name);
         logic saw_entry_null;
         logic saw_mov_endi;
@@ -244,6 +246,13 @@ module tb_rung6_mov_reg_reg16;
             mem[pa16(RESET_EIP + 32'd1)] = opcode;
             if (has_modrm)
                 mem[pa16(RESET_EIP + 32'd2)] = modrm;
+            if (has_sib) begin
+                mem[pa16(RESET_EIP + 32'd3)] = sib;
+                mem[pa16(RESET_EIP + 32'd4)] = 8'h00;
+                mem[pa16(RESET_EIP + 32'd5)] = 8'h20;
+                mem[pa16(RESET_EIP + 32'd6)] = 8'h00;
+                mem[pa16(RESET_EIP + 32'd7)] = 8'h00;
+            end
             saw_entry_null = 1'b0;
             saw_mov_endi   = 1'b0;
             saw_bus_wr     = 1'b0;
@@ -378,9 +387,11 @@ module tb_rung6_mov_reg_reg16;
         check("fall-through EIP after Pass 5B MOV sequence", dbg_eip == program_end_eip);
         check("final GPR state matches low-word shadow", gprs_match_shadow());
 
-        run_unsupported_prefix(8'h88, 8'hC0, 1'b1, "66+88 mod=11");
-        run_unsupported_prefix(8'h89, 8'h04, 1'b1, "66+89 SIB memory");
-        run_unsupported_prefix(8'h8B, 8'h04, 1'b1, "66+8B SIB memory");
+        run_unsupported_prefix(8'h88, 8'hC0, 1'b1, 1'b0, 8'h00, "66+88 mod=11");
+        run_unsupported_prefix(8'h89, 8'h04, 1'b1, 1'b1, 8'h05,
+                               "66+89 no-base indexed SIB memory");
+        run_unsupported_prefix(8'h8B, 8'h04, 1'b1, 1'b1, 8'h05,
+                               "66+8B no-base indexed SIB memory");
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 5B MOV register-register16 smoke completed");

@@ -612,10 +612,10 @@ module tb_rung6_mov_mem_dst_disp32;
                   read_mem32(addr) == expected_mem32[16 + r]);
         end
 
-        run_unsupported_form(7, 8'h88, 8'h84, 8'h0D, 8'h00, 8'h40, 8'h00, 8'h00,
-                             "88 SIB mod=10 index!=100 memory destination", 1'b0);
-        run_unsupported_form(7, 8'h89, 8'h84, 8'h0D, 8'h00, 8'h40, 8'h00, 8'h00,
-                             "89 SIB mod=10 index!=100 memory destination", 1'b0);
+        run_unsupported_form(7, 8'h88, 8'h04, 8'h05, 8'h00, 8'h40, 8'h00, 8'h00,
+                             "88 no-base indexed SIB memory destination", 1'b0);
+        run_unsupported_form(7, 8'h89, 8'h04, 8'h05, 8'h00, 8'h40, 8'h00, 8'h00,
+                             "89 no-base indexed SIB memory destination", 1'b0);
         run_unsupported_form(7, 8'h66, 8'h88, 8'h05, 8'h00, 8'h40, 8'h00, 8'h00,
                              "66+88 memory destination", 1'b0);
         run_unsupported_form(7, 8'h67, 8'h89, 8'h05, 8'h00, 8'h40, 8'h00, 8'h00,
