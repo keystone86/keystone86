@@ -425,8 +425,6 @@ module tb_rung6_mov_base_disp8;
 
         clear_memory();
 
-        run_unsupported_form(3, 8'h8B, 8'h04, 8'h05, 8'h00, 8'h00, 8'h00,
-                             "no-base indexed SIB", 1'b0);
         // The current Rung 6 decoder exposes 0x67 only as a standalone
         // ENTRY_PREFIX_ONLY byte; this check intentionally does not claim the
         // following 8B 40 01 bytes are consumed as one unsupported instruction.

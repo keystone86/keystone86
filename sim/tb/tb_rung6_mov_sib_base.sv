@@ -8,9 +8,9 @@
 //   mod=01 any base plus signed disp8
 //   mod=10 any base plus disp32
 //
-// Pass 6F-1 supports only base-only SIB with SIB.index=100. Later Pass 6G-1
-// supports base-present indexed SIB, so this test keeps only no-base indexed
-// SIB and 0x67 as unsupported-adjacent probes. EA_CALC_16, 16-bit addressing,
+// Pass 6F-1 supports only base-only SIB with SIB.index=100. Later passes
+// cover indexed SIB forms, so this test keeps only 0x67 as an
+// unsupported-adjacent probe. EA_CALC_16, 16-bit addressing,
 // protected/page/segment behavior, flags production, segment/control/debug/
 // test-register MOV, string MOVS, and Rung 7 behavior remain unsupported.
 
@@ -460,8 +460,6 @@ module tb_rung6_mov_sib_base;
 
         clear_memory();
 
-        run_unsupported_form(7, 8'h8B, 8'h04, 8'h0D, 8'h00, 8'h20, 8'h00, 8'h00,
-                             "no-base indexed SIB", 1'b0);
         run_unsupported_form(1, 8'h67, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
                              "0x67 prefix byte", 1'b1);
         run_unsupported_form(4, 8'hC7, 8'h4C, 8'h24, 8'h00, 8'h00, 8'h00, 8'h00,

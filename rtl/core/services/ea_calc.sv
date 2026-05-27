@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/services/ea_calc.sv
 //
-// Bounded Rung 6 Pass 6G-1 effective-address service.
+// Bounded Rung 6 Pass 6G-2 effective-address service.
 //
 // This slice implements only EA_CALC_32 for:
 //   ModRM.mod=00, ModRM.r/m=101
@@ -14,9 +14,11 @@
 //     ModRM.r/m=100, SIB.index=100, SIB.base=101 no-base disp32 with EA=disp32
 //   Pass 6G-1 base-present indexed SIB forms with SIB.index!=100:
 //     mod=00 base!=101, mod=01 any base + disp8, mod=10 any base + disp32
+//   Pass 6G-2 no-base indexed SIB disp32 forms with ModRM.mod=00,
+//     ModRM.r/m=100, SIB.base=101, and SIB.index!=100
 //
-// It does not implement EA_CALC_16, no-base indexed SIB, 0x67,
-// segment-base addition, protection checks, memory access, or Rung 7 behavior.
+// It does not implement EA_CALC_16, 0x67, segment-base addition, protection
+// checks, memory access, or Rung 7 behavior.
 
 import keystone86_pkg::*;
 
@@ -69,6 +71,7 @@ module ea_calc (
     logic        sib_index_nodisp_mem_form_w;
     logic        sib_index_disp8_mem_form_w;
     logic        sib_index_disp32_mem_form_w;
+    logic        sib_index_nobase_disp32_mem_form_w;
     logic        authorized_sib_mem_form_w;
 
     function automatic logic is_direct_disp32_mem_form;
@@ -142,6 +145,14 @@ module ea_calc (
                (meta_sib_byte[2:0] != 3'b101);
     endfunction
 
+    function automatic logic is_sib_index_nobase_disp32_mem_form;
+        return (meta_modrm_class == MRM_SIB) &&
+               (meta_modrm_byte[7:6] == 2'b00) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               sib_index_present() &&
+               (meta_sib_byte[2:0] == 3'b101);
+    endfunction
+
     function automatic logic is_sib_index_disp8_mem_form;
         return (meta_modrm_class == MRM_SIB_DISP8) &&
                (meta_modrm_byte[7:6] == 2'b01) &&
@@ -159,6 +170,7 @@ module ea_calc (
     function automatic logic is_authorized_sib_mem_form;
         return is_sib_nodisp_mem_form() ||
                is_sib_index_nodisp_mem_form() ||
+               is_sib_index_nobase_disp32_mem_form() ||
                is_sib_disp8_mem_form() ||
                is_sib_index_disp8_mem_form() ||
                is_sib_disp32_mem_form() ||
@@ -167,12 +179,15 @@ module ea_calc (
 
     function automatic logic is_indexed_sib_mem_form;
         return is_sib_index_nodisp_mem_form() ||
+               is_sib_index_nobase_disp32_mem_form() ||
                is_sib_index_disp8_mem_form() ||
                is_sib_index_disp32_mem_form();
     endfunction
 
     function automatic logic [31:0] indexed_disp_value;
-        if (is_sib_index_disp8_mem_form() || is_sib_index_disp32_mem_form())
+        if (is_sib_index_nobase_disp32_mem_form() ||
+            is_sib_index_disp8_mem_form() ||
+            is_sib_index_disp32_mem_form())
             return meta_disp_value;
         return 32'h0;
     endfunction
@@ -213,6 +228,12 @@ module ea_calc (
         (meta_modrm_byte[2:0] == 3'b100) &&
         sib_index_present_w &&
         (meta_sib_byte[2:0] != 3'b101);
+    assign sib_index_nobase_disp32_mem_form_w =
+        (meta_modrm_class == MRM_SIB) &&
+        (meta_modrm_byte[7:6] == 2'b00) &&
+        (meta_modrm_byte[2:0] == 3'b100) &&
+        sib_index_present_w &&
+        (meta_sib_byte[2:0] == 3'b101);
     assign sib_index_disp8_mem_form_w =
         (meta_modrm_class == MRM_SIB_DISP8) &&
         (meta_modrm_byte[7:6] == 2'b01) &&
@@ -225,6 +246,7 @@ module ea_calc (
         sib_index_present_w;
     assign authorized_sib_mem_form_w = sib_nodisp_mem_form_w ||
                                        sib_index_nodisp_mem_form_w ||
+                                       sib_index_nobase_disp32_mem_form_w ||
                                        sib_disp8_mem_form_w ||
                                        sib_index_disp8_mem_form_w ||
                                        sib_disp32_mem_form_w ||
@@ -232,7 +254,8 @@ module ea_calc (
 
     assign svc_done   = done_r;
     assign svc_sr     = sr_r;
-    assign base_gpr_rd_idx = ((state_r == EA_INDEX_READ) || (state_r == EA_INDEX_DONE)) ?
+    assign base_gpr_rd_idx = sib_index_nobase_disp32_mem_form_w ? meta_sib_byte[5:3] :
+                             ((state_r == EA_INDEX_READ) || (state_r == EA_INDEX_DONE)) ?
                                                         meta_sib_byte[5:3] :
                              authorized_sib_mem_form_w ? meta_sib_byte[2:0] :
                                                          meta_modrm_byte[2:0];
@@ -257,11 +280,13 @@ module ea_calc (
                 EA_IDLE: begin
                     if (svc_req) begin
                         if ((svc_id == EA_CALC_32) && is_indexed_sib_mem_form()) begin
-                            // Pass 6G-1 keeps the single committed-GPR read
-                            // path: latch base now, then hold the index
-                            // selection for a full wait cycle before consuming
-                            // the read data.
-                            indexed_base_val_r <= base_gpr_rd_val;
+                            // Indexed SIB keeps the single committed-GPR read
+                            // path: base-present forms latch base now, then
+                            // hold SIB.index for a full wait cycle. No-base
+                            // indexed SIB latches zero for the base term and
+                            // reads only SIB.index.
+                            indexed_base_val_r <= is_sib_index_nobase_disp32_mem_form()
+                                                  ? 32'h0 : base_gpr_rd_val;
                             indexed_disp_val_r <= indexed_disp_value();
                             sr_r               <= SR_WAIT;
                             state_r            <= EA_INDEX_READ;

@@ -1,6 +1,6 @@
 .entry ENTRY_MOV, 0x01
 
-; Rung 6 Pass 6G-1 bounded MOV slice:
+; Rung 6 Pass 6G-2 bounded MOV slice:
 ;   B0-B7 MOV r8, imm8
 ;   B8-BF MOV r32, imm32
 ;   66+B8-BF MOV r16, imm16
@@ -12,21 +12,24 @@
 ;     Pass 6E-3 default-32 mod=10 non-SIB signed disp32, and
 ;     Pass 6F-1 base-only SIB forms with SIB.index=100, Pass 6F-2
 ;     ModRM.mod=00 ModRM.r/m=100 SIB.index=100 SIB.base=101 no-base
-;     disp32 with EA=disp32, and Pass 6G-1 base-present indexed SIB forms
+;     disp32 with EA=disp32, Pass 6G-1 base-present indexed SIB forms, and
+;     Pass 6G-2 no-base indexed SIB disp32 forms
 ;   88/89 and 66+89 memory-destination for ModRM.mod=00 r/m=101 disp32 and
 ;     Pass 6E-1 default-32 base-only no-displacement r/m!=100/101, plus
 ;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8,
 ;     Pass 6E-3 default-32 mod=10 non-SIB signed disp32, and
 ;     Pass 6F-1 base-only SIB forms with SIB.index=100, Pass 6F-2
 ;     ModRM.mod=00 ModRM.r/m=100 SIB.index=100 SIB.base=101 no-base
-;     disp32 with EA=disp32, and Pass 6G-1 base-present indexed SIB forms
+;     disp32 with EA=disp32, Pass 6G-1 base-present indexed SIB forms, and
+;     Pass 6G-2 no-base indexed SIB disp32 forms
 ;   C6/C7 /0 and 66+C7 /0 immediate-to-memory only for ModRM.mod=00,
 ;     r/m=101 disp32, Pass 6E-1 base-only no-displacement r/m!=100/101, or
 ;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8, Pass 6E-3
 ;     default-32 mod=10 non-SIB signed disp32, or Pass 6F-1 base-only SIB
 ;     forms with SIB.index=100, Pass 6F-2 ModRM.mod=00
 ;     ModRM.r/m=100 SIB.index=100 SIB.base=101 no-base disp32
-;     with EA=disp32, and Pass 6G-1 base-present indexed SIB forms
+;     with EA=disp32, Pass 6G-1 base-present indexed SIB forms, and Pass
+;     6G-2 no-base indexed SIB disp32 forms
 ;   C6/C7 /0 and 66+C7 /0 immediate-to-register only for ModRM.mod=11
 ; Decoder supplies OC_MOV_R_IMM, M_OPSZ, and raw M_REG_DST from opcode[2:0].
 ; For 88/89/8A/8B it supplies OC_MOV_RM_R or OC_MOV_R_RM, M_REG_SRC,
@@ -36,9 +39,9 @@
 ; no-displacement forms, plus Pass 6E-2 signed disp8 and Pass 6E-3 signed
 ; disp32 forms, plus Pass 6F-1 base-only SIB forms with SIB.index=100,
 ; Pass 6F-2 ModRM.mod=00 ModRM.r/m=100 SIB.index=100 SIB.base=101
-; no-base SIB disp32 with EA=disp32, and Pass 6G-1 base-present indexed
-; SIB forms. No-base indexed SIB, 0x67, EA_CALC_16, and Rung 7 behavior
-; remain unsupported.
+; no-base SIB disp32 with EA=disp32, Pass 6G-1 base-present indexed SIB
+; forms, and Pass 6G-2 no-base indexed SIB disp32 forms. 0x67, EA_CALC_16,
+; and Rung 7 behavior remain unsupported.
 ; The memory-destination path uses EA_CALC_32, LOAD_REG_META, and STORE_RM8/16/32
 ; before ENDI CM_NOP|CM_EIP. The immediate-to-memory path uses FETCH_IMM*,
 ; EA_CALC_32, and STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP.

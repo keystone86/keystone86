@@ -19,7 +19,8 @@
 // additionally allows base-only SIB forms with SIB.index=100. Pass 6F-2
 // additionally allows only the mod=00 SIB.index=100
 // SIB.base=101 no-base disp32 special case. Pass 6G-1 additionally allows
-// base-present indexed SIB forms; no-base indexed SIB remains unsupported.
+// base-present indexed SIB forms. Pass 6G-2 additionally allows no-base
+// indexed SIB disp32 forms.
 
 import keystone86_pkg::*;
 
@@ -168,6 +169,14 @@ module load_store (
                (meta_sib_byte[2:0] == 3'b101);
     endfunction
 
+    function automatic logic is_sib_index_nobase_disp32_mem_form;
+        return (meta_modrm_class == MRM_SIB) &&
+               (meta_modrm_byte[7:6] == 2'b00) &&
+               (meta_modrm_byte[2:0] == 3'b100) &&
+               !sib_index_none() &&
+               (meta_sib_byte[2:0] == 3'b101);
+    endfunction
+
     function automatic logic is_sib_disp8_mem_form;
         return (meta_modrm_class == MRM_SIB_DISP8) &&
                (meta_modrm_byte[7:6] == 2'b01) &&
@@ -187,6 +196,7 @@ module load_store (
                is_base_disp32_mem_form() ||
                is_sib_nodisp_mem_form() ||
                is_sib_nobase_disp32_mem_form() ||
+               is_sib_index_nobase_disp32_mem_form() ||
                is_sib_disp8_mem_form() ||
                is_sib_disp32_mem_form();
     endfunction

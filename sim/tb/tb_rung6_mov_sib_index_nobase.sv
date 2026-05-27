@@ -1,22 +1,19 @@
 // Keystone86 / Aegis
-// sim/tb/tb_rung6_mov_sib_index_base.sv
-// Bounded Rung 6 Pass 6G-1 smoke: default-32 base-present indexed SIB MOV.
+// sim/tb/tb_rung6_mov_sib_index_nobase.sv
+// Bounded Rung 6 Pass 6G-2 smoke: default-32 no-base indexed SIB MOV.
 //
 // Authorized addressing subset:
-//   ModRM.r/m=100, SIB.index!=100
-//   mod=00 base!=101, no displacement
-//   mod=01 any base plus signed disp8, including base=101 as EBP
-//   mod=10 any base plus disp32, including base=101 as EBP
-//   EA = committed base + (committed index << scale) + optional displacement
+//   ModRM.mod=00, ModRM.r/m=100, SIB.base=101, SIB.index!=100, disp32
+//   EA = disp32 + (committed index << scale)
 //
-// No-base indexed SIB is covered separately by Pass 6G-2. 0x67,
+// SIB.index=100 remains the existing no-index no-base disp32 form. 0x67,
 // EA_CALC_16, 16-bit addressing, protected/page/segment behavior, flags
 // production, segment/control/debug/test-register MOV, string MOVS, and
 // Rung 7 behavior remain unsupported.
 
 `timescale 1ns/1ps
 
-module tb_rung6_mov_sib_index_base;
+module tb_rung6_mov_sib_index_nobase;
 
     localparam int CLK_HALF_PERIOD = 5;
     localparam int TIMEOUT         = 260000;
@@ -84,7 +81,6 @@ module tb_rung6_mov_sib_index_base;
     logic [3:0]  bus_byteen_pending;
     logic [31:0] bus_dout_pending;
     logic [31:0] expected_gpr [0:7];
-    logic        base_seen [0:7];
     logic        index_seen [0:7];
 
     logic [31:0] program_pc;
@@ -94,8 +90,9 @@ module tb_rung6_mov_sib_index_base;
     int cycles;
     int mov_endi_count;
     int ea_calc32_count;
-    int indexed_ea_count;
-    int indexed_t2_exact_count;
+    int nobase_index_ea_count;
+    int nobase_index_t2_exact_count;
+    int base_contribution_bad_count;
     int no_index_ea_count;
     int no_index_t2_exact_count;
     int esp_index_seen_count;
@@ -170,28 +167,27 @@ module tb_rung6_mov_sib_index_base;
         endcase
     endfunction
 
-    function automatic logic [31:0] indexed_ea(
-        input logic [2:0] base,
+    function automatic logic [31:0] nobase_indexed_ea(
         input logic [2:0] index,
         input logic [1:0] scale,
-        input logic signed [31:0] disp
+        input logic [31:0] disp
     );
-        return expected_gpr[base] + scale_value(expected_gpr[index], scale) + disp;
+        return disp + scale_value(expected_gpr[index], scale);
     endfunction
 
-    function automatic logic [31:0] dut_indexed_ea;
-        logic [2:0] base;
+    function automatic logic [31:0] dut_nobase_indexed_ea;
         logic [2:0] index;
         logic [1:0] scale;
-        logic [31:0] disp;
         begin
-            base = dut.meta_sib_byte_r[2:0];
             index = dut.meta_sib_byte_r[5:3];
             scale = dut.meta_sib_byte_r[7:6];
-            disp = ((dut.meta_modrm_class_r == 4'h6) ||
-                    (dut.meta_modrm_class_r == 4'h7)) ? dut.meta_disp_value_r : 32'h0;
-            return dut.u_commit.gpr_r[base] + scale_value(dut.u_commit.gpr_r[index], scale) + disp;
+            return dut.meta_disp_value_r +
+                   scale_value(dut.u_commit.gpr_r[index], scale);
         end
+    endfunction
+
+    function automatic logic [31:0] dut_nobase_indexed_ea_with_ebp_base;
+        return dut_nobase_indexed_ea() + dut.u_commit.gpr_r[3'h5];
     endfunction
 
     function automatic logic gprs_match_expected;
@@ -206,24 +202,20 @@ module tb_rung6_mov_sib_index_base;
         end
     endfunction
 
-    function automatic logic is_indexed_sib_form;
-        return ((dut.meta_modrm_class_r == 4'h5) ||
-                (dut.meta_modrm_class_r == 4'h6) ||
-                (dut.meta_modrm_class_r == 4'h7)) &&
+    function automatic logic is_nobase_indexed_sib_form;
+        return (dut.meta_modrm_class_r == 4'h5) &&
+               (dut.meta_modrm_byte_r[7:6] == 2'b00) &&
                (dut.meta_modrm_byte_r[2:0] == 3'b100) &&
-               (dut.meta_sib_byte_r[5:3] != 3'b100) &&
-               !((dut.meta_modrm_class_r == 4'h5) &&
-                 (dut.meta_sib_byte_r[2:0] == 3'b101));
+               (dut.meta_sib_byte_r[2:0] == 3'b101) &&
+               (dut.meta_sib_byte_r[5:3] != 3'b100);
     endfunction
 
-    function automatic logic is_no_index_sib_form;
-        return ((dut.meta_modrm_class_r == 4'h5) ||
-                (dut.meta_modrm_class_r == 4'h6) ||
-                (dut.meta_modrm_class_r == 4'h7)) &&
+    function automatic logic is_nobase_no_index_sib_form;
+        return (dut.meta_modrm_class_r == 4'h5) &&
+               (dut.meta_modrm_byte_r[7:6] == 2'b00) &&
                (dut.meta_modrm_byte_r[2:0] == 3'b100) &&
-               (dut.meta_sib_byte_r[5:3] == 3'b100) &&
-               !((dut.meta_modrm_class_r == 4'h5) &&
-                 (dut.meta_sib_byte_r[2:0] == 3'b101));
+               (dut.meta_sib_byte_r[2:0] == 3'b101) &&
+               (dut.meta_sib_byte_r[5:3] == 3'b100);
     endfunction
 
     always_ff @(posedge clk or negedge reset_n) begin
@@ -301,14 +293,7 @@ module tb_rung6_mov_sib_index_base;
         end
     endtask
 
-    task automatic append_disp8(input logic signed [7:0] disp);
-        begin
-            mem[pa16(program_pc)] = disp[7:0];
-            program_pc += 32'd1;
-        end
-    endtask
-
-    task automatic append_disp32(input logic signed [31:0] disp);
+    task automatic append_disp32(input logic [31:0] disp);
         begin
             mem[pa16(program_pc + 32'd0)] = disp[7:0];
             mem[pa16(program_pc + 32'd1)] = disp[15:8];
@@ -330,111 +315,81 @@ module tb_rung6_mov_sib_index_base;
         end
     endtask
 
-    task automatic append_sib(input logic [1:0] mod_bits,
-                              input logic [2:0] reg_bits,
-                              input logic [1:0] scale_bits,
-                              input logic [2:0] index_bits,
-                              input logic [2:0] base_bits);
+    task automatic append_sib_index_nobase(input logic [2:0] reg_bits,
+                                           input logic [1:0] scale_bits,
+                                           input logic [2:0] index_bits,
+                                           input logic [31:0] disp);
         begin
-            mem[pa16(program_pc + 32'd0)] = {mod_bits, reg_bits, 3'b100};
-            mem[pa16(program_pc + 32'd1)] = {scale_bits, index_bits, base_bits};
+            mem[pa16(program_pc + 32'd0)] = {2'b00, reg_bits, 3'b100};
+            mem[pa16(program_pc + 32'd1)] = {scale_bits, index_bits, 3'b101};
             program_pc += 32'd2;
+            append_disp32(disp);
         end
     endtask
 
-    task automatic append_mov32_sib_index(input logic [2:0] dst,
-                                          input logic [1:0] mod_bits,
-                                          input logic [2:0] base,
-                                          input logic [2:0] index,
-                                          input logic [1:0] scale,
-                                          input logic signed [31:0] disp,
-                                          input logic [31:0] val);
+    task automatic append_mov32_nobase_index(input logic [2:0] dst,
+                                             input logic [2:0] index,
+                                             input logic [1:0] scale,
+                                             input logic [31:0] disp,
+                                             input logic [31:0] val);
         begin
             mem[pa16(program_pc++)] = 8'h8B;
-            append_sib(mod_bits, dst, scale, index, base);
-            if (mod_bits == 2'b01)
-                append_disp8(disp[7:0]);
-            else if (mod_bits == 2'b10)
-                append_disp32(disp);
+            append_sib_index_nobase(dst, scale, index, disp);
             expected_gpr[dst] = val;
         end
     endtask
 
-    task automatic append_mov8_sib_index(input logic [2:0] dst,
-                                         input logic [1:0] mod_bits,
-                                         input logic [2:0] base,
-                                         input logic [2:0] index,
-                                         input logic [1:0] scale,
-                                         input logic signed [31:0] disp,
-                                         input logic [7:0] val);
+    task automatic append_mov8_nobase_index(input logic [2:0] dst,
+                                            input logic [2:0] index,
+                                            input logic [1:0] scale,
+                                            input logic [31:0] disp,
+                                            input logic [7:0] val);
         begin
             mem[pa16(program_pc++)] = 8'h8A;
-            append_sib(mod_bits, dst, scale, index, base);
-            if (mod_bits == 2'b01)
-                append_disp8(disp[7:0]);
-            else if (mod_bits == 2'b10)
-                append_disp32(disp);
+            append_sib_index_nobase(dst, scale, index, disp);
             expected_gpr[{1'b0, dst[1:0]}] =
                 merge_byte(expected_gpr[{1'b0, dst[1:0]}], dst, val);
         end
     endtask
 
-    task automatic append_mov16_sib_index(input logic [2:0] dst,
-                                          input logic [1:0] mod_bits,
-                                          input logic [2:0] base,
-                                          input logic [2:0] index,
-                                          input logic [1:0] scale,
-                                          input logic signed [31:0] disp,
-                                          input logic [15:0] val);
+    task automatic append_mov16_nobase_index(input logic [2:0] dst,
+                                             input logic [2:0] index,
+                                             input logic [1:0] scale,
+                                             input logic [31:0] disp,
+                                             input logic [15:0] val);
         begin
             mem[pa16(program_pc++)] = 8'h66;
             mem[pa16(program_pc++)] = 8'h8B;
-            append_sib(mod_bits, dst, scale, index, base);
-            if (mod_bits == 2'b01)
-                append_disp8(disp[7:0]);
-            else if (mod_bits == 2'b10)
-                append_disp32(disp);
+            append_sib_index_nobase(dst, scale, index, disp);
             expected_gpr[dst] = merge_word(expected_gpr[dst], val);
         end
     endtask
 
-    task automatic append_store_sib_index(input logic [7:0] opcode,
-                                          input logic [2:0] src,
-                                          input logic [1:0] mod_bits,
-                                          input logic [2:0] base,
-                                          input logic [2:0] index,
-                                          input logic [1:0] scale,
-                                          input logic signed [31:0] disp,
-                                          input logic pref66);
+    task automatic append_store_nobase_index(input logic [7:0] opcode,
+                                             input logic [2:0] src,
+                                             input logic [2:0] index,
+                                             input logic [1:0] scale,
+                                             input logic [31:0] disp,
+                                             input logic pref66);
         begin
             if (pref66)
                 mem[pa16(program_pc++)] = 8'h66;
             mem[pa16(program_pc++)] = opcode;
-            append_sib(mod_bits, src, scale, index, base);
-            if (mod_bits == 2'b01)
-                append_disp8(disp[7:0]);
-            else if (mod_bits == 2'b10)
-                append_disp32(disp);
+            append_sib_index_nobase(src, scale, index, disp);
         end
     endtask
 
-    task automatic append_imm_sib_index(input logic [7:0] opcode,
-                                        input logic [1:0] mod_bits,
-                                        input logic [2:0] base,
-                                        input logic [2:0] index,
-                                        input logic [1:0] scale,
-                                        input logic signed [31:0] disp,
-                                        input logic [31:0] imm,
-                                        input logic pref66);
+    task automatic append_imm_nobase_index(input logic [7:0] opcode,
+                                           input logic [2:0] index,
+                                           input logic [1:0] scale,
+                                           input logic [31:0] disp,
+                                           input logic [31:0] imm,
+                                           input logic pref66);
         begin
             if (pref66)
                 mem[pa16(program_pc++)] = 8'h66;
             mem[pa16(program_pc++)] = opcode;
-            append_sib(mod_bits, 3'b000, scale, index, base);
-            if (mod_bits == 2'b01)
-                append_disp8(disp[7:0]);
-            else if (mod_bits == 2'b10)
-                append_disp32(disp);
+            append_sib_index_nobase(3'b000, scale, index, disp);
             mem[pa16(program_pc + 32'd0)] = imm[7:0];
             if (opcode == 8'hC6) begin
                 program_pc += 32'd1;
@@ -447,16 +402,6 @@ module tb_rung6_mov_sib_index_base;
                 mem[pa16(program_pc + 32'd3)] = imm[31:24];
                 program_pc += 32'd4;
             end
-        end
-    endtask
-
-    task automatic append_mov32_sib_no_index(input logic [2:0] dst,
-                                             input logic [2:0] base,
-                                             input logic [31:0] val);
-        begin
-            mem[pa16(program_pc++)] = 8'h8B;
-            append_sib(2'b00, dst, 2'b11, 3'b100, base);
-            expected_gpr[dst] = val;
         end
     endtask
 
@@ -527,9 +472,6 @@ module tb_rung6_mov_sib_index_base;
         logic [31:0] ea_i;
         logic [31:0] ea_j;
         logic [31:0] ea_k;
-        logic [31:0] ea_l;
-        logic [31:0] ea_m;
-        logic [31:0] ea_n;
 
         failures = 0;
         reset_n = 1'b0;
@@ -545,20 +487,20 @@ module tb_rung6_mov_sib_index_base;
 
         run_unsupported_form(1, 8'h67, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
                              "0x67 prefix byte", 1'b1);
-        run_unsupported_form(4, 8'hC7, 8'h4C, 8'h4D, 8'h00, 8'h00, 8'h00, 8'h00,
-                             "C7 indexed SIB non-/0", 1'b0);
+        run_unsupported_form(7, 8'hC7, 8'h0C, 8'h0D, 8'h00, 8'h20, 8'h00, 8'h00,
+                             "C7 no-base indexed SIB non-/0", 1'b0);
 
         clear_memory();
         for (int i = 0; i < 8; i++) begin
             expected_gpr[i] = 32'h0;
-            base_seen[i] = 1'b0;
             index_seen[i] = 1'b0;
         end
 
         mov_endi_count = 0;
         ea_calc32_count = 0;
-        indexed_ea_count = 0;
-        indexed_t2_exact_count = 0;
+        nobase_index_ea_count = 0;
+        nobase_index_t2_exact_count = 0;
+        base_contribution_bad_count = 0;
         no_index_ea_count = 0;
         no_index_t2_exact_count = 0;
         esp_index_seen_count = 0;
@@ -584,99 +526,80 @@ module tb_rung6_mov_sib_index_base;
 
         program_pc = RESET_EIP;
 
-        append_mov32_imm(3'h0, 32'h00001000); // EAX base for mod=00
-        append_mov32_imm(3'h1, 32'h00000004); // ECX index
+        append_mov32_imm(3'h0, 32'h00000001); // EAX index
+        append_mov32_imm(3'h1, 32'h00000002); // ECX index
         append_mov32_imm(3'h2, 32'h00000003); // EDX index
-        append_mov32_imm(3'h3, 32'h00001300); // EBX base
-        append_mov32_imm(3'h4, 32'h00001400); // ESP base
-        append_mov32_imm(3'h5, 32'h00000005); // EBP index
-        append_mov32_imm(3'h6, 32'h00000002); // ESI index
-        append_mov32_imm(3'h7, 32'h00000006); // EDI index
+        append_mov32_imm(3'h3, 32'h00000004); // EBX index/source
+        append_mov32_imm(3'h4, 32'h00000004); // ESP proves index=100 is no-index
+        append_mov32_imm(3'h5, 32'h00003005); // EBP index; would corrupt EA if used as base
+        append_mov32_imm(3'h6, 32'h00000006); // ESI index/source
+        append_mov32_imm(3'h7, 32'h55667788); // EDI source
 
-        ea_a = indexed_ea(3'h0, 3'h5, 2'b00, 32'sd0);
+        ea_a = nobase_indexed_ea(3'h0, 2'b00, 32'h00002010);
         write_mem32(ea_a, 32'hA1A2A3A4);
-        append_mov32_sib_index(3'h2, 2'b00, 3'h0, 3'h5, 2'b00, 32'sd0, 32'hA1A2A3A4);
+        append_mov32_nobase_index(3'h2, 3'h0, 2'b00, 32'h00002010, 32'hA1A2A3A4);
 
-        ea_b = indexed_ea(3'h4, 3'h1, 2'b01, -32'sd4);
+        ea_b = nobase_indexed_ea(3'h1, 2'b01, 32'h00002020);
         write_mem32(ea_b, 32'hB1B2B35A);
-        append_mov8_sib_index(3'h3, 2'b01, 3'h4, 3'h1, 2'b01, -32'sd4, 8'h5A);
+        append_mov8_nobase_index(3'h3, 3'h1, 2'b01, 32'h00002020, 8'h5A);
 
-        append_mov32_imm(3'h5, 32'h00001500); // EBP base for mod=10
-        append_mov32_imm(3'h6, 32'h00000002); // ESI index restored
-        ea_c = indexed_ea(3'h5, 3'h6, 2'b10, 32'sd32);
+        append_mov32_imm(3'h2, 32'h00000003); // restore EDX as index
+        ea_c = nobase_indexed_ea(3'h2, 2'b10, 32'h00002030);
         write_mem32(ea_c, 32'hC1C2BEEF);
-        append_mov16_sib_index(3'h7, 2'b10, 3'h5, 3'h6, 2'b10, 32'sd32, 16'hBEEF);
+        append_mov16_nobase_index(3'h6, 3'h2, 2'b10, 32'h00002030, 16'hBEEF);
 
-        ea_d = indexed_ea(3'h3, 3'h7, 2'b11, 32'sd0);
+        append_mov32_imm(3'h3, 32'h00000004); // restore EBX as index
+        ea_d = nobase_indexed_ea(3'h3, 2'b11, 32'h00002040);
         write_mem32(ea_d, 32'hD1D2D3D4);
-        append_mov32_sib_index(3'h0, 2'b00, 3'h3, 3'h7, 2'b11, 32'sd0, 32'hD1D2D3D4);
+        append_mov32_nobase_index(3'h0, 3'h3, 2'b11, 32'h00002040, 32'hD1D2D3D4);
 
-        append_mov32_imm(3'h0, 32'h00000001); // EAX index
-        append_mov32_imm(3'h1, 32'h0000005A); // CL store source
-        append_mov32_imm(3'h2, 32'h00001200); // EDX base
-        ea_e = indexed_ea(3'h2, 3'h0, 2'b00, 32'sd0);
+        ea_e = nobase_indexed_ea(3'h5, 2'b00, 32'h00002050);
         write_mem32(ea_e, 32'h11111111);
-        append_store_sib_index(8'h88, 3'h1, 2'b00, 3'h2, 3'h0, 2'b00, 32'sd0, 1'b0);
+        append_store_nobase_index(8'h88, 3'h0, 3'h5, 2'b00, 32'h00002050, 1'b0);
 
-        append_mov32_imm(3'h2, 32'h00000003); // EDX index
-        append_mov32_imm(3'h3, 32'h55667788); // EBX store source
-        append_mov32_imm(3'h6, 32'h00001600); // ESI base
-        ea_f = indexed_ea(3'h6, 3'h2, 2'b01, 32'sd8);
+        append_mov32_imm(3'h6, 32'h00000006); // restore ESI as index
+        ea_f = nobase_indexed_ea(3'h6, 2'b01, 32'h00002060);
         write_mem32(ea_f, 32'h22222222);
-        append_store_sib_index(8'h89, 3'h3, 2'b01, 3'h6, 3'h2, 2'b01, 32'sd8, 1'b0);
+        append_store_nobase_index(8'h89, 3'h7, 3'h6, 2'b01, 32'h00002060, 1'b0);
 
-        append_mov32_imm(3'h3, 32'h00000004); // EBX index
-        append_mov32_imm(3'h6, 32'h0000CAFE); // SI store source
-        append_mov32_imm(3'h7, 32'h00001700); // EDI base
-        ea_g = indexed_ea(3'h7, 3'h3, 2'b10, 32'sd16);
+        append_mov32_imm(3'h6, 32'h0000BEEF); // SI source for 66 89
+        ea_g = nobase_indexed_ea(3'h7, 2'b10, 32'h00002070);
         write_mem32(ea_g, 32'h33333333);
-        append_store_sib_index(8'h89, 3'h6, 2'b10, 3'h7, 3'h3, 2'b10, 32'sd16, 1'b1);
+        append_store_nobase_index(8'h89, 3'h6, 3'h7, 2'b10, 32'h00002070, 1'b1);
 
-        append_mov32_imm(3'h0, 32'h00000001); // EAX index
-        append_mov32_imm(3'h1, 32'h00001100); // ECX base
-        ea_h = indexed_ea(3'h1, 3'h0, 2'b11, -32'sd8);
+        append_mov32_imm(3'h0, 32'h00000001); // restore EAX as index
+        ea_h = nobase_indexed_ea(3'h0, 2'b11, 32'h00002080);
         write_mem32(ea_h, 32'h44444444);
-        append_imm_sib_index(8'hC6, 2'b01, 3'h1, 3'h0, 2'b11, -32'sd8,
-                             32'h0000005A, 1'b0);
+        append_imm_nobase_index(8'hC6, 3'h0, 2'b11, 32'h00002080,
+                                32'h0000005A, 1'b0);
 
-        append_mov32_imm(3'h5, 32'h00001500); // EBP base for mod=01
-        append_mov32_imm(3'h7, 32'h00000002); // EDI index
-        ea_i = indexed_ea(3'h5, 3'h7, 2'b01, 32'sd4);
+        ea_i = nobase_indexed_ea(3'h1, 2'b10, 32'h00002090);
         write_mem32(ea_i, 32'h55555555);
-        append_imm_sib_index(8'hC7, 2'b01, 3'h5, 3'h7, 2'b01, 32'sd4,
-                             32'h11223344, 1'b0);
+        append_imm_nobase_index(8'hC7, 3'h1, 2'b10, 32'h00002090,
+                                32'h11223344, 1'b0);
 
-        append_mov32_imm(3'h4, 32'h00001400); // ESP base
-        append_mov32_imm(3'h6, 32'h00000003); // ESI index
-        ea_j = indexed_ea(3'h4, 3'h6, 2'b10, 32'sd32);
+        ea_j = nobase_indexed_ea(3'h2, 2'b01, 32'h000020A0);
         write_mem32(ea_j, 32'h66666666);
-        append_imm_sib_index(8'hC7, 2'b10, 3'h4, 3'h6, 2'b10, 32'sd32,
-                             32'h0000BEEF, 1'b1);
+        append_imm_nobase_index(8'hC7, 3'h2, 2'b01, 32'h000020A0,
+                                32'h0000CAFE, 1'b1);
 
-        append_mov32_imm(3'h0, 32'h00001800);
-        append_mov32_imm(3'h1, 32'h00000002);
-        ea_l = indexed_ea(3'h0, 3'h1, 2'b00, 32'sd0);
-        write_mem32(ea_l, 32'hAAAAAA7C);
-        append_mov8_sib_index(3'h3, 2'b00, 3'h0, 3'h1, 2'b00, 32'sd0, 8'h7C);
-
-        append_mov32_imm(3'h5, 32'h00001900);
-        append_mov32_imm(3'h6, 32'h00000003);
-        ea_m = indexed_ea(3'h5, 3'h6, 2'b01, 32'sd4);
-        write_mem32(ea_m, 32'hBBBBCAFE);
-        append_mov16_sib_index(3'h7, 2'b01, 3'h5, 3'h6, 2'b01, 32'sd4, 16'hCAFE);
-
-        append_mov32_imm(3'h0, 32'h00001A00);
-        append_mov32_imm(3'h1, 32'h00000001);
-        ea_n = indexed_ea(3'h0, 3'h1, 2'b10, 32'sd16);
-        write_mem32(ea_n, 32'hCAFEBABE);
-        append_mov32_sib_index(3'h1, 2'b10, 3'h0, 3'h1, 2'b10, 32'sd16, 32'hCAFEBABE);
-
-        append_mov32_imm(3'h0, 32'h00001B00); // base
-        append_mov32_imm(3'h4, 32'h00000020); // proves SIB.index=100 is no-index
-        ea_k = expected_gpr[3'h0];
+        ea_k = 32'h000020B0;
         write_mem32(ea_k, 32'hABCDEF01);
-        write_mem32(ea_k + (expected_gpr[3'h4] << 3), 32'hBAD0BAD0);
-        append_mov32_sib_no_index(3'h2, 3'h0, 32'hABCDEF01);
+        write_mem32(ea_k + scale_value(expected_gpr[3'h4], 2'b11), 32'hBAD0BAD0);
+        append_mov32_nobase_index(3'h5, 3'h4, 2'b11, ea_k, 32'hABCDEF01);
+
+        append_mov32_imm(3'h0, 32'h00000001);
+        append_mov32_imm(3'h1, 32'h00000002);
+        append_mov32_imm(3'h6, 32'h00000006);
+        ea_a = nobase_indexed_ea(3'h0, 2'b00, 32'h00002100);
+        write_mem32(ea_a, 32'hAAAAAA7C);
+        append_mov8_nobase_index(3'h3, 3'h0, 2'b00, 32'h00002100, 8'h7C);
+        ea_b = nobase_indexed_ea(3'h1, 2'b01, 32'h00002110);
+        write_mem32(ea_b, 32'hBBBBCAFE);
+        append_mov16_nobase_index(3'h7, 3'h1, 2'b01, 32'h00002110, 16'hCAFE);
+        ea_c = nobase_indexed_ea(3'h6, 2'b10, 32'h00002120);
+        write_mem32(ea_c, 32'hCAFEBABE);
+        append_mov32_nobase_index(3'h2, 3'h6, 2'b10, 32'h00002120, 32'hCAFEBABE);
 
         mem[pa16(program_pc)] = 8'h90;
         program_end_eip = program_pc + 32'd1;
@@ -694,9 +617,8 @@ module tb_rung6_mov_sib_index_base;
                     SVC_FETCH_IMM32: fetch_imm32_count++;
                     SVC_EA_CALC_32: begin
                         ea_calc32_count++;
-                        if (is_indexed_sib_form()) begin
-                            indexed_ea_count++;
-                            base_seen[dut.meta_sib_byte_r[2:0]] = 1'b1;
+                        if (is_nobase_indexed_sib_form()) begin
+                            nobase_index_ea_count++;
                             index_seen[dut.meta_sib_byte_r[5:3]] = 1'b1;
                             if (dut.meta_sib_byte_r[5:3] == 3'b100)
                                 esp_index_seen_count++;
@@ -707,7 +629,7 @@ module tb_rung6_mov_sib_index_base;
                                 2'b11: scale3_count++;
                                 default: ;
                             endcase
-                        end else if (is_no_index_sib_form()) begin
+                        end else if (is_nobase_no_index_sib_form()) begin
                             no_index_ea_count++;
                         end
                     end
@@ -721,12 +643,15 @@ module tb_rung6_mov_sib_index_base;
                 endcase
             end
 
-            if (dut.ea_t2_wr_en && is_indexed_sib_form() &&
-                (dut.ea_t2_wr_data == dut_indexed_ea()))
-                indexed_t2_exact_count++;
+            if (dut.ea_t2_wr_en && is_nobase_indexed_sib_form()) begin
+                if (dut.ea_t2_wr_data == dut_nobase_indexed_ea())
+                    nobase_index_t2_exact_count++;
+                if (dut.ea_t2_wr_data == dut_nobase_indexed_ea_with_ebp_base())
+                    base_contribution_bad_count++;
+            end
 
-            if (dut.ea_t2_wr_en && is_no_index_sib_form() &&
-                (dut.ea_t2_wr_data == dut.u_commit.gpr_r[dut.meta_sib_byte_r[2:0]]))
+            if (dut.ea_t2_wr_en && is_nobase_no_index_sib_form() &&
+                (dut.ea_t2_wr_data == dut.meta_disp_value_r))
                 no_index_t2_exact_count++;
 
             if (bus_wr && !bus_pending) begin
@@ -755,17 +680,19 @@ module tb_rung6_mov_sib_index_base;
         if (cycles >= TIMEOUT)
             timed_out = 1'b1;
 
-        $display("Rung 6 Pass 6G-1 MOV base-present indexed SIB checks");
+        $display("Rung 6 Pass 6G-2 MOV no-base indexed SIB checks");
 
         check("simulation completed before timeout", !timed_out);
         check("final EIP reached NOP fall-through", dbg_eip == program_end_eip);
         check("no fault pending", !dbg_fault_pending);
         check("EFLAGS unchanged", dut.u_commit.eflags_r == 32'h00000002);
-        check("EA_CALC_32 issued for indexed and no-index SIB MOV", ea_calc32_count == 14);
-        check("EA_CALC_32 issued for each indexed SIB MOV", indexed_ea_count == 13);
-        check("EA_CALC_32 computed base + scaled index + displacement", indexed_t2_exact_count == 13);
+        check("EA_CALC_32 issued for no-base indexed and no-index SIB MOV", ea_calc32_count == 14);
+        check("EA_CALC_32 issued for each no-base indexed SIB MOV", nobase_index_ea_count == 13);
+        check("EA_CALC_32 computed disp32 + scaled index", nobase_index_t2_exact_count == 13);
+        check("no committed base GPR contributed to no-base indexed EA",
+              base_contribution_bad_count == 0);
         check("scale=00 covered", scale0_count >= 2);
-        check("scale=01 covered", scale1_count >= 3);
+        check("scale=01 covered", scale1_count >= 2);
         check("scale=10 covered", scale2_count >= 3);
         check("scale=11 covered", scale3_count >= 2);
         check("EAX covered as index", index_seen[3'h0]);
@@ -776,42 +703,37 @@ module tb_rung6_mov_sib_index_base;
         check("EBP covered as index", index_seen[3'h5]);
         check("ESI covered as index", index_seen[3'h6]);
         check("EDI covered as index", index_seen[3'h7]);
-        check("EAX covered as base", base_seen[3'h0]);
-        check("ECX covered as base", base_seen[3'h1]);
-        check("EDX covered as base", base_seen[3'h2]);
-        check("EBX covered as base", base_seen[3'h3]);
-        check("ESP covered as base", base_seen[3'h4]);
-        check("EBP covered as base", base_seen[3'h5]);
-        check("ESI covered as base", base_seen[3'h6]);
-        check("EDI covered as base", base_seen[3'h7]);
+        check("SIB.base=101 and ModRM.mod=00 covered for indexed forms",
+              nobase_index_ea_count == 13);
         check("SIB.index=100 remains no-index", no_index_ea_count == 1);
-        check("no-index SIB ignored ESP as index", no_index_t2_exact_count == 1);
-        check("LOAD_RM8 issued for indexed memory-source", load_rm8_count == 2);
-        check("LOAD_RM16 issued for indexed memory-source", load_rm16_count == 2);
-        check("LOAD_RM32 issued for indexed/no-index memory-source", load_rm32_count == 4);
-        check("STORE_RM8 issued for indexed stores", store_rm8_count == 2);
-        check("STORE_RM16 issued for indexed stores", store_rm16_count == 2);
-        check("STORE_RM32 issued for indexed stores", store_rm32_count == 2);
-        check("FETCH_IMM8 issued for C6 indexed SIB form", fetch_imm8_count >= 1);
-        check("FETCH_IMM16 issued for 66+C7 indexed SIB form", fetch_imm16_count >= 1);
-        check("FETCH_IMM32 issued for C7 indexed SIB form and setup", fetch_imm32_count >= 1);
-        check("CM_MOV_REG used for register destinations", cm_mov_reg_count >= 12);
+        check("no-index form ignored ESP as index", no_index_t2_exact_count == 1);
+        check("LOAD_RM8 issued for no-base indexed memory-source", load_rm8_count == 2);
+        check("LOAD_RM16 issued for no-base indexed memory-source", load_rm16_count == 2);
+        check("LOAD_RM32 issued for no-base indexed/no-index memory-source", load_rm32_count == 4);
+        check("STORE_RM8 issued for no-base indexed stores", store_rm8_count == 2);
+        check("STORE_RM16 issued for no-base indexed stores", store_rm16_count == 2);
+        check("STORE_RM32 issued for no-base indexed stores", store_rm32_count == 2);
+        check("FETCH_IMM8 issued for C6 no-base indexed form", fetch_imm8_count >= 1);
+        check("FETCH_IMM16 issued for 66+C7 no-base indexed form", fetch_imm16_count >= 1);
+        check("FETCH_IMM32 issued for C7 no-base indexed form and setup", fetch_imm32_count >= 1);
+        check("CM_MOV_REG used for register destinations", cm_mov_reg_count >= 22);
         check("CM_NOP|CM_EIP used for memory destinations", cm_nop_eip_count >= 6);
         check("STORE_RM8 byte enable observed", byteen_0001_count >= 2);
         check("STORE_RM16 byte enable observed", byteen_0011_count >= 2);
         check("STORE_RM32 byte enable observed", byteen_1111_count >= 2);
 
         check("final GPR state matches expected", gprs_match_expected());
-        check("8A r8,[EAX+ECX] loaded final byte", dut.u_commit.gpr_r[3'h3][7:0] == 8'h7C);
-        check("66 8B r16,[EBP+ESI*2+4] loaded final word", dut.u_commit.gpr_r[3'h7][15:0] == 16'hCAFE);
-        check("8B r32,[EAX+ECX*4+16] loaded final dword", dut.u_commit.gpr_r[3'h1] == 32'hCAFEBABE);
-        check("88 [EDX+EAX], CL wrote byte", read_mem32(ea_e) == 32'h1111115A);
-        check("89 [ESI+EDX*2+8], EBX wrote dword", read_mem32(ea_f) == 32'h55667788);
-        check("66 89 [EDI+EBX*4+16], SI wrote word", read_mem32(ea_g) == 32'h3333CAFE);
-        check("C6 [ECX+EAX*8-8], imm8 wrote byte", read_mem32(ea_h) == 32'h4444445A);
-        check("C7 [EBP+EDI*2+4], imm32 wrote dword", read_mem32(ea_i) == 32'h11223344);
-        check("66 C7 [ESP+ESI*4+32], imm16 wrote word", read_mem32(ea_j) == 32'h6666BEEF);
-        check("index=100 no-index form loaded base-only address", dut.u_commit.gpr_r[3'h2] == 32'hABCDEF01);
+        check("8A r8,[disp32+EAX] loaded final byte", dut.u_commit.gpr_r[3'h3][7:0] == 8'h7C);
+        check("66 8B r16,[disp32+ECX*2] loaded final word", dut.u_commit.gpr_r[3'h7][15:0] == 16'hCAFE);
+        check("8B r32,[disp32+ESI*4] loaded final dword", dut.u_commit.gpr_r[3'h2] == 32'hCAFEBABE);
+        check("88 [disp32+EBP], AL wrote byte", read_mem32(ea_e) == 32'h111111D4);
+        check("89 [disp32+ESI*2], EDI wrote dword", read_mem32(ea_f) == 32'h55667788);
+        check("66 89 [disp32+EDI*4], SI wrote word", read_mem32(ea_g) == 32'h3333BEEF);
+        check("C6 [disp32+EAX*8], imm8 wrote byte", read_mem32(ea_h) == 32'h4444445A);
+        check("C7 [disp32+ECX*4], imm32 wrote dword", read_mem32(ea_i) == 32'h11223344);
+        check("66 C7 [disp32+EDX*2], imm16 wrote word", read_mem32(ea_j) == 32'h6666CAFE);
+        check("index=100 no-index form loaded disp32-only address",
+              dut.u_commit.gpr_r[3'h5] == 32'hABCDEF01);
 
         if (failures == 0) begin
             $display("RESULT: ALL TESTS PASSED");

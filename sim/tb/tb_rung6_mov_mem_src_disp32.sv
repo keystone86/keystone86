@@ -510,14 +510,8 @@ module tb_rung6_mov_mem_src_disp32;
             end
         end
 
-        run_unsupported_form(7, 8'h8A, 8'h04, 8'h05, 8'h00, 8'h30, 8'h00, 8'h00,
-                             "8A no-base indexed SIB");
-        run_unsupported_form(7, 8'h8B, 8'h04, 8'h05, 8'h00, 8'h30, 8'h00, 8'h00,
-                             "8B no-base indexed SIB");
         run_unsupported_form(7, 8'h66, 8'h8A, 8'h05, 8'h00, 8'h30, 8'h00, 8'h00,
                              "66+8A memory-source byte");
-        run_unsupported_form(8, 8'h66, 8'h8B, 8'h04, 8'h05, 8'h00, 8'h30, 8'h00,
-                             "66+8B no-base indexed SIB");
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 6A-1 MOV mem-source disp32 smoke completed");

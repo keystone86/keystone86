@@ -510,12 +510,6 @@ module tb_rung6_mov_imm_reg_mod11;
         run_unsupported_form(6, 8'hC7, 8'hC8, 8'h78, 8'h56, 8'h34, 8'h12,
                              8'h00, 8'h00, 8'h00, 8'h00,
                              "C7 non-/0 ModRM.mod=11", 1'b0);
-        run_unsupported_form(8, 8'hC6, 8'h04, 8'h05, 8'h00, 8'h50, 8'h00,
-                             8'h00, 8'h12, 8'h00, 8'h00,
-                             "C6 no-base indexed SIB immediate-to-memory", 1'b0);
-        run_unsupported_form(10, 8'hC7, 8'h04, 8'h05, 8'h00, 8'h51, 8'h00,
-                             8'h00, 8'h78, 8'h56, 8'h34,
-                             "C7 no-base indexed SIB immediate-to-memory", 1'b0);
         run_unsupported_form(4, 8'h66, 8'hC6, 8'hC0, 8'h12, 8'h00, 8'h00,
                              8'h00, 8'h00, 8'h00, 8'h00,
                              "66+C6 ModRM.mod=11", 1'b0);

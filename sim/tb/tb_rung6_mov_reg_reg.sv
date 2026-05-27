@@ -428,11 +428,6 @@ module tb_rung6_mov_reg_reg;
             end
         end
 
-        run_unsupported_form(8'h88, 8'h04, 8'h05, "88 no-base indexed SIB memory");
-        run_unsupported_form(8'h89, 8'h04, 8'h05, "89 no-base indexed SIB memory");
-        run_unsupported_form(8'h8A, 8'h04, 8'h05, "8A no-base indexed SIB memory");
-        run_unsupported_form(8'h8B, 8'h04, 8'h05, "8B no-base indexed SIB memory");
-
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 5A MOV register-register smoke completed");
         end else begin

@@ -431,10 +431,6 @@ module tb_rung6_mov_sib_nobase_disp32;
 
         clear_memory();
 
-        run_unsupported_form(7, 8'h8B, 8'h04, 8'h2D, 8'h00, 8'h20, 8'h00, 8'h00,
-                             "SIB.index!=100 no-base form", 1'b0);
-        run_unsupported_form(7, 8'h8B, 8'h04, 8'h6D, 8'h00, 8'h20, 8'h00, 8'h00,
-                             "scaled indexed SIB no-base form", 1'b0);
         run_unsupported_form(1, 8'h67, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
                              "0x67 prefix byte", 1'b1);
         run_unsupported_form(7, 8'hC7, 8'h0C, 8'h25, 8'h00, 8'h20, 8'h00, 8'h00,

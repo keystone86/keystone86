@@ -438,8 +438,6 @@ module tb_rung6_mov_base_disp32;
 
         clear_memory();
 
-        run_unsupported_form(3, 8'h8B, 8'h04, 8'h05, 8'h00, 8'h00, 8'h00,
-                             "no-base indexed SIB", 1'b0);
         run_unsupported_form(1, 8'h67, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00,
                              "0x67 prefix byte", 1'b1);
         run_unsupported_form(7, 8'hC7, 8'h8D, 8'h08, 8'h00, 8'h00, 8'h00,
