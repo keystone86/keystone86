@@ -547,7 +547,8 @@ module tb_rung6_mov_imm_mem_disp32;
                              "66+C6 immediate-to-memory", 1'b0);
         run_unsupported_form(10, 8'h67, 8'hC7, 8'h05, 8'h00, 8'h51, 8'h00,
                              8'h00, 8'h78, 8'h56, 8'h34,
-                             "67-prefixed C7 immediate-to-memory", 1'b1);
+                             "67-prefixed unsupported r/m=101 C7 immediate-to-memory",
+                             1'b0);
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 6C-1 MOV imm-to-mem disp32 smoke completed");

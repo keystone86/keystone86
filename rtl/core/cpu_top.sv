@@ -1,12 +1,12 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 6 Pass 6G-2 top-level with service-based control-transfer paths,
+// Rung 6 Pass 6H-1 top-level with service-based control-transfer paths,
 // bounded MOV immediate/register-register slices, direct-disp32 memory MOV,
 // base-only no-displacement memory MOV, signed-disp8 memory MOV, signed
 // disp32 base memory MOV, bounded base-only SIB memory MOV, bounded no-base
 // SIB disp32 MOV, bounded base-present indexed SIB MOV, and bounded no-base
-// indexed SIB disp32 MOV.
+// indexed SIB disp32 MOV, plus 0x67 direct disp16 MOV through EA_CALC_16.
 
 import keystone86_pkg::*;
 
@@ -92,6 +92,7 @@ module cpu_top (
     logic [15:0] dec_payload16;
     logic [7:0]  dec_opcode_class;
     logic [1:0]  dec_opsz;
+    logic        dec_addrsz;
     logic [2:0]  dec_imm_class;
     logic [2:0]  dec_reg_dst;
     logic [2:0]  dec_reg_src;
@@ -276,6 +277,7 @@ module cpu_top (
     logic [3:0]  meta_cond_code;
     logic [7:0]  meta_opcode_class_r;
     logic [1:0]  meta_opsz_r;
+    logic        meta_addrsz_r;
     logic [2:0]  meta_imm_class_r;
     logic [2:0]  meta_reg_dst_r;
     logic [2:0]  meta_reg_src_r;
@@ -347,10 +349,13 @@ module cpu_top (
     // forms select the base register; Pass 6G-1 indexed SIB forms first select
     // SIB.base, then SIB.index on a wait cycle. The no-base SIB disp32 forms
     // either ignore the read value (index=100) or select SIB.index directly
-    // (Pass 6G-2). No second architectural read owner is introduced.
-    assign gpr_rd_idx  = (ea_svc_id == EA_CALC_32) ? ea_base_gpr_rd_idx :
+    // (Pass 6G-2). EA_CALC_16 direct disp16 does not consume the read value.
+    // No second architectural read owner is introduced.
+    assign gpr_rd_idx  = ((ea_svc_id == EA_CALC_32) ||
+                          (ea_svc_id == EA_CALC_16)) ? ea_base_gpr_rd_idx :
                                                         ls_gpr_rd_idx;
-    assign gpr_rd_opsz = (ea_svc_id == EA_CALC_32) ? 2'h2 :
+    assign gpr_rd_opsz = ((ea_svc_id == EA_CALC_32) ||
+                          (ea_svc_id == EA_CALC_16)) ? 2'h2 :
                                                         ls_gpr_rd_opsz;
 
     always_ff @(posedge clk or negedge reset_n) begin
@@ -393,6 +398,7 @@ module cpu_top (
             meta_disp_value_r    <= 32'h0;
             meta_opcode_class_r  <= 8'h0;
             meta_opsz_r          <= 2'h0;
+            meta_addrsz_r        <= 1'b1;
             meta_imm_class_r     <= 3'h0;
             meta_reg_dst_r       <= 3'h0;
             meta_reg_src_r       <= 3'h0;
@@ -406,6 +412,7 @@ module cpu_top (
                 meta_disp_value_r    <= dec_disp_value;
                 meta_opcode_class_r  <= dec_opcode_class;
                 meta_opsz_r          <= dec_opsz;
+                meta_addrsz_r        <= dec_addrsz;
                 meta_imm_class_r     <= dec_imm_class;
                 meta_reg_dst_r       <= dec_reg_dst;
                 meta_reg_src_r       <= dec_reg_src;
@@ -511,6 +518,7 @@ module cpu_top (
         .payload16    (dec_payload16),
         .opcode_class (dec_opcode_class),
         .opsz         (dec_opsz),
+        .addrsz       (dec_addrsz),
         .imm_class    (dec_imm_class),
         .reg_dst      (dec_reg_dst),
         .reg_src      (dec_reg_src),
@@ -575,6 +583,7 @@ module cpu_top (
         .t3_data         (t3_r),
         .meta_opcode_class_in(dec_opcode_class),
         .meta_opsz_in    (dec_opsz),
+        .meta_addrsz_in  (dec_addrsz),
         .meta_imm_class_in(dec_imm_class),
         .meta_modrm_class_in(dec_modrm_class),
         .meta_reg_dst_in (dec_reg_dst),
@@ -710,6 +719,7 @@ module cpu_top (
         .meta_modrm_byte  (meta_modrm_byte_r),
         .meta_sib_byte    (meta_sib_byte_r),
         .meta_modrm_class (meta_modrm_class_r),
+        .meta_addrsz      (meta_addrsz_r),
         .meta_disp_value  (meta_disp_value_r),
         .base_gpr_rd_idx  (ea_base_gpr_rd_idx),
         .base_gpr_rd_val  (gpr_rd_val),
@@ -726,6 +736,7 @@ module cpu_top (
         .svc_sr           (ls_svc_sr),
         .meta_opcode_class(meta_opcode_class_r),
         .meta_opsz        (meta_opsz_r),
+        .meta_addrsz      (meta_addrsz_r),
         .meta_modrm_byte  (meta_modrm_byte_r),
         .meta_sib_byte    (meta_sib_byte_r),
         .meta_modrm_class (meta_modrm_class_r),

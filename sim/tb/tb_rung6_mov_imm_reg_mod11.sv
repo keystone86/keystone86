@@ -515,7 +515,7 @@ module tb_rung6_mov_imm_reg_mod11;
                              "66+C6 ModRM.mod=11", 1'b0);
         run_unsupported_form(7, 8'h67, 8'hC7, 8'hC0, 8'h78, 8'h56, 8'h34,
                              8'h12, 8'h00, 8'h00, 8'h00,
-                             "67-prefixed C7 ModRM.mod=11", 1'b1);
+                             "67-prefixed C7 ModRM.mod=11", 1'b0);
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 6D-1 MOV imm-to-reg ModRM.mod=11 smoke completed");

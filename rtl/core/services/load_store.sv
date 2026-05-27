@@ -20,7 +20,9 @@
 // additionally allows only the mod=00 SIB.index=100
 // SIB.base=101 no-base disp32 special case. Pass 6G-1 additionally allows
 // base-present indexed SIB forms. Pass 6G-2 additionally allows no-base
-// indexed SIB disp32 forms.
+// indexed SIB disp32 forms. Pass 6H-1 additionally allows only 0x67
+// address-size direct disp16 forms after EA_CALC_16 has staged the
+// zero-extended offset in T2.
 
 import keystone86_pkg::*;
 
@@ -35,6 +37,7 @@ module load_store (
 
     input  logic [7:0]  meta_opcode_class,
     input  logic [1:0]  meta_opsz,
+    input  logic        meta_addrsz,
     input  logic [7:0]  meta_modrm_byte,
     input  logic [7:0]  meta_sib_byte,
     input  logic [3:0]  meta_modrm_class,
@@ -76,6 +79,7 @@ module load_store (
     localparam logic [3:0] MRM_MEM_NO_DISP = 4'h1;
     localparam logic [3:0] MRM_MEM_DISP8 = 4'h2;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
+    localparam logic [3:0] MRM_DIRECT16 = 4'h8;
     localparam logic [3:0] MRM_SIB = 4'h5;
     localparam logic [3:0] MRM_SIB_DISP8 = 4'h6;
     localparam logic [3:0] MRM_SIB_DISP32 = 4'h7;
@@ -126,26 +130,37 @@ module load_store (
     assign pc_gpr_val = pc_gpr_val_r;
 
     function automatic logic is_direct_disp32_mem_form;
-        return (meta_modrm_class == MRM_MEM_DISP32) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_MEM_DISP32) &&
                (meta_modrm_byte[7:6] == 2'b00) &&
                (meta_modrm_byte[2:0] == 3'b101);
     endfunction
 
+    function automatic logic is_direct_disp16_mem_form;
+        return !meta_addrsz &&
+               (meta_modrm_class == MRM_DIRECT16) &&
+               (meta_modrm_byte[7:6] == 2'b00) &&
+               (meta_modrm_byte[2:0] == 3'b110);
+    endfunction
+
     function automatic logic is_base_nodisp_mem_form;
-        return (meta_modrm_class == MRM_MEM_NO_DISP) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_MEM_NO_DISP) &&
                (meta_modrm_byte[7:6] == 2'b00) &&
                (meta_modrm_byte[2:0] != 3'b100) &&
                (meta_modrm_byte[2:0] != 3'b101);
     endfunction
 
     function automatic logic is_base_disp8_mem_form;
-        return (meta_modrm_class == MRM_MEM_DISP8) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_MEM_DISP8) &&
                (meta_modrm_byte[7:6] == 2'b01) &&
                (meta_modrm_byte[2:0] != 3'b100);
     endfunction
 
     function automatic logic is_base_disp32_mem_form;
-        return (meta_modrm_class == MRM_MEM_DISP32) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_MEM_DISP32) &&
                (meta_modrm_byte[7:6] == 2'b10) &&
                (meta_modrm_byte[2:0] != 3'b100);
     endfunction
@@ -155,14 +170,16 @@ module load_store (
     endfunction
 
     function automatic logic is_sib_nodisp_mem_form;
-        return (meta_modrm_class == MRM_SIB) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_SIB) &&
                (meta_modrm_byte[7:6] == 2'b00) &&
                (meta_modrm_byte[2:0] == 3'b100) &&
                (meta_sib_byte[2:0] != 3'b101);
     endfunction
 
     function automatic logic is_sib_nobase_disp32_mem_form;
-        return (meta_modrm_class == MRM_SIB) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_SIB) &&
                (meta_modrm_byte[7:6] == 2'b00) &&
                (meta_modrm_byte[2:0] == 3'b100) &&
                sib_index_none() &&
@@ -170,7 +187,8 @@ module load_store (
     endfunction
 
     function automatic logic is_sib_index_nobase_disp32_mem_form;
-        return (meta_modrm_class == MRM_SIB) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_SIB) &&
                (meta_modrm_byte[7:6] == 2'b00) &&
                (meta_modrm_byte[2:0] == 3'b100) &&
                !sib_index_none() &&
@@ -178,19 +196,22 @@ module load_store (
     endfunction
 
     function automatic logic is_sib_disp8_mem_form;
-        return (meta_modrm_class == MRM_SIB_DISP8) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_SIB_DISP8) &&
                (meta_modrm_byte[7:6] == 2'b01) &&
                (meta_modrm_byte[2:0] == 3'b100);
     endfunction
 
     function automatic logic is_sib_disp32_mem_form;
-        return (meta_modrm_class == MRM_SIB_DISP32) &&
+        return meta_addrsz &&
+               (meta_modrm_class == MRM_SIB_DISP32) &&
                (meta_modrm_byte[7:6] == 2'b10) &&
                (meta_modrm_byte[2:0] == 3'b100);
     endfunction
 
     function automatic logic is_authorized_mem_form;
         return is_direct_disp32_mem_form() ||
+               is_direct_disp16_mem_form() ||
                is_base_nodisp_mem_form() ||
                is_base_disp8_mem_form() ||
                is_base_disp32_mem_form() ||

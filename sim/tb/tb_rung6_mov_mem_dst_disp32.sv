@@ -615,7 +615,7 @@ module tb_rung6_mov_mem_dst_disp32;
         run_unsupported_form(7, 8'h66, 8'h88, 8'h05, 8'h00, 8'h40, 8'h00, 8'h00,
                              "66+88 memory destination", 1'b0);
         run_unsupported_form(7, 8'h67, 8'h89, 8'h05, 8'h00, 8'h40, 8'h00, 8'h00,
-                             "67-prefixed memory destination", 1'b1);
+                             "67-prefixed unsupported r/m=101 memory destination", 1'b0);
 
         if (failures == 0) begin
             $display("PASS: Rung 6 Pass 6B-1 MOV mem-destination disp32 smoke completed");

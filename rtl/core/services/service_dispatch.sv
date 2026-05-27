@@ -8,6 +8,8 @@
 //     independent of whether svc_req is still high.
 //   - LOAD_RM32 remains routed to operand_engine for the older CALL path unless
 //     MOV memory-source metadata selects the Rung 6 load_store path.
+//   - EA_CALC_16 and EA_CALC_32 share the existing effective-address service
+//     path.
 //   - STORE_RM8/16/32 are bounded Rung 6 MOV memory-destination services and
 //     route directly to load_store.
 
@@ -111,6 +113,7 @@ module service_dispatch (
                     use_operand = 1'b1;
             end
 
+            EA_CALC_16,
             EA_CALC_32: begin
                 use_ea = 1'b1;
             end

@@ -96,6 +96,7 @@ module microsequencer (
     // --- Metadata latch outputs (to services) ---
     input  logic [7:0]  meta_opcode_class_in,
     input  logic [1:0]  meta_opsz_in,
+    input  logic        meta_addrsz_in,
     input  logic [2:0]  meta_imm_class_in,
     input  logic [3:0]  meta_modrm_class_in,
     input  logic [2:0]  meta_reg_dst_in,
@@ -151,6 +152,7 @@ module microsequencer (
     logic [3:0]  cond_code_r;
     logic [7:0]  meta_opcode_class_r;
     logic [1:0]  meta_opsz_r;
+    logic        meta_addrsz_r;
     logic [2:0]  meta_imm_class_r;
     logic [3:0]  meta_modrm_class_r;
     logic [2:0]  meta_reg_dst_r;
@@ -220,6 +222,8 @@ module microsequencer (
             C_W8:     br_taken = (meta_opsz_r == 2'h0);
             C_T3Z:    br_taken = (t3_data == 32'h0);
             C_T3NZ:   br_taken = (t3_data != 32'h0);
+            C_ADDR16: br_taken = (meta_addrsz_r == 1'b0);
+            C_ADDR32: br_taken = (meta_addrsz_r == 1'b1);
             default:  br_taken = 1'b0;
         endcase
     end
@@ -261,6 +265,7 @@ module microsequencer (
             sr_r                  <= SR_OK;
             meta_opcode_class_r   <= 8'h00;
             meta_opsz_r           <= 2'h0;
+            meta_addrsz_r         <= 1'b1;
             meta_imm_class_r      <= 3'h0;
             meta_modrm_class_r    <= 4'hF;
             meta_reg_dst_r        <= 3'h0;
@@ -283,6 +288,7 @@ module microsequencer (
                         cond_code_r          <= cond_code_in;
                         meta_opcode_class_r  <= meta_opcode_class_in;
                         meta_opsz_r          <= meta_opsz_in;
+                        meta_addrsz_r        <= meta_addrsz_in;
                         meta_imm_class_r     <= meta_imm_class_in;
                         meta_modrm_class_r   <= meta_modrm_class_in;
                         meta_reg_dst_r       <= meta_reg_dst_in;

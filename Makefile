@@ -143,6 +143,8 @@ help:
 	@echo "  make rung6-pass6g1-clean   - remove Rung 6 Pass 6G-1 simulation artifacts"
 	@echo "  make rung6-pass6g2-sim     - compile and run bounded Rung 6 Pass 6G-2 MOV no-base indexed SIB simulation"
 	@echo "  make rung6-pass6g2-clean   - remove Rung 6 Pass 6G-2 simulation artifacts"
+	@echo "  make rung6-pass6h1-sim     - compile and run bounded Rung 6 Pass 6H-1 MOV addr16 direct disp16 simulation"
+	@echo "  make rung6-pass6h1-clean   - remove Rung 6 Pass 6H-1 simulation artifacts"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -920,6 +922,28 @@ rung6-pass6g2-sim: require-container ucode
 rung6-pass6g2-clean: require-container
 	@rm -rf build/sim/rung6_pass6g2
 	@echo "Rung 6 Pass 6G-2 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 Pass 6H-1 — bounded MOV address-size direct disp16 slice
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_PASS6H1 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_addr16_direct.sv
+
+rung6-pass6h1-sim: require-container ucode
+	@echo "--- Rung 6 Pass 6H-1: compiling bounded MOV addr16 direct disp16 RTL simulation ---"
+	@mkdir -p build/sim/rung6_pass6h1
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_pass6h1/tb_rung6_mov_addr16_direct.vvp \
+		$(IVERILOG_SOURCES_RUNG6_PASS6H1)
+	@echo "--- Rung 6 Pass 6H-1: running bounded MOV addr16 direct disp16 simulation ---"
+	vvp build/sim/rung6_pass6h1/tb_rung6_mov_addr16_direct.vvp
+
+rung6-pass6h1-clean: require-container
+	@rm -rf build/sim/rung6_pass6h1
+	@echo "Rung 6 Pass 6H-1 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything
