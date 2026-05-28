@@ -5,8 +5,9 @@
 // bounded MOV immediate/register-register slices, direct-disp32 memory MOV,
 // base-only no-displacement memory MOV, signed-disp8 memory MOV, signed
 // disp32 base memory MOV, bounded base-only SIB memory MOV, bounded no-base
-// SIB disp32 MOV, bounded base-present indexed SIB MOV, and bounded no-base
-// indexed SIB disp32 MOV, plus 0x67 direct disp16 MOV through EA_CALC_16.
+// SIB disp32 MOV, bounded base-present indexed SIB MOV, bounded no-base
+// indexed SIB disp32 MOV, 0x67 direct disp16 MOV, and 0x67 no-displacement
+// non-BP 16-bit MOV forms through EA_CALC_16.
 
 import keystone86_pkg::*;
 
@@ -185,7 +186,8 @@ module cpu_top (
 
     // ea_calc side: bounded EA_CALC_32 direct disp32 plus default-32
     // base-only, base+disp8, base+disp32 non-SIB forms, base-only SIB,
-    // no-base SIB disp32, base-present indexed SIB, and no-base indexed SIB.
+    // no-base SIB disp32, base-present indexed SIB, no-base indexed SIB,
+    // and the bounded 0x67 16-bit no-displacement non-BP forms.
     logic [7:0]  ea_svc_id;
     logic        ea_svc_req;
     logic        ea_svc_done;
@@ -195,8 +197,9 @@ module cpu_top (
 
     // load_store side: register metadata plus bounded memory-source LOAD_RM*
     // and memory-destination STORE_RM* direct-disp32/base-only/base+disp8/
-    // base+disp32 operations, plus the bounded base-only, no-base, and
-    // base-present indexed SIB and no-base indexed SIB subsets.
+    // base+disp32 operations, plus the bounded base-only, no-base,
+    // base-present indexed SIB, no-base indexed SIB, and 0x67 16-bit
+    // no-displacement non-BP subsets.
     logic [7:0]  ls_svc_id;
     logic        ls_svc_req;
     logic        ls_svc_done;
@@ -349,8 +352,10 @@ module cpu_top (
     // forms select the base register; Pass 6G-1 indexed SIB forms first select
     // SIB.base, then SIB.index on a wait cycle. The no-base SIB disp32 forms
     // either ignore the read value (index=100) or select SIB.index directly
-    // (Pass 6G-2). EA_CALC_16 direct disp16 does not consume the read value.
-    // No second architectural read owner is introduced.
+    // (Pass 6G-2). EA_CALC_16 direct disp16 does not consume the read value;
+    // Pass 6H-2 no-displacement non-BP forms use this same single read path,
+    // sequencing [BX+SI] and [BX+DI] internally. No second architectural read
+    // owner is introduced.
     assign gpr_rd_idx  = ((ea_svc_id == EA_CALC_32) ||
                           (ea_svc_id == EA_CALC_16)) ? ea_base_gpr_rd_idx :
                                                         ls_gpr_rd_idx;

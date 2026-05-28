@@ -545,9 +545,9 @@ module tb_rung6_mov_imm_mem_disp32;
         run_unsupported_form(8, 8'h66, 8'hC6, 8'h05, 8'h00, 8'h50, 8'h00,
                              8'h00, 8'h12, 8'h00, 8'h00,
                              "66+C6 immediate-to-memory", 1'b0);
-        run_unsupported_form(10, 8'h67, 8'hC7, 8'h05, 8'h00, 8'h51, 8'h00,
-                             8'h00, 8'h78, 8'h56, 8'h34,
-                             "67-prefixed unsupported r/m=101 C7 immediate-to-memory",
+        run_unsupported_form(3, 8'h67, 8'hC7, 8'h02, 8'h00, 8'h00, 8'h00,
+                             8'h00, 8'h00, 8'h00, 8'h00,
+                             "67-prefixed unsupported r/m=010 BP+SI C7 immediate-to-memory",
                              1'b0);
 
         if (failures == 0) begin

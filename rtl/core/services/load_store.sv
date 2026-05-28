@@ -22,7 +22,8 @@
 // base-present indexed SIB forms. Pass 6G-2 additionally allows no-base
 // indexed SIB disp32 forms. Pass 6H-1 additionally allows only 0x67
 // address-size direct disp16 forms after EA_CALC_16 has staged the
-// zero-extended offset in T2.
+// zero-extended offset in T2. Pass 6H-2 additionally allows only 0x67
+// address-size no-displacement non-BP forms after EA_CALC_16 has staged T2.
 
 import keystone86_pkg::*;
 
@@ -143,6 +144,21 @@ module load_store (
                (meta_modrm_byte[2:0] == 3'b110);
     endfunction
 
+    function automatic logic is_addr16_nobp_nodisp_mem_form;
+        if (meta_addrsz ||
+            (meta_modrm_class != MRM_MEM_NO_DISP) ||
+            (meta_modrm_byte[7:6] != 2'b00))
+            return 1'b0;
+        case (meta_modrm_byte[2:0])
+            3'b000, // [BX+SI]
+            3'b001, // [BX+DI]
+            3'b100, // [SI]
+            3'b101, // [DI]
+            3'b111: return 1'b1; // [BX]
+            default: return 1'b0;
+        endcase
+    endfunction
+
     function automatic logic is_base_nodisp_mem_form;
         return meta_addrsz &&
                (meta_modrm_class == MRM_MEM_NO_DISP) &&
@@ -212,6 +228,7 @@ module load_store (
     function automatic logic is_authorized_mem_form;
         return is_direct_disp32_mem_form() ||
                is_direct_disp16_mem_form() ||
+               is_addr16_nobp_nodisp_mem_form() ||
                is_base_nodisp_mem_form() ||
                is_base_disp8_mem_form() ||
                is_base_disp32_mem_form() ||

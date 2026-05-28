@@ -34,8 +34,11 @@
 //     forms. Pass 6G-2 additionally accepts no-base indexed SIB disp32.
 //     Pass 6H-1 additionally accepts 0x67 address-size override only for
 //     16-bit direct disp16 MOV forms with ModRM.mod=00 and ModRM.r/m=110.
-//     Other 16-bit addressing forms, segment-base addition, protected/page
-//     behavior, and Rung 7 behavior remain unsupported.
+//     Pass 6H-2 additionally accepts only 0x67 16-bit no-displacement
+//     non-BP register-based forms with ModRM.mod=00 and
+//     r/m=000/001/100/101/111. BP forms, 16-bit mod=01/mod=10,
+//     segment-base addition, protected/page behavior, and Rung 7 behavior
+//     remain unsupported.
 //   - For the bounded Pass 6B-1 memory-destination slice, accept only 88/89
 //     and 66+89 with ModRM.mod=00 and r/m=101, consume the disp32 absolute
 //     address, and report M_NEXT_EIP after that displacement. Pass 6E-1
@@ -48,7 +51,8 @@
 //     SIB.index=100 SIB.base=101 no-base disp32 special case. Pass 6G-1
 //     additionally accepts base-present indexed SIB. Pass 6G-2 additionally
 //     accepts no-base indexed SIB disp32. Pass 6H-1 adds only 0x67 direct
-//     disp16 memory-destination forms.
+//     disp16 memory-destination forms. Pass 6H-2 adds only the authorized
+//     0x67 no-displacement non-BP memory-destination forms.
 //   - For the bounded Pass 6C-1 immediate-to-memory slice, accept only C6/C7
 //     /0 with ModRM.mod=00 and r/m=101, consume the disp32 absolute address,
 //     and report M_NEXT_EIP after the immediate. Pass 6E-1 additionally
@@ -61,7 +65,8 @@
 //     SIB.base=101 no-base disp32 special case. Pass 6G-1 additionally
 //     accepts base-present indexed SIB. Pass 6G-2 additionally accepts
 //     no-base indexed SIB disp32. Pass 6H-1 adds only 0x67 direct disp16
-//     immediate-to-memory forms.
+//     immediate-to-memory forms. Pass 6H-2 adds only the authorized 0x67
+//     no-displacement non-BP immediate-to-memory forms.
 //     For Pass 6D-1, also accept C6/C7 /0 with ModRM.mod=11 as
 //     register-destination MOV and report M_NEXT_EIP after the immediate.
 //     FETCH_IMM* remains the microcode-called service that consumes the
@@ -292,9 +297,10 @@ module decoder (
                             prefix_count    <= 2'd2;
                         end else if (prefix_opcode_candidate(q_data)) begin
                             // Prefix support remains bounded. Pass 6H-1 adds
-                            // 0x67 and the 66+67 order only for direct disp16
-                            // MOV forms; unsupported prefix ordering is left
-                            // as a prefix-only boundary.
+                            // 0x67/66+67 direct disp16 MOV forms; Pass 6H-2
+                            // also allows no-displacement non-BP addr16 forms.
+                            // Unsupported prefix ordering remains a prefix-only
+                            // boundary.
                             opcode_byte_latch <= q_data;
                             is_jmp_short      <= 1'b0;
                             is_jmp_near       <= 1'b0;
@@ -540,11 +546,11 @@ module decoder (
 
             if (mod_bits == 2'b11)
                 return 3'd0;
-            if (prefix67_active) begin
-                if ((mod_bits == 2'b00) && (rm_bits == 3'b110))
-                    return 3'd2;
-                return 3'd0;
-            end
+        if (prefix67_active) begin
+            if ((mod_bits == 2'b00) && (rm_bits == 3'b110))
+                return 3'd2;
+            return 3'd0;
+        end
             if (mod_bits == 2'b01)
                 return 3'd1;
             if (mod_bits == 2'b10)
@@ -574,6 +580,8 @@ module decoder (
             return 4'h0; // MRM_REG
         if (prefix67_active && (m[7:6] == 2'b00) && (m[2:0] == 3'b110))
             return 4'h8; // MRM_DIRECT16
+        if (prefix67_active && addr16_nobp_nodisp_form(m))
+            return 4'h1; // MRM_MEM_NO_DISP for the bounded 16-bit no-disp subset
         if (prefix67_active)
             return 4'hF; // Unsupported 16-bit addressing forms stay unrouted.
         if (modrm_needs_sib(m)) begin
@@ -1069,13 +1077,26 @@ module decoder (
         return (m[7:6] == 2'b00) && (m[2:0] == 3'b110);
     endfunction
 
+    function automatic logic addr16_nobp_nodisp_form(input logic [7:0] m);
+        if (m[7:6] != 2'b00)
+            return 1'b0;
+        case (m[2:0])
+            3'b000, // [BX+SI]
+            3'b001, // [BX+DI]
+            3'b100, // [SI]
+            3'b101, // [DI]
+            3'b111: return 1'b1; // [BX]
+            default: return 1'b0;
+        endcase
+    endfunction
+
     function automatic logic mov_mem_src_direct16_form(
         input logic [7:0] op,
         input logic [7:0] m,
         input logic       pref66,
         input logic       addr16
     );
-        if (!addr16 || !direct16_addr_form(m))
+        if (!addr16 || !(direct16_addr_form(m) || addr16_nobp_nodisp_form(m)))
             return 1'b0;
         if (pref66)
             return (op == 8'h8B);
@@ -1088,7 +1109,7 @@ module decoder (
         input logic       pref66,
         input logic       addr16
     );
-        if (!addr16 || !direct16_addr_form(m))
+        if (!addr16 || !(direct16_addr_form(m) || addr16_nobp_nodisp_form(m)))
             return 1'b0;
         if (pref66)
             return (op == 8'h89);
@@ -1101,7 +1122,9 @@ module decoder (
         input logic       pref66,
         input logic       addr16
     );
-        if (!addr16 || !direct16_addr_form(m) || (m[5:3] != 3'b000))
+        if (!addr16 ||
+            !(direct16_addr_form(m) || addr16_nobp_nodisp_form(m)) ||
+            (m[5:3] != 3'b000))
             return 1'b0;
         if (pref66)
             return (op == 8'hC7);
@@ -1188,7 +1211,7 @@ module decoder (
 
     function automatic logic [31:0] mov_modrm_length();
         return modrm_offset() + 32'd1 +
-               (modrm_needs_sib(modrm_latch) ? 32'd1 : 32'd0) +
+               (modrm_needs_sib_addr(modrm_latch) ? 32'd1 : 32'd0) +
                {29'h0, disp_total};
     endfunction
 

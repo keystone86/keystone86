@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/services/ea_calc.sv
 //
-// Bounded Rung 6 Pass 6H-1 effective-address service.
+// Bounded Rung 6 effective-address service through Pass 6H-2.
 //
 // This slice implements only EA_CALC_32 for:
 //   ModRM.mod=00, ModRM.r/m=101
@@ -19,8 +19,12 @@
 //
 // Pass 6H-1 adds EA_CALC_16 only for 0x67 direct disp16 forms:
 //   ModRM.mod=00, ModRM.r/m=110, T2 = zero-extended disp16.
-// It does not implement BX/BP/SI/DI register-based addressing, segment-base
-// addition, protection checks, memory access, or Rung 7 behavior.
+// Pass 6H-2 adds only 0x67 16-bit no-displacement non-BP forms:
+//   r/m=000 [BX+SI], r/m=001 [BX+DI], r/m=100 [SI],
+//   r/m=101 [DI], and r/m=111 [BX].
+// Two-register forms sequence over the existing single committed-GPR read
+// path. BP forms, 16-bit mod=01/mod=10, segment-base addition, protection
+// checks, memory access, and Rung 7 behavior remain unsupported.
 
 import keystone86_pkg::*;
 
@@ -77,6 +81,8 @@ module ea_calc (
     logic        sib_index_disp32_mem_form_w;
     logic        sib_index_nobase_disp32_mem_form_w;
     logic        authorized_sib_mem_form_w;
+    logic        addr16_nobp_nodisp_mem_form_w;
+    logic        addr16_two_reg_mem_form_w;
 
     function automatic logic is_direct_disp32_mem_form;
         return meta_addrsz &&
@@ -90,6 +96,57 @@ module ea_calc (
                (meta_modrm_class == MRM_DIRECT16) &&
                (meta_modrm_byte[7:6] == 2'b00) &&
                (meta_modrm_byte[2:0] == 3'b110);
+    endfunction
+
+    function automatic logic is_addr16_nobp_nodisp_mem_form;
+        if (meta_addrsz ||
+            (meta_modrm_class != MRM_MEM_NO_DISP) ||
+            (meta_modrm_byte[7:6] != 2'b00))
+            return 1'b0;
+        case (meta_modrm_byte[2:0])
+            3'b000, // [BX+SI]
+            3'b001, // [BX+DI]
+            3'b100, // [SI]
+            3'b101, // [DI]
+            3'b111: return 1'b1; // [BX]
+            default: return 1'b0;
+        endcase
+    endfunction
+
+    function automatic logic is_addr16_two_reg_mem_form;
+        return is_addr16_nobp_nodisp_mem_form() &&
+               ((meta_modrm_byte[2:0] == 3'b000) ||
+                (meta_modrm_byte[2:0] == 3'b001));
+    endfunction
+
+    function automatic logic [2:0] addr16_first_gpr_idx;
+        case (meta_modrm_byte[2:0])
+            3'b000,
+            3'b001,
+            3'b111: return 3'h3; // EBX/BX
+            3'b100: return 3'h6; // ESI/SI
+            3'b101: return 3'h7; // EDI/DI
+            default: return 3'h0;
+        endcase
+    endfunction
+
+    function automatic logic [2:0] addr16_second_gpr_idx;
+        return (meta_modrm_byte[2:0] == 3'b001) ? 3'h7 : 3'h6; // DI or SI
+    endfunction
+
+    function automatic logic [31:0] zero_extend_low16(input logic [31:0] val);
+        return {16'h0000, val[15:0]};
+    endfunction
+
+    function automatic logic [31:0] add_addr16_terms(
+        input logic [31:0] a,
+        input logic [31:0] b
+    );
+        logic [15:0] sum16;
+        begin
+            sum16 = a[15:0] + b[15:0];
+            return {16'h0000, sum16};
+        end
     endfunction
 
     function automatic logic is_base_nodisp_mem_form;
@@ -274,14 +331,38 @@ module ea_calc (
                                        sib_index_disp8_mem_form_w ||
                                        sib_disp32_mem_form_w ||
                                        sib_index_disp32_mem_form_w;
+    assign addr16_nobp_nodisp_mem_form_w =
+        !meta_addrsz &&
+        (meta_modrm_class == MRM_MEM_NO_DISP) &&
+        (meta_modrm_byte[7:6] == 2'b00) &&
+        ((meta_modrm_byte[2:0] == 3'b000) ||
+         (meta_modrm_byte[2:0] == 3'b001) ||
+         (meta_modrm_byte[2:0] == 3'b100) ||
+         (meta_modrm_byte[2:0] == 3'b101) ||
+         (meta_modrm_byte[2:0] == 3'b111));
+    assign addr16_two_reg_mem_form_w =
+        addr16_nobp_nodisp_mem_form_w &&
+        ((meta_modrm_byte[2:0] == 3'b000) ||
+         (meta_modrm_byte[2:0] == 3'b001));
 
     assign svc_done   = done_r;
     assign svc_sr     = sr_r;
-    assign base_gpr_rd_idx = sib_index_nobase_disp32_mem_form_w ? meta_sib_byte[5:3] :
-                             ((state_r == EA_INDEX_READ) || (state_r == EA_INDEX_DONE)) ?
-                                                        meta_sib_byte[5:3] :
-                             authorized_sib_mem_form_w ? meta_sib_byte[2:0] :
-                                                         meta_modrm_byte[2:0];
+    always_comb begin
+        if (addr16_two_reg_mem_form_w &&
+            ((state_r == EA_INDEX_READ) || (state_r == EA_INDEX_DONE))) begin
+            base_gpr_rd_idx = addr16_second_gpr_idx();
+        end else if (addr16_nobp_nodisp_mem_form_w) begin
+            base_gpr_rd_idx = addr16_first_gpr_idx();
+        end else if (sib_index_nobase_disp32_mem_form_w) begin
+            base_gpr_rd_idx = meta_sib_byte[5:3];
+        end else if ((state_r == EA_INDEX_READ) || (state_r == EA_INDEX_DONE)) begin
+            base_gpr_rd_idx = meta_sib_byte[5:3];
+        end else if (authorized_sib_mem_form_w) begin
+            base_gpr_rd_idx = meta_sib_byte[2:0];
+        end else begin
+            base_gpr_rd_idx = meta_modrm_byte[2:0];
+        end
+    end
     assign t2_wr_en   = t2_wr_en_r;
     assign t2_wr_data = t2_wr_data_r;
 
@@ -302,7 +383,15 @@ module ea_calc (
             case (state_r)
                 EA_IDLE: begin
                     if (svc_req) begin
-                        if ((svc_id == EA_CALC_32) && is_indexed_sib_mem_form()) begin
+                        if ((svc_id == EA_CALC_16) && is_addr16_two_reg_mem_form()) begin
+                            // The 16-bit [BX+SI] and [BX+DI] forms share the
+                            // single committed-GPR read path: latch BX now,
+                            // then select SI/DI for the completion cycle.
+                            indexed_base_val_r <= base_gpr_rd_val;
+                            indexed_disp_val_r <= 32'h0;
+                            sr_r               <= SR_WAIT;
+                            state_r            <= EA_INDEX_READ;
+                        end else if ((svc_id == EA_CALC_32) && is_indexed_sib_mem_form()) begin
                             // Indexed SIB keeps the single committed-GPR read
                             // path: base-present forms latch base now, then
                             // hold SIB.index for a full wait cycle. No-base
@@ -320,6 +409,11 @@ module ea_calc (
                                 sr_r         <= SR_OK;
                                 t2_wr_en_r   <= 1'b1;
                                 t2_wr_data_r <= {16'h0, meta_disp_value[15:0]};
+                            end else if ((svc_id == EA_CALC_16) &&
+                                         is_addr16_nobp_nodisp_mem_form()) begin
+                                sr_r         <= SR_OK;
+                                t2_wr_en_r   <= 1'b1;
+                                t2_wr_data_r <= zero_extend_low16(base_gpr_rd_val);
                             end else if ((svc_id == EA_CALC_32) && is_direct_disp32_mem_form()) begin
                                 sr_r         <= SR_OK;
                                 t2_wr_en_r   <= 1'b1;
@@ -368,9 +462,14 @@ module ea_calc (
                     done_r       <= 1'b1;
                     sr_r         <= SR_OK;
                     t2_wr_en_r   <= 1'b1;
-                    t2_wr_data_r <= indexed_base_val_r +
-                                    scale_index(base_gpr_rd_val, meta_sib_byte[7:6]) +
-                                    indexed_disp_val_r;
+                    if (!meta_addrsz && is_addr16_two_reg_mem_form()) begin
+                        t2_wr_data_r <= add_addr16_terms(indexed_base_val_r,
+                                                         base_gpr_rd_val);
+                    end else begin
+                        t2_wr_data_r <= indexed_base_val_r +
+                                        scale_index(base_gpr_rd_val, meta_sib_byte[7:6]) +
+                                        indexed_disp_val_r;
+                    end
                     state_r      <= EA_IDLE;
                 end
 
