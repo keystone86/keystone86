@@ -551,8 +551,6 @@ module tb_rung6_mov_addr16_direct;
         check("fall-through EIP after Pass 6H-1 MOV sequence", dbg_eip == program_end_eip);
         check("no fault after addr16 direct MOV sequence", !dbg_fault_pending);
 
-        run_unsupported_form(3, 8'h67, 8'h8B, 8'h02, 8'h00, 8'h00, 8'h00,
-                             "0x67 mod=00 r/m=010 [BP+SI]");
         run_unsupported_form(4, 8'h67, 8'h8B, 8'h46, 8'h04, 8'h00, 8'h00,
                              "0x67 mod=01 signed disp8");
         run_unsupported_form(5, 8'h67, 8'h8B, 8'h86, 8'h34, 8'h12, 8'h00,
