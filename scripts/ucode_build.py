@@ -283,7 +283,7 @@ rom[0x0A2] = br(C_FAULT, rel10(0x0A2, 0x000))
 rom[0x0A3] = endi(CM_IRET)
 
 # --------------------------------------------------------------------
-# Rung 6 Pass 6H-3: ENTRY_MOV immediate, register-register, bounded
+# Rung 6 Pass 6H-4: ENTRY_MOV immediate, register-register, bounded
 # memory-source direct-disp32/base-only/base+disp8/base+disp32, bounded
 # register-source memory-destination direct-disp32/base-only/base+disp8/
 # base+disp32, and bounded immediate-to-memory direct-disp32/base-only/
@@ -307,7 +307,8 @@ rom[0x0A3] = endi(CM_IRET)
 # SIB.index=100, Pass 6F-2 mod=00 SIB.index=100 SIB.base=101 no-base
 # disp32, Pass 6G-1 base-present indexed SIB, Pass 6G-2 no-base indexed
 # SIB disp32, Pass 6H-1 0x67 direct disp16, Pass 6H-2 0x67
-# no-displacement non-BP forms, and Pass 6H-3 0x67 no-displacement BP forms.
+# no-displacement non-BP forms, Pass 6H-3 0x67 no-displacement BP forms,
+# and Pass 6H-4 0x67 mod=01 signed disp8 forms.
 # C6/C7 /0 and 66+C7 /0 ModRM.mod=11 forms use FETCH_IMM8/16/32, STAGE_GPR,
 # and ENDI CM_MOV_REG without memory services.
 # Other memory forms remain on ENTRY_NULL and are not routed here.
@@ -622,4 +623,4 @@ print(f"  CM_IRET = 0x{CM_IRET:03X}")
 print(f"  ENTRY_INT       at dispatch[0x0E] -> uPC 0x090 (Pass 2 INT_ENTER)")
 print(f"  ENTRY_IRET      at dispatch[0x0F] -> uPC 0x0A0 (Pass 3 IRET_FLOW)")
 print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
-print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6H-3 MOV immediate/register/memory/immediate-to-memory/immediate-to-register/SIB-base/SIB-no-base/SIB-indexed-base/SIB-indexed-no-base/addr16-direct/addr16-nobp-nodisp/addr16-bp-nodisp)")
+print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6H-4 MOV immediate/register/memory/immediate-to-memory/immediate-to-register/SIB-base/SIB-no-base/SIB-indexed-base/SIB-indexed-no-base/addr16-direct/addr16-nobp-nodisp/addr16-bp-nodisp/addr16-disp8)")

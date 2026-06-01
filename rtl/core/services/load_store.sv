@@ -26,6 +26,8 @@
 // address-size no-displacement non-BP forms after EA_CALC_16 has staged T2.
 // Pass 6H-3 additionally allows only 0x67 address-size no-displacement
 // BP-based [BP+SI]/[BP+DI] forms after EA_CALC_16 has staged T2.
+// Pass 6H-4 additionally allows only 0x67 address-size ModRM.mod=01 signed
+// disp8 forms after EA_CALC_16 has staged T2.
 
 import keystone86_pkg::*;
 
@@ -163,6 +165,12 @@ module load_store (
         endcase
     endfunction
 
+    function automatic logic is_addr16_disp8_mem_form;
+        return !meta_addrsz &&
+               (meta_modrm_class == MRM_MEM_DISP8) &&
+               (meta_modrm_byte[7:6] == 2'b01);
+    endfunction
+
     function automatic logic is_base_nodisp_mem_form;
         return meta_addrsz &&
                (meta_modrm_class == MRM_MEM_NO_DISP) &&
@@ -233,6 +241,7 @@ module load_store (
         return is_direct_disp32_mem_form() ||
                is_direct_disp16_mem_form() ||
                is_addr16_nodisp_mem_form() ||
+               is_addr16_disp8_mem_form() ||
                is_base_nodisp_mem_form() ||
                is_base_disp8_mem_form() ||
                is_base_disp32_mem_form() ||

@@ -5,9 +5,9 @@
 // Authorized address-size-16 subset:
 //   ModRM.mod=00, ModRM.r/m=110, disp16 present, EA = zero-extended disp16.
 //
-// This test intentionally does not exercise BX/BP/SI/DI register-based
-// addressing, 16-bit mod=01/mod=10 forms, BP segment semantics, segment-base
-// addition, protected/page behavior, broad 0x67 behavior, or Rung 7 behavior.
+// This test intentionally does not exercise accepted BX/BP/SI/DI register-based
+// or signed-disp8 addressing forms, BP segment semantics, segment-base addition,
+// protected/page behavior, broad 0x67 behavior, or Rung 7 behavior.
 
 `timescale 1ns/1ps
 
@@ -551,8 +551,6 @@ module tb_rung6_mov_addr16_direct;
         check("fall-through EIP after Pass 6H-1 MOV sequence", dbg_eip == program_end_eip);
         check("no fault after addr16 direct MOV sequence", !dbg_fault_pending);
 
-        run_unsupported_form(4, 8'h67, 8'h8B, 8'h46, 8'h04, 8'h00, 8'h00,
-                             "0x67 mod=01 signed disp8");
         run_unsupported_form(5, 8'h67, 8'h8B, 8'h86, 8'h34, 8'h12, 8'h00,
                              "0x67 mod=10 disp16");
         run_unsupported_form(5, 8'h67, 8'hC7, 8'h0E, 8'h00, 8'h21, 8'h00,

@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through bounded Rung 6 Pass 6H-3:
+// Decoder role through bounded Rung 6 Pass 6H-4:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -37,9 +37,10 @@
 //     Pass 6H-2 additionally accepts only 0x67 16-bit no-displacement
 //     non-BP register-based forms with ModRM.mod=00 and
 //     r/m=000/001/100/101/111. Pass 6H-3 additionally accepts only
-//     r/m=010 [BP+SI] and r/m=011 [BP+DI]. 16-bit mod=01/mod=10,
-//     segment-base addition, default-SS linearization, protected/page
-//     behavior, and Rung 7 behavior remain unsupported.
+//     r/m=010 [BP+SI] and r/m=011 [BP+DI]. Pass 6H-4 additionally accepts
+//     only 0x67 ModRM.mod=01 signed disp8 16-bit addressing forms. 16-bit
+//     mod=10, segment-base addition, default-SS linearization,
+//     protected/page behavior, and Rung 7 behavior remain unsupported.
 //   - For the bounded Pass 6B-1 memory-destination slice, accept only 88/89
 //     and 66+89 with ModRM.mod=00 and r/m=101, consume the disp32 absolute
 //     address, and report M_NEXT_EIP after that displacement. Pass 6E-1
@@ -55,6 +56,7 @@
 //     disp16 memory-destination forms. Pass 6H-2 adds only the authorized
 //     0x67 no-displacement non-BP memory-destination forms. Pass 6H-3 adds
 //     only the authorized BP-based no-displacement memory-destination forms.
+//     Pass 6H-4 adds only 0x67 ModRM.mod=01 signed disp8 forms.
 //   - For the bounded Pass 6C-1 immediate-to-memory slice, accept only C6/C7
 //     /0 with ModRM.mod=00 and r/m=101, consume the disp32 absolute address,
 //     and report M_NEXT_EIP after the immediate. Pass 6E-1 additionally
@@ -70,6 +72,7 @@
 //     immediate-to-memory forms. Pass 6H-2 adds only the authorized 0x67
 //     no-displacement non-BP immediate-to-memory forms. Pass 6H-3 adds only
 //     the authorized BP-based no-displacement immediate-to-memory forms.
+//     Pass 6H-4 adds only 0x67 ModRM.mod=01 signed disp8 forms.
 //     For Pass 6D-1, also accept C6/C7 /0 with ModRM.mod=11 as
 //     register-destination MOV and report M_NEXT_EIP after the immediate.
 //     FETCH_IMM* remains the microcode-called service that consumes the
@@ -302,7 +305,8 @@ module decoder (
                             // Prefix support remains bounded. Pass 6H-1 adds
                             // 0x67/66+67 direct disp16 MOV forms; Pass 6H-2
                             // also allows no-displacement non-BP addr16 forms,
-                            // and Pass 6H-3 adds only [BP+SI]/[BP+DI].
+                            // Pass 6H-3 adds [BP+SI]/[BP+DI], and Pass 6H-4
+                            // adds only mod=01 signed disp8 addr16 forms.
                             // Unsupported prefix ordering remains a prefix-only
                             // boundary.
                             opcode_byte_latch <= q_data;
@@ -550,11 +554,13 @@ module decoder (
 
             if (mod_bits == 2'b11)
                 return 3'd0;
-        if (prefix67_active) begin
-            if ((mod_bits == 2'b00) && (rm_bits == 3'b110))
-                return 3'd2;
-            return 3'd0;
-        end
+            if (prefix67_active) begin
+                if ((mod_bits == 2'b00) && (rm_bits == 3'b110))
+                    return 3'd2;
+                if (mod_bits == 2'b01)
+                    return 3'd1;
+                return 3'd0;
+            end
             if (mod_bits == 2'b01)
                 return 3'd1;
             if (mod_bits == 2'b10)
@@ -586,6 +592,8 @@ module decoder (
             return 4'h8; // MRM_DIRECT16
         if (prefix67_active && addr16_nodisp_form(m))
             return 4'h1; // MRM_MEM_NO_DISP for the bounded 16-bit no-disp subset
+        if (prefix67_active && addr16_disp8_form(m))
+            return 4'h2; // MRM_MEM_DISP8 for the bounded 16-bit disp8 subset
         if (prefix67_active)
             return 4'hF; // Unsupported 16-bit addressing forms stay unrouted.
         if (modrm_needs_sib(m)) begin
@@ -1096,13 +1104,19 @@ module decoder (
         endcase
     endfunction
 
+    function automatic logic addr16_disp8_form(input logic [7:0] m);
+        return (m[7:6] == 2'b01);
+    endfunction
+
     function automatic logic mov_mem_src_addr16_form(
         input logic [7:0] op,
         input logic [7:0] m,
         input logic       pref66,
         input logic       addr16
     );
-        if (!addr16 || !(direct16_addr_form(m) || addr16_nodisp_form(m)))
+        if (!addr16 ||
+            !(direct16_addr_form(m) || addr16_nodisp_form(m) ||
+              addr16_disp8_form(m)))
             return 1'b0;
         if (pref66)
             return (op == 8'h8B);
@@ -1115,7 +1129,9 @@ module decoder (
         input logic       pref66,
         input logic       addr16
     );
-        if (!addr16 || !(direct16_addr_form(m) || addr16_nodisp_form(m)))
+        if (!addr16 ||
+            !(direct16_addr_form(m) || addr16_nodisp_form(m) ||
+              addr16_disp8_form(m)))
             return 1'b0;
         if (pref66)
             return (op == 8'h89);
@@ -1129,7 +1145,8 @@ module decoder (
         input logic       addr16
     );
         if (!addr16 ||
-            !(direct16_addr_form(m) || addr16_nodisp_form(m)) ||
+            !(direct16_addr_form(m) || addr16_nodisp_form(m) ||
+              addr16_disp8_form(m)) ||
             (m[5:3] != 3'b000))
             return 1'b0;
         if (pref66)

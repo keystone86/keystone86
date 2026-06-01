@@ -6,8 +6,8 @@
 //   ModRM.mod=00, no displacement, r/m=000 [BX+SI], r/m=001 [BX+DI],
 //   r/m=100 [SI], r/m=101 [DI], and r/m=111 [BX].
 //
-// This test intentionally does not exercise BP forms, 16-bit mod=01/mod=10,
-// direct disp16 changes, segment-base addition, protected/page behavior,
+// This test intentionally does not exercise BP forms, accepted signed-disp8
+// forms, direct disp16 changes, segment-base addition, protected/page behavior,
 // broad 0x67 behavior, or Rung 7 behavior.
 
 `timescale 1ns/1ps
@@ -622,8 +622,6 @@ module tb_rung6_mov_addr16_nobp_nodisp;
         check("fall-through EIP after Pass 6H-2 MOV sequence", dbg_eip == program_end_eip);
         check("no fault after addr16 no-disp MOV sequence", !dbg_fault_pending);
 
-        run_unsupported_form(4, 8'h67, 8'h8B, 8'h46, 8'h04, 8'h00, 8'h00,
-                             "0x67 mod=01 signed disp8");
         run_unsupported_form(5, 8'h67, 8'h8B, 8'h86, 8'h34, 8'h12, 8'h00,
                              "0x67 mod=10 disp16");
         run_unsupported_form(3, 8'h67, 8'h8B, 8'hC0, 8'h00, 8'h00, 8'h00,

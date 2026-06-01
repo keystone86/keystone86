@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/services/ea_calc.sv
 //
-// Bounded Rung 6 effective-address service through Pass 6H-3.
+// Bounded Rung 6 effective-address service through Pass 6H-4.
 //
 // This slice implements only EA_CALC_32 for:
 //   ModRM.mod=00, ModRM.r/m=101
@@ -24,9 +24,11 @@
 //   r/m=101 [DI], and r/m=111 [BX].
 // Pass 6H-3 adds only BP-based no-displacement forms:
 //   r/m=010 [BP+SI] and r/m=011 [BP+DI].
+// Pass 6H-4 adds only 0x67 ModRM.mod=01 signed disp8 forms for all
+// 16-bit r/m encodings, with the low-16 result wrapping before zero-extension.
 // Two-register forms sequence over the existing single committed-GPR read
-// path. 16-bit mod=01/mod=10, segment-base/default-SS linearization,
-// protection checks, memory access, and Rung 7 behavior remain unsupported.
+// path. 16-bit mod=10, segment-base/default-SS linearization, protection
+// checks, memory access, and Rung 7 behavior remain unsupported.
 
 import keystone86_pkg::*;
 
@@ -84,6 +86,8 @@ module ea_calc (
     logic        sib_index_nobase_disp32_mem_form_w;
     logic        authorized_sib_mem_form_w;
     logic        addr16_nodisp_mem_form_w;
+    logic        addr16_disp8_mem_form_w;
+    logic        addr16_reg_mem_form_w;
     logic        addr16_two_reg_mem_form_w;
 
     function automatic logic is_direct_disp32_mem_form;
@@ -117,8 +121,18 @@ module ea_calc (
         endcase
     endfunction
 
+    function automatic logic is_addr16_disp8_mem_form;
+        return !meta_addrsz &&
+               (meta_modrm_class == MRM_MEM_DISP8) &&
+               (meta_modrm_byte[7:6] == 2'b01);
+    endfunction
+
+    function automatic logic is_addr16_reg_mem_form;
+        return is_addr16_nodisp_mem_form() || is_addr16_disp8_mem_form();
+    endfunction
+
     function automatic logic is_addr16_two_reg_mem_form;
-        return is_addr16_nodisp_mem_form() &&
+        return is_addr16_reg_mem_form() &&
                ((meta_modrm_byte[2:0] == 3'b000) ||
                 (meta_modrm_byte[2:0] == 3'b001) ||
                 (meta_modrm_byte[2:0] == 3'b010) ||
@@ -131,7 +145,8 @@ module ea_calc (
             3'b001,
             3'b111: return 3'h3; // EBX/BX
             3'b010,
-            3'b011: return 3'h5; // EBP/BP
+            3'b011,
+            3'b110: return 3'h5; // EBP/BP; r/m=110 is BP only for mod=01.
             3'b100: return 3'h6; // ESI/SI
             3'b101: return 3'h7; // EDI/DI
             default: return 3'h0;
@@ -143,17 +158,14 @@ module ea_calc (
                 (meta_modrm_byte[2:0] == 3'b011)) ? 3'h7 : 3'h6; // DI or SI
     endfunction
 
-    function automatic logic [31:0] zero_extend_low16(input logic [31:0] val);
-        return {16'h0000, val[15:0]};
-    endfunction
-
     function automatic logic [31:0] add_addr16_terms(
         input logic [31:0] a,
-        input logic [31:0] b
+        input logic [31:0] b,
+        input logic [31:0] disp
     );
         logic [15:0] sum16;
         begin
-            sum16 = a[15:0] + b[15:0];
+            sum16 = a[15:0] + b[15:0] + disp[15:0];
             return {16'h0000, sum16};
         end
     endfunction
@@ -351,8 +363,14 @@ module ea_calc (
          (meta_modrm_byte[2:0] == 3'b100) ||
          (meta_modrm_byte[2:0] == 3'b101) ||
          (meta_modrm_byte[2:0] == 3'b111));
+    assign addr16_disp8_mem_form_w =
+        !meta_addrsz &&
+        (meta_modrm_class == MRM_MEM_DISP8) &&
+        (meta_modrm_byte[7:6] == 2'b01);
+    assign addr16_reg_mem_form_w =
+        addr16_nodisp_mem_form_w || addr16_disp8_mem_form_w;
     assign addr16_two_reg_mem_form_w =
-        addr16_nodisp_mem_form_w &&
+        addr16_reg_mem_form_w &&
         ((meta_modrm_byte[2:0] == 3'b000) ||
          (meta_modrm_byte[2:0] == 3'b001) ||
          (meta_modrm_byte[2:0] == 3'b010) ||
@@ -364,7 +382,7 @@ module ea_calc (
         if (addr16_two_reg_mem_form_w &&
             ((state_r == EA_INDEX_READ) || (state_r == EA_INDEX_DONE))) begin
             base_gpr_rd_idx = addr16_second_gpr_idx();
-        end else if (addr16_nodisp_mem_form_w) begin
+        end else if (addr16_reg_mem_form_w) begin
             base_gpr_rd_idx = addr16_first_gpr_idx();
         end else if (sib_index_nobase_disp32_mem_form_w) begin
             base_gpr_rd_idx = meta_sib_byte[5:3];
@@ -401,7 +419,7 @@ module ea_calc (
                             // committed-GPR read path: latch BX/BP now,
                             // then select SI/DI for the completion cycle.
                             indexed_base_val_r <= base_gpr_rd_val;
-                            indexed_disp_val_r <= 32'h0;
+                            indexed_disp_val_r <= meta_disp_value;
                             sr_r               <= SR_WAIT;
                             state_r            <= EA_INDEX_READ;
                         end else if ((svc_id == EA_CALC_32) && is_indexed_sib_mem_form()) begin
@@ -423,10 +441,12 @@ module ea_calc (
                                 t2_wr_en_r   <= 1'b1;
                                 t2_wr_data_r <= {16'h0, meta_disp_value[15:0]};
                             end else if ((svc_id == EA_CALC_16) &&
-                                         is_addr16_nodisp_mem_form()) begin
+                                         is_addr16_reg_mem_form()) begin
                                 sr_r         <= SR_OK;
                                 t2_wr_en_r   <= 1'b1;
-                                t2_wr_data_r <= zero_extend_low16(base_gpr_rd_val);
+                                t2_wr_data_r <= add_addr16_terms(base_gpr_rd_val,
+                                                                 32'h0,
+                                                                 meta_disp_value);
                             end else if ((svc_id == EA_CALC_32) && is_direct_disp32_mem_form()) begin
                                 sr_r         <= SR_OK;
                                 t2_wr_en_r   <= 1'b1;
@@ -477,7 +497,8 @@ module ea_calc (
                     t2_wr_en_r   <= 1'b1;
                     if (!meta_addrsz && is_addr16_two_reg_mem_form()) begin
                         t2_wr_data_r <= add_addr16_terms(indexed_base_val_r,
-                                                         base_gpr_rd_val);
+                                                         base_gpr_rd_val,
+                                                         indexed_disp_val_r);
                     end else begin
                         t2_wr_data_r <= indexed_base_val_r +
                                         scale_index(base_gpr_rd_val, meta_sib_byte[7:6]) +

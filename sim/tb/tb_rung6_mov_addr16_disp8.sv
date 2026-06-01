@@ -1,20 +1,20 @@
 // Keystone86 / Aegis
-// sim/tb/tb_rung6_mov_addr16_bp_nodisp.sv
-// Bounded Rung 6 Pass 6H-3 smoke: 0x67 no-displacement BP-based MOV forms.
+// sim/tb/tb_rung6_mov_addr16_disp8.sv
+// Bounded Rung 6 Pass 6H-4 smoke: 0x67 mod=01 signed disp8 MOV forms.
 //
 // Authorized address-size-16 subset:
-//   ModRM.mod=00, no displacement, r/m=010 [BP+SI] and r/m=011 [BP+DI].
+//   ModRM.mod=01, signed disp8, r/m=000..111.
 //
-// This test intentionally does not exercise accepted signed-disp8 forms, direct
-// disp16 changes, segment-base/default-SS linearization, protected/page behavior,
-// broad 0x67 behavior, or Rung 7 behavior.
+// This test intentionally does not exercise 16-bit mod=10, segment-base
+// addition, default-SS linearization, protected/page behavior, full 0x67
+// behavior, broad 0x66 behavior, or Rung 7 behavior.
 
 `timescale 1ns/1ps
 
-module tb_rung6_mov_addr16_bp_nodisp;
+module tb_rung6_mov_addr16_disp8;
 
     localparam int CLK_HALF_PERIOD = 5;
-    localparam int TIMEOUT         = 140000;
+    localparam int TIMEOUT         = 160000;
 
     localparam logic [7:0]  ENTRY_NULL_ID      = 8'h00;
     localparam logic [7:0]  ENTRY_MOV_ID       = 8'h01;
@@ -140,14 +140,14 @@ module tb_rung6_mov_addr16_bp_nodisp;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            bus_ready          <= 1'b0;
-            bus_din            <= 32'h0;
-            bus_pending        <= 1'b0;
-            bus_wr_pending     <= 1'b0;
+            bus_ready <= 1'b0;
+            bus_din <= 32'h0;
+            bus_pending <= 1'b0;
+            bus_wr_pending <= 1'b0;
             bus_wr_observed_active <= 1'b0;
-            bus_addr_pending   <= 32'h0;
+            bus_addr_pending <= 32'h0;
             bus_byteen_pending <= 4'h0;
-            bus_dout_pending   <= 32'h0;
+            bus_dout_pending <= 32'h0;
         end else begin
             bus_ready <= 1'b0;
 
@@ -266,51 +266,64 @@ module tb_rung6_mov_addr16_bp_nodisp;
         end
     endtask
 
-    task automatic append_addr16_modrm(input logic [7:0] op,
+    task automatic append_addr16_disp8(input logic [7:0] op,
                                        input logic [2:0] reg_field,
-                                       input logic [2:0] rm_field);
+                                       input logic [2:0] rm_field,
+                                       input logic [7:0] disp8);
         begin
             emit8(8'h67);
             emit8(op);
-            emit8({2'b00, reg_field, rm_field});
+            emit8({2'b01, reg_field, rm_field});
+            emit8(disp8);
         end
     endtask
 
-    task automatic append_addr16_modrm_66(input logic [7:0] op,
+    task automatic append_addr16_disp8_66(input logic [7:0] op,
                                           input logic [2:0] reg_field,
-                                          input logic [2:0] rm_field);
+                                          input logic [2:0] rm_field,
+                                          input logic [7:0] disp8);
         begin
             emit8(8'h66);
             emit8(8'h67);
             emit8(op);
-            emit8({2'b00, reg_field, rm_field});
+            emit8({2'b01, reg_field, rm_field});
+            emit8(disp8);
         end
     endtask
 
-    task automatic append_c6_addr16(input logic [2:0] rm_field, input logic [7:0] imm);
+    task automatic append_c6_addr16_disp8(input logic [2:0] rm_field,
+                                          input logic [7:0] disp8,
+                                          input logic [7:0] imm);
         begin
             emit8(8'h67);
             emit8(8'hC6);
-            emit8({2'b00, 3'b000, rm_field});
+            emit8({2'b01, 3'b000, rm_field});
+            emit8(disp8);
             emit8(imm);
         end
     endtask
 
-    task automatic append_c7_addr16(input logic [2:0] rm_field, input logic [31:0] imm);
+    task automatic append_c7_addr16_disp8(input logic [2:0] rm_field,
+                                          input logic [7:0] disp8,
+                                          input logic [31:0] imm);
         begin
             emit8(8'h67);
             emit8(8'hC7);
-            emit8({2'b00, 3'b000, rm_field});
+            emit8({2'b01, 3'b000, rm_field});
+            emit8(disp8);
             emit32(imm);
         end
     endtask
 
-    task automatic append_66_c7_addr16(input logic [2:0] rm_field, input logic [15:0] imm);
+    task automatic append_66_c7_addr16_disp8(input logic [2:0] rm_field,
+                                             input logic [7:0] disp8,
+                                             input logic [15:0] imm);
         begin
             emit8(8'h66);
             emit8(8'h67);
             emit8(8'hC7);
-            emit8({2'b00, 3'b000, rm_field});
+            emit8({2'b01, 3'b000, rm_field});
+            emit8(disp8);
             emit16(imm);
         end
     endtask
@@ -344,7 +357,7 @@ module tb_rung6_mov_addr16_bp_nodisp;
             reset_cpu();
 
             begin : wait_unsupported
-                for (int c = 0; c < 700; c++) begin
+                for (int c = 0; c < 800; c++) begin
                     @(posedge clk);
                     #1;
                     if (bus_wr)
@@ -395,7 +408,7 @@ module tb_rung6_mov_addr16_bp_nodisp;
             reset_cpu();
 
             begin : wait_prefix_order
-                for (int c = 0; c < 700; c++) begin
+                for (int c = 0; c < 800; c++) begin
                     @(posedge clk);
                     #1;
                     if (bus_wr)
@@ -436,57 +449,62 @@ module tb_rung6_mov_addr16_bp_nodisp;
         end
 
         clear_memory();
-        write_mem32(32'h00001020, 32'h1111115A);
-        write_mem32(32'h000020F0, 32'hA1A2A3A4);
-        write_mem32(32'h00008030, 32'h22222222);
-        write_mem32(32'h00009100, 32'h33333333);
+        write_mem32(32'h00000040, 32'h1111115A);
+        write_mem32(32'h000080F0, 32'hA1A2A3A4);
+        write_mem32(32'h000090A0, 32'h2222CAFE);
+        write_mem32(32'h00001090, 32'h44444444);
+        write_mem32(32'h00000044, 32'h55555555);
+        write_mem32(32'h00008100, 32'h77777777);
+        write_mem32(32'h00009000, 32'h88888888);
+        write_mem32(32'h0000FFE0, 32'h99999999);
 
-        expected_t2[0] = 32'h00001020; // [BP+SI], 8FF0+8030 wraps
-        expected_t2[1] = 32'h000020F0; // [BP+DI], 8FF0+9100 wraps
-        expected_t2[2] = 32'h00001020; // [BP+SI]
-        expected_t2[3] = 32'h000020F0; // [BP+DI]
-        expected_t2[4] = 32'h00001020; // [BP+SI]
-        expected_t2[5] = 32'h000020F0; // [BP+DI]
-        expected_t2[6] = 32'h00001020; // [BP+SI]
-        expected_t2[7] = 32'h000020F0; // [BP+DI]
-        expected_t2[8] = 32'h00001020; // [BP+SI]
+        expected_t2[0] = 32'h00000040; // [BX+SI]+10h wraps
+        expected_t2[1] = 32'h000080F0; // [BX+DI]-20h wraps
+        expected_t2[2] = 32'h000090A0; // [BP+SI]+70h
+        expected_t2[3] = 32'h00001090; // [BP+DI]-80h wraps
+        expected_t2[4] = 32'h00000044; // [SI]+04h
+        expected_t2[5] = 32'h00008100; // [DI]-20h
+        expected_t2[6] = 32'h00009000; // [BP]+10h
+        expected_t2[7] = 32'h0000FFE0; // [BX]-10h
+        expected_t2[8] = 32'h00000040; // [BX+SI]+10h
 
-        expected_store_addr[0] = 32'h000020F0;
+        expected_store_addr[0] = 32'h00001090;
         expected_store_be[0]   = 4'b0001;
         expected_store_data[0] = 32'h000000BB;
-        expected_store_addr[1] = 32'h00001020;
+        expected_store_addr[1] = 32'h00000044;
         expected_store_be[1]   = 4'b1111;
         expected_store_data[1] = 32'h1122AABB;
-        expected_store_addr[2] = 32'h000020F0;
+        expected_store_addr[2] = 32'h00008100;
         expected_store_be[2]   = 4'b0011;
         expected_store_data[2] = 32'h0000AABB;
-        expected_store_addr[3] = 32'h00001020;
+        expected_store_addr[3] = 32'h00009000;
         expected_store_be[3]   = 4'b0001;
         expected_store_data[3] = 32'h0000006B;
-        expected_store_addr[4] = 32'h000020F0;
+        expected_store_addr[4] = 32'h0000FFE0;
         expected_store_be[4]   = 4'b1111;
         expected_store_data[4] = 32'h55667788;
-        expected_store_addr[5] = 32'h00001020;
+        expected_store_addr[5] = 32'h00000040;
         expected_store_be[5]   = 4'b0011;
         expected_store_data[5] = 32'h0000BEEF;
 
         program_pc = RESET_EIP;
         append_mov32_imm(3'h0, 32'h1122AABB); // EAX source for stores
+        append_mov32_imm(3'h3, 32'h0000FFF0); // EBX/BX address term
         append_mov32_imm(3'h5, 32'h00008FF0); // EBP/BP address term
-        append_mov32_imm(3'h6, 32'h00008030); // ESI/SI address term
-        append_mov32_imm(3'h7, 32'h00009100); // EDI/DI address term
-        append_addr16_modrm(8'h8A, 3'h1, 3'b010);      // CL <- [BP+SI]
-        append_addr16_modrm(8'h8B, 3'h2, 3'b011);      // EDX <- [BP+DI]
-        append_addr16_modrm_66(8'h8B, 3'h3, 3'b010);   // BX <- [BP+SI]
-        append_addr16_modrm(8'h88, 3'h0, 3'b011);      // [BP+DI] <- AL
-        append_addr16_modrm(8'h89, 3'h0, 3'b010);      // [BP+SI] <- EAX
-        append_addr16_modrm_66(8'h89, 3'h0, 3'b011);   // [BP+DI] <- AX
-        append_c6_addr16(3'b010, 8'h6B);               // [BP+SI] <- imm8
-        append_c7_addr16(3'b011, 32'h55667788);        // [BP+DI] <- imm32
-        append_66_c7_addr16(3'b010, 16'hBEEF);         // [BP+SI] <- imm16
+        append_mov32_imm(3'h6, 32'h00000040); // ESI/SI address term
+        append_mov32_imm(3'h7, 32'h00008120); // EDI/DI address term
+        append_addr16_disp8(8'h8A, 3'h1, 3'b000, 8'h10);      // CL <- [BX+SI]+10h
+        append_addr16_disp8(8'h8B, 3'h2, 3'b001, 8'hE0);      // EDX <- [BX+DI]-20h
+        append_addr16_disp8_66(8'h8B, 3'h4, 3'b010, 8'h70);   // SP <- [BP+SI]+70h
+        append_addr16_disp8(8'h88, 3'h0, 3'b011, 8'h80);      // [BP+DI]-80h <- AL
+        append_addr16_disp8(8'h89, 3'h0, 3'b100, 8'h04);      // [SI]+04h <- EAX
+        append_addr16_disp8_66(8'h89, 3'h0, 3'b101, 8'hE0);   // [DI]-20h <- AX
+        append_c6_addr16_disp8(3'b110, 8'h10, 8'h6B);         // [BP]+10h <- imm8
+        append_c7_addr16_disp8(3'b111, 8'hF0, 32'h55667788);  // [BX]-10h <- imm32
+        append_66_c7_addr16_disp8(3'b000, 8'h10, 16'hBEEF);   // [BX+SI]+10h <- imm16
         program_end_eip = program_pc;
 
-        $display("Keystone86 / Aegis - Rung 6 Pass 6H-3 MOV addr16 no-disp BP Smoke");
+        $display("Keystone86 / Aegis - Rung 6 Pass 6H-4 MOV addr16 disp8 Smoke");
 
         mov_endi_count = 0;
         mov_route_count = 0;
@@ -544,7 +562,7 @@ module tb_rung6_mov_addr16_bp_nodisp;
 
                 if (dut.ea_t2_wr_en) begin
                     if (t2_check_count < 9) begin
-                        check("EA_CALC_16 wrote expected zero-extended T2",
+                        check("EA_CALC_16 wrote expected signed-disp8 T2",
                               dut.ea_t2_wr_data == expected_t2[t2_check_count]);
                         check("EA_CALC_16 T2 high half is zero",
                               dut.ea_t2_wr_data[31:16] == 16'h0000);
@@ -556,7 +574,7 @@ module tb_rung6_mov_addr16_bp_nodisp;
 
                 if (dbg_endi_pulse && (dbg_entry_id == ENTRY_MOV_ID)) begin
                     mov_endi_count++;
-                    if (mov_endi_count == 13) begin
+                    if (mov_endi_count == 14) begin
                         timed_out = 1'b0;
                         @(posedge clk);
                         #1;
@@ -566,16 +584,17 @@ module tb_rung6_mov_addr16_bp_nodisp;
             end
         end
 
-        check("four setup MOVs plus nine addr16 BP no-disp MOVs completed",
-              !timed_out && (mov_endi_count == 13));
-        check("ENTRY_MOV routed for all setup and addr16 BP no-disp forms",
-              mov_route_count == 13);
-        check("EA_CALC_16 issued for each addr16 memory MOV", ea_calc16_count == 9);
-        check("EA_CALC_32 not issued for addr16 BP no-disp MOVs", ea_calc32_count == 0);
-        check("T2 checked for every addr16 BP no-disp MOV", t2_check_count == 9);
-        check("BP-based two-register addr16 forms wrapped before zero-extension",
-              (expected_t2[0] == 32'h00001020) &&
-              (expected_t2[1] == 32'h000020F0));
+        check("five setup MOVs plus nine addr16 disp8 MOVs completed",
+              !timed_out && (mov_endi_count == 14));
+        check("ENTRY_MOV routed for all setup and addr16 disp8 forms",
+              mov_route_count == 14);
+        check("EA_CALC_16 issued for each addr16 disp8 memory MOV", ea_calc16_count == 9);
+        check("EA_CALC_32 not issued for addr16 disp8 MOVs", ea_calc32_count == 0);
+        check("T2 checked for every addr16 disp8 MOV", t2_check_count == 9);
+        check("two-register addr16 forms wrapped before zero-extension",
+              (expected_t2[0] == 32'h00000040) &&
+              (expected_t2[1] == 32'h000080F0) &&
+              (expected_t2[3] == 32'h00001090));
         check("LOAD_RM8 issued for 67+8A", load_rm8_count == 1);
         check("LOAD_RM32 issued for 67+8B", load_rm32_count == 1);
         check("LOAD_RM16 issued for 66+67+8B", load_rm16_count == 1);
@@ -584,7 +603,7 @@ module tb_rung6_mov_addr16_bp_nodisp;
         check("STORE_RM16 issued for 66+67+89 and 66+67+C7", store_rm16_count == 2);
         check("FETCH_IMM8 issued for 67+C6", fetch_imm8_count == 1);
         check("FETCH_IMM16 issued for 66+67+C7", fetch_imm16_count == 1);
-        check("FETCH_IMM32 issued for setup MOVs and 67+C7", fetch_imm32_count == 5);
+        check("FETCH_IMM32 issued for setup MOVs and 67+C7", fetch_imm32_count == 6);
         check("all STORE_RM bus writes observed", store_bus_count == 6);
         check("no extra STORE_RM bus write observed", !extra_store_seen);
         for (int i = 0; i < 6; i++) begin
@@ -600,35 +619,43 @@ module tb_rung6_mov_addr16_bp_nodisp;
         check("STORE_RM16 byte enable observed", byteen_0011_count == 2);
         check("STORE_RM32 byte enable observed", byteen_1111_count == 2);
 
-        check("67+8A loaded byte through [BP+SI] into CL",
+        check("67+8A loaded byte through [BX+SI]+disp8 into CL",
               dut.u_commit.gpr_r[3'h1] == 32'h0000005A);
-        check("67+8B loaded dword through [BP+DI] into EDX",
+        check("67+8B loaded dword through [BX+DI]+disp8 into EDX",
               dut.u_commit.gpr_r[3'h2] == 32'hA1A2A3A4);
-        check("66+67+8B loaded word through [BP+SI] into BX",
-              dut.u_commit.gpr_r[3'h3] == 32'h0000115A);
-        check("67+89/C6/66+C7 final stores through [BP+SI]",
-              read_mem32(32'h00001020) == 32'h1122BEEF);
-        check("88/66+89/C7 final stores through [BP+DI]",
-              read_mem32(32'h000020F0) == 32'h55667788);
+        check("66+67+8B loaded word through [BP+SI]+disp8 into SP",
+              dut.u_commit.gpr_r[3'h4] == 32'h0000CAFE);
+        check("67+89 store through [SI]+disp8",
+              read_mem32(32'h00000044) == 32'h1122AABB);
+        check("66+67+89 store through [DI]+disp8",
+              read_mem32(32'h00008100) == 32'h7777AABB);
+        check("67+C6 store through [BP]+disp8",
+              read_mem32(32'h00009000) == 32'h8888886B);
+        check("67+C7 store through [BX]+disp8",
+              read_mem32(32'h0000FFE0) == 32'h55667788);
+        check("66+67+C7 final store through [BX+SI]+disp8",
+              read_mem32(32'h00000040) == 32'h1111BEEF);
+        check("67+88 store through [BP+DI]+disp8",
+              read_mem32(32'h00001090) == 32'h444444BB);
         check("EFLAGS unchanged", dut.u_commit.eflags_r == 32'h00000002);
-        check("fall-through EIP after Pass 6H-3 MOV sequence", dbg_eip == program_end_eip);
-        check("no fault after addr16 BP no-disp MOV sequence", !dbg_fault_pending);
+        check("fall-through EIP after Pass 6H-4 MOV sequence", dbg_eip == program_end_eip);
+        check("no fault after addr16 disp8 MOV sequence", !dbg_fault_pending);
 
         run_unsupported_form(5, 8'h67, 8'h8B, 8'h86, 8'h34, 8'h12, 8'h00,
                              "0x67 mod=10 disp16");
         run_unsupported_form(3, 8'h67, 8'h8B, 8'hC0, 8'h00, 8'h00, 8'h00,
                              "0x67 ModRM.mod=11 register form");
-        run_unsupported_form(4, 8'h67, 8'hC7, 8'h08, 8'h34, 8'h12, 8'h00,
-                             "0x67 C7 non-/0 no-disp form");
-        run_unsupported_prefix_order(4, 8'h67, 8'h66, 8'h8B, 8'h00, 8'h00, 8'h00,
+        run_unsupported_form(5, 8'h67, 8'hC7, 8'h48, 8'h04, 8'h34, 8'h12,
+                             "0x67 C7 non-/0 disp8 form");
+        run_unsupported_prefix_order(5, 8'h67, 8'h66, 8'h8B, 8'h40, 8'h04, 8'h00,
                                      "unsupported 67+66 prefix order");
 
         if (failures == 0) begin
-            $display("PASS: Rung 6 Pass 6H-3 MOV addr16 no-disp BP smoke completed");
+            $display("PASS: Rung 6 Pass 6H-4 MOV addr16 disp8 smoke completed");
         end else begin
-            $display("FAIL: Rung 6 Pass 6H-3 MOV addr16 no-disp BP smoke had %0d failure(s)",
+            $display("FAIL: Rung 6 Pass 6H-4 MOV addr16 disp8 smoke had %0d failure(s)",
                      failures);
-            $fatal(1, "Rung 6 Pass 6H-3 MOV addr16 no-disp BP smoke failed");
+            $fatal(1, "Rung 6 Pass 6H-4 MOV addr16 disp8 smoke failed");
         end
 
         $finish;
