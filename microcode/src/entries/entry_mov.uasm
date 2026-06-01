@@ -1,6 +1,6 @@
 .entry ENTRY_MOV, 0x01
 
-; Rung 6 Pass 6H-4 bounded MOV slice:
+; Rung 6 Pass 6H-5 bounded MOV slice:
 ;   B0-B7 MOV r8, imm8
 ;   B8-BF MOV r32, imm32
 ;   66+B8-BF MOV r16, imm16
@@ -15,8 +15,8 @@
 ;     disp32 with EA=disp32, Pass 6G-1 base-present indexed SIB forms, Pass
 ;     6G-2 no-base indexed SIB disp32 forms, Pass 6H-1 0x67 direct
 ;     disp16 forms, Pass 6H-2 0x67 no-displacement non-BP forms, Pass 6H-3
-;     0x67 no-displacement BP-based forms, and Pass 6H-4 0x67 mod=01 signed
-;     disp8 forms
+;     0x67 no-displacement BP-based forms, Pass 6H-4 0x67 mod=01 signed
+;     disp8 forms, and Pass 6H-5 0x67 mod=10 disp16 forms
 ;   88/89 and 66+89 memory-destination for ModRM.mod=00 r/m=101 disp32 and
 ;     Pass 6E-1 default-32 base-only no-displacement r/m!=100/101, plus
 ;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8,
@@ -26,8 +26,8 @@
 ;     disp32 with EA=disp32, Pass 6G-1 base-present indexed SIB forms, Pass
 ;     6G-2 no-base indexed SIB disp32 forms, Pass 6H-1 0x67 direct
 ;     disp16 forms, Pass 6H-2 0x67 no-displacement non-BP forms, Pass 6H-3
-;     0x67 no-displacement BP-based forms, and Pass 6H-4 0x67 mod=01 signed
-;     disp8 forms
+;     0x67 no-displacement BP-based forms, Pass 6H-4 0x67 mod=01 signed
+;     disp8 forms, and Pass 6H-5 0x67 mod=10 disp16 forms
 ;   C6/C7 /0 and 66+C7 /0 immediate-to-memory only for ModRM.mod=00,
 ;     r/m=101 disp32, Pass 6E-1 base-only no-displacement r/m!=100/101, or
 ;     Pass 6E-2 default-32 mod=01 non-SIB signed disp8, Pass 6E-3
@@ -37,8 +37,8 @@
 ;     with EA=disp32, Pass 6G-1 base-present indexed SIB forms, Pass
 ;     6G-2 no-base indexed SIB disp32 forms, Pass 6H-1 0x67 direct
 ;     disp16 forms, Pass 6H-2 0x67 no-displacement non-BP forms, Pass 6H-3
-;     0x67 no-displacement BP-based forms, and Pass 6H-4 0x67 mod=01 signed
-;     disp8 forms
+;     0x67 no-displacement BP-based forms, Pass 6H-4 0x67 mod=01 signed
+;     disp8 forms, and Pass 6H-5 0x67 mod=10 disp16 forms
 ;   C6/C7 /0 and 66+C7 /0 immediate-to-register only for ModRM.mod=11
 ; Decoder supplies OC_MOV_R_IMM, M_OPSZ, and raw M_REG_DST from opcode[2:0].
 ; For 88/89/8A/8B it supplies OC_MOV_RM_R or OC_MOV_R_RM, M_REG_SRC,
@@ -51,10 +51,9 @@
 ; no-base SIB disp32 with EA=disp32, Pass 6G-1 base-present indexed SIB
 ; forms, Pass 6G-2 no-base indexed SIB disp32 forms, Pass 6H-1 0x67 direct
 ; disp16 forms, Pass 6H-2 0x67 no-displacement non-BP forms, Pass 6H-3
-; 0x67 no-displacement BP-based forms, and Pass 6H-4 0x67 mod=01 signed
-; disp8 forms. Other 16-bit addressing forms, segment-base/default-SS
-; linearization, protected/page behavior, and Rung 7 behavior remain
-; unsupported.
+; 0x67 no-displacement BP-based forms, Pass 6H-4 0x67 mod=01 signed
+; disp8 forms, and Pass 6H-5 0x67 mod=10 disp16 forms. Segment-base/default-SS
+; linearization, protected/page behavior, and Rung 7 behavior remain unsupported.
 ; The memory-destination path uses EA_CALC_32 or EA_CALC_16, LOAD_REG_META,
 ; and STORE_RM8/16/32 before ENDI CM_NOP|CM_EIP. The immediate-to-memory path
 ; uses FETCH_IMM*, EA_CALC_32 or EA_CALC_16, and STORE_RM8/16/32 before ENDI

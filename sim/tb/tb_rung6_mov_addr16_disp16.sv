@@ -1,17 +1,17 @@
 // Keystone86 / Aegis
-// sim/tb/tb_rung6_mov_addr16_disp8.sv
-// Bounded Rung 6 Pass 6H-4 smoke: 0x67 mod=01 signed disp8 MOV forms.
+// sim/tb/tb_rung6_mov_addr16_disp16.sv
+// Bounded Rung 6 Pass 6H-5 smoke: 0x67 mod=10 disp16 MOV forms.
 //
 // Authorized address-size-16 subset:
-//   ModRM.mod=01, signed disp8, r/m=000..111.
+//   ModRM.mod=10, disp16, r/m=000..111.
 //
-// This test intentionally does not exercise 16-bit mod=10, segment-base
-// addition, default-SS linearization, protected/page behavior, full 0x67
-// behavior, broad 0x66 behavior, or Rung 7 behavior.
+// This test intentionally does not exercise segment-base addition, default-SS
+// linearization, protected/page behavior, full 0x67 behavior, broad 0x66
+// behavior, or Rung 7 behavior.
 
 `timescale 1ns/1ps
 
-module tb_rung6_mov_addr16_disp8;
+module tb_rung6_mov_addr16_disp16;
 
     localparam int CLK_HALF_PERIOD = 5;
     localparam int TIMEOUT         = 160000;
@@ -266,64 +266,64 @@ module tb_rung6_mov_addr16_disp8;
         end
     endtask
 
-    task automatic append_addr16_disp8(input logic [7:0] op,
-                                       input logic [2:0] reg_field,
-                                       input logic [2:0] rm_field,
-                                       input logic [7:0] disp8);
+    task automatic append_addr16_disp16(input logic [7:0] op,
+                                        input logic [2:0] reg_field,
+                                        input logic [2:0] rm_field,
+                                        input logic [15:0] disp16);
         begin
             emit8(8'h67);
             emit8(op);
-            emit8({2'b01, reg_field, rm_field});
-            emit8(disp8);
+            emit8({2'b10, reg_field, rm_field});
+            emit16(disp16);
         end
     endtask
 
-    task automatic append_addr16_disp8_66(input logic [7:0] op,
-                                          input logic [2:0] reg_field,
-                                          input logic [2:0] rm_field,
-                                          input logic [7:0] disp8);
+    task automatic append_addr16_disp16_66(input logic [7:0] op,
+                                           input logic [2:0] reg_field,
+                                           input logic [2:0] rm_field,
+                                           input logic [15:0] disp16);
         begin
             emit8(8'h66);
             emit8(8'h67);
             emit8(op);
-            emit8({2'b01, reg_field, rm_field});
-            emit8(disp8);
+            emit8({2'b10, reg_field, rm_field});
+            emit16(disp16);
         end
     endtask
 
-    task automatic append_c6_addr16_disp8(input logic [2:0] rm_field,
-                                          input logic [7:0] disp8,
-                                          input logic [7:0] imm);
+    task automatic append_c6_addr16_disp16(input logic [2:0] rm_field,
+                                           input logic [15:0] disp16,
+                                           input logic [7:0] imm);
         begin
             emit8(8'h67);
             emit8(8'hC6);
-            emit8({2'b01, 3'b000, rm_field});
-            emit8(disp8);
+            emit8({2'b10, 3'b000, rm_field});
+            emit16(disp16);
             emit8(imm);
         end
     endtask
 
-    task automatic append_c7_addr16_disp8(input logic [2:0] rm_field,
-                                          input logic [7:0] disp8,
-                                          input logic [31:0] imm);
+    task automatic append_c7_addr16_disp16(input logic [2:0] rm_field,
+                                           input logic [15:0] disp16,
+                                           input logic [31:0] imm);
         begin
             emit8(8'h67);
             emit8(8'hC7);
-            emit8({2'b01, 3'b000, rm_field});
-            emit8(disp8);
+            emit8({2'b10, 3'b000, rm_field});
+            emit16(disp16);
             emit32(imm);
         end
     endtask
 
-    task automatic append_66_c7_addr16_disp8(input logic [2:0] rm_field,
-                                             input logic [7:0] disp8,
-                                             input logic [15:0] imm);
+    task automatic append_66_c7_addr16_disp16(input logic [2:0] rm_field,
+                                              input logic [15:0] disp16,
+                                              input logic [15:0] imm);
         begin
             emit8(8'h66);
             emit8(8'h67);
             emit8(8'hC7);
-            emit8({2'b01, 3'b000, rm_field});
-            emit8(disp8);
+            emit8({2'b10, 3'b000, rm_field});
+            emit16(disp16);
             emit16(imm);
         end
     endtask
@@ -493,18 +493,18 @@ module tb_rung6_mov_addr16_disp8;
         append_mov32_imm(3'h5, 32'h00008FF0); // EBP/BP address term
         append_mov32_imm(3'h6, 32'h00000040); // ESI/SI address term
         append_mov32_imm(3'h7, 32'h00008120); // EDI/DI address term
-        append_addr16_disp8(8'h8A, 3'h1, 3'b000, 8'h10);      // CL <- [BX+SI]+10h
-        append_addr16_disp8(8'h8B, 3'h2, 3'b001, 8'hE0);      // EDX <- [BX+DI]-20h
-        append_addr16_disp8_66(8'h8B, 3'h4, 3'b010, 8'h70);   // SP <- [BP+SI]+70h
-        append_addr16_disp8(8'h88, 3'h0, 3'b011, 8'h80);      // [BP+DI]-80h <- AL
-        append_addr16_disp8(8'h89, 3'h0, 3'b100, 8'h04);      // [SI]+04h <- EAX
-        append_addr16_disp8_66(8'h89, 3'h0, 3'b101, 8'hE0);   // [DI]-20h <- AX
-        append_c6_addr16_disp8(3'b110, 8'h10, 8'h6B);         // [BP]+10h <- imm8
-        append_c7_addr16_disp8(3'b111, 8'hF0, 32'h55667788);  // [BX]-10h <- imm32
-        append_66_c7_addr16_disp8(3'b000, 8'h10, 16'hBEEF);   // [BX+SI]+10h <- imm16
+        append_addr16_disp16(8'h8A, 3'h1, 3'b000, 16'h0010);      // CL <- [BX+SI]+0010h
+        append_addr16_disp16(8'h8B, 3'h2, 3'b001, 16'hFFE0);      // EDX <- [BX+DI]+FFE0h
+        append_addr16_disp16_66(8'h8B, 3'h4, 3'b010, 16'h0070);   // SP <- [BP+SI]+0070h
+        append_addr16_disp16(8'h88, 3'h0, 3'b011, 16'hFF80);      // [BP+DI]+FF80h <- AL
+        append_addr16_disp16(8'h89, 3'h0, 3'b100, 16'h0004);      // [SI]+0004h <- EAX
+        append_addr16_disp16_66(8'h89, 3'h0, 3'b101, 16'hFFE0);   // [DI]+FFE0h <- AX
+        append_c6_addr16_disp16(3'b110, 16'h0010, 8'h6B);         // [BP]+0010h <- imm8
+        append_c7_addr16_disp16(3'b111, 16'hFFF0, 32'h55667788);  // [BX]+FFF0h <- imm32
+        append_66_c7_addr16_disp16(3'b000, 16'h0010, 16'hBEEF);   // [BX+SI]+0010h <- imm16
         program_end_eip = program_pc;
 
-        $display("Keystone86 / Aegis - Rung 6 Pass 6H-4 MOV addr16 disp8 Smoke");
+        $display("Keystone86 / Aegis - Rung 6 Pass 6H-5 MOV addr16 disp16 Smoke");
 
         mov_endi_count = 0;
         mov_route_count = 0;
@@ -562,7 +562,7 @@ module tb_rung6_mov_addr16_disp8;
 
                 if (dut.ea_t2_wr_en) begin
                     if (t2_check_count < 9) begin
-                        check("EA_CALC_16 wrote expected signed-disp8 T2",
+                        check("EA_CALC_16 wrote expected disp16 T2",
                               dut.ea_t2_wr_data == expected_t2[t2_check_count]);
                         check("EA_CALC_16 T2 high half is zero",
                               dut.ea_t2_wr_data[31:16] == 16'h0000);
@@ -584,13 +584,13 @@ module tb_rung6_mov_addr16_disp8;
             end
         end
 
-        check("five setup MOVs plus nine addr16 disp8 MOVs completed",
+        check("five setup MOVs plus nine addr16 disp16 MOVs completed",
               !timed_out && (mov_endi_count == 14));
-        check("ENTRY_MOV routed for all setup and addr16 disp8 forms",
+        check("ENTRY_MOV routed for all setup and addr16 disp16 forms",
               mov_route_count == 14);
-        check("EA_CALC_16 issued for each addr16 disp8 memory MOV", ea_calc16_count == 9);
-        check("EA_CALC_32 not issued for addr16 disp8 MOVs", ea_calc32_count == 0);
-        check("T2 checked for every addr16 disp8 MOV", t2_check_count == 9);
+        check("EA_CALC_16 issued for each addr16 disp16 memory MOV", ea_calc16_count == 9);
+        check("EA_CALC_32 not issued for addr16 disp16 MOVs", ea_calc32_count == 0);
+        check("T2 checked for every addr16 disp16 MOV", t2_check_count == 9);
         check("two-register addr16 forms wrapped before zero-extension",
               (expected_t2[0] == 32'h00000040) &&
               (expected_t2[1] == 32'h000080F0) &&
@@ -619,41 +619,41 @@ module tb_rung6_mov_addr16_disp8;
         check("STORE_RM16 byte enable observed", byteen_0011_count == 2);
         check("STORE_RM32 byte enable observed", byteen_1111_count == 2);
 
-        check("67+8A loaded byte through [BX+SI]+disp8 into CL",
+        check("67+8A loaded byte through [BX+SI]+disp16 into CL",
               dut.u_commit.gpr_r[3'h1] == 32'h0000005A);
-        check("67+8B loaded dword through [BX+DI]+disp8 into EDX",
+        check("67+8B loaded dword through [BX+DI]+disp16 into EDX",
               dut.u_commit.gpr_r[3'h2] == 32'hA1A2A3A4);
-        check("66+67+8B loaded word through [BP+SI]+disp8 into SP",
+        check("66+67+8B loaded word through [BP+SI]+disp16 into SP",
               dut.u_commit.gpr_r[3'h4] == 32'h0000CAFE);
-        check("67+89 store through [SI]+disp8",
+        check("67+89 store through [SI]+disp16",
               read_mem32(32'h00000044) == 32'h1122AABB);
-        check("66+67+89 store through [DI]+disp8",
+        check("66+67+89 store through [DI]+disp16",
               read_mem32(32'h00008100) == 32'h7777AABB);
-        check("67+C6 store through [BP]+disp8",
+        check("67+C6 store through [BP]+disp16",
               read_mem32(32'h00009000) == 32'h8888886B);
-        check("67+C7 store through [BX]+disp8",
+        check("67+C7 store through [BX]+disp16",
               read_mem32(32'h0000FFE0) == 32'h55667788);
-        check("66+67+C7 final store through [BX+SI]+disp8",
+        check("66+67+C7 final store through [BX+SI]+disp16",
               read_mem32(32'h00000040) == 32'h1111BEEF);
-        check("67+88 store through [BP+DI]+disp8",
+        check("67+88 store through [BP+DI]+disp16",
               read_mem32(32'h00001090) == 32'h444444BB);
         check("EFLAGS unchanged", dut.u_commit.eflags_r == 32'h00000002);
-        check("fall-through EIP after Pass 6H-4 MOV sequence", dbg_eip == program_end_eip);
-        check("no fault after addr16 disp8 MOV sequence", !dbg_fault_pending);
+        check("fall-through EIP after Pass 6H-5 MOV sequence", dbg_eip == program_end_eip);
+        check("no fault after addr16 disp16 MOV sequence", !dbg_fault_pending);
 
         run_unsupported_form(3, 8'h67, 8'h8B, 8'hC0, 8'h00, 8'h00, 8'h00,
                              "0x67 ModRM.mod=11 register form");
-        run_unsupported_form(5, 8'h67, 8'hC7, 8'h48, 8'h04, 8'h34, 8'h12,
-                             "0x67 C7 non-/0 disp8 form");
-        run_unsupported_prefix_order(5, 8'h67, 8'h66, 8'h8B, 8'h40, 8'h04, 8'h00,
+        run_unsupported_form(5, 8'h67, 8'hC7, 8'h88, 8'h34, 8'h12, 8'h00,
+                             "0x67 C7 non-/0 disp16 form");
+        run_unsupported_prefix_order(6, 8'h67, 8'h66, 8'h8B, 8'h80, 8'h34, 8'h12,
                                      "unsupported 67+66 prefix order");
 
         if (failures == 0) begin
-            $display("PASS: Rung 6 Pass 6H-4 MOV addr16 disp8 smoke completed");
+            $display("PASS: Rung 6 Pass 6H-5 MOV addr16 disp16 smoke completed");
         end else begin
-            $display("FAIL: Rung 6 Pass 6H-4 MOV addr16 disp8 smoke had %0d failure(s)",
+            $display("FAIL: Rung 6 Pass 6H-5 MOV addr16 disp16 smoke had %0d failure(s)",
                      failures);
-            $fatal(1, "Rung 6 Pass 6H-4 MOV addr16 disp8 smoke failed");
+            $fatal(1, "Rung 6 Pass 6H-5 MOV addr16 disp16 smoke failed");
         end
 
         $finish;

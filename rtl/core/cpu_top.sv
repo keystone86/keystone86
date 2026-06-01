@@ -1,14 +1,14 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 6 Pass 6H-4 top-level with service-based control-transfer paths,
+// Rung 6 Pass 6H-5 top-level with service-based control-transfer paths,
 // bounded MOV immediate/register-register slices, direct-disp32 memory MOV,
 // base-only no-displacement memory MOV, signed-disp8 memory MOV, signed
 // disp32 base memory MOV, bounded base-only SIB memory MOV, bounded no-base
 // SIB disp32 MOV, bounded base-present indexed SIB MOV, bounded no-base
 // indexed SIB disp32 MOV, 0x67 direct disp16 MOV, 0x67 no-displacement
-// non-BP plus BP-based 16-bit MOV forms, and 0x67 mod=01 signed disp8
-// 16-bit MOV forms through EA_CALC_16.
+// non-BP plus BP-based 16-bit MOV forms, 0x67 mod=01 signed disp8, and
+// 0x67 mod=10 disp16 16-bit MOV forms through EA_CALC_16.
 
 import keystone86_pkg::*;
 
@@ -355,8 +355,9 @@ module cpu_top (
     // SIB.base, then SIB.index on a wait cycle. The no-base SIB disp32 forms
     // either ignore the read value (index=100) or select SIB.index directly
     // (Pass 6G-2). EA_CALC_16 direct disp16 does not consume the read value;
-    // Pass 6H-2/6H-3 no-displacement forms and Pass 6H-4 signed-disp8 forms
-    // use this same single read path, sequencing [BX/BP+SI/DI] internally.
+    // Pass 6H-2/6H-3 no-displacement forms, Pass 6H-4 signed-disp8 forms,
+    // and Pass 6H-5 disp16 forms use this same single read path, sequencing
+    // [BX/BP+SI/DI] internally.
     // No second architectural read owner is introduced.
     assign gpr_rd_idx  = ((ea_svc_id == EA_CALC_32) ||
                           (ea_svc_id == EA_CALC_16)) ? ea_base_gpr_rd_idx :

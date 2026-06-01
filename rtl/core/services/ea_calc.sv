@@ -1,7 +1,7 @@
 // Keystone86 / Aegis
 // rtl/core/services/ea_calc.sv
 //
-// Bounded Rung 6 effective-address service through Pass 6H-4.
+// Bounded Rung 6 effective-address service through Pass 6H-5.
 //
 // This slice implements only EA_CALC_32 for:
 //   ModRM.mod=00, ModRM.r/m=101
@@ -26,9 +26,11 @@
 //   r/m=010 [BP+SI] and r/m=011 [BP+DI].
 // Pass 6H-4 adds only 0x67 ModRM.mod=01 signed disp8 forms for all
 // 16-bit r/m encodings, with the low-16 result wrapping before zero-extension.
+// Pass 6H-5 adds only 0x67 ModRM.mod=10 disp16 forms for all 16-bit r/m
+// encodings, using the same wrapped offset contract.
 // Two-register forms sequence over the existing single committed-GPR read
-// path. 16-bit mod=10, segment-base/default-SS linearization, protection
-// checks, memory access, and Rung 7 behavior remain unsupported.
+// path. Segment-base/default-SS linearization, protection checks, memory
+// access, and Rung 7 behavior remain unsupported.
 
 import keystone86_pkg::*;
 
@@ -57,6 +59,7 @@ module ea_calc (
     localparam logic [3:0] MRM_MEM_NO_DISP = 4'h1;
     localparam logic [3:0] MRM_MEM_DISP8 = 4'h2;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
+    localparam logic [3:0] MRM_MEM_DISP16 = 4'h4;
     localparam logic [3:0] MRM_DIRECT16 = 4'h8;
     localparam logic [3:0] MRM_SIB = 4'h5;
     localparam logic [3:0] MRM_SIB_DISP8 = 4'h6;
@@ -87,6 +90,7 @@ module ea_calc (
     logic        authorized_sib_mem_form_w;
     logic        addr16_nodisp_mem_form_w;
     logic        addr16_disp8_mem_form_w;
+    logic        addr16_disp16_mem_form_w;
     logic        addr16_reg_mem_form_w;
     logic        addr16_two_reg_mem_form_w;
 
@@ -127,8 +131,16 @@ module ea_calc (
                (meta_modrm_byte[7:6] == 2'b01);
     endfunction
 
+    function automatic logic is_addr16_disp16_mem_form;
+        return !meta_addrsz &&
+               (meta_modrm_class == MRM_MEM_DISP16) &&
+               (meta_modrm_byte[7:6] == 2'b10);
+    endfunction
+
     function automatic logic is_addr16_reg_mem_form;
-        return is_addr16_nodisp_mem_form() || is_addr16_disp8_mem_form();
+        return is_addr16_nodisp_mem_form() ||
+               is_addr16_disp8_mem_form() ||
+               is_addr16_disp16_mem_form();
     endfunction
 
     function automatic logic is_addr16_two_reg_mem_form;
@@ -146,7 +158,7 @@ module ea_calc (
             3'b111: return 3'h3; // EBX/BX
             3'b010,
             3'b011,
-            3'b110: return 3'h5; // EBP/BP; r/m=110 is BP only for mod=01.
+            3'b110: return 3'h5; // EBP/BP for disp8/disp16 r/m=110 forms.
             3'b100: return 3'h6; // ESI/SI
             3'b101: return 3'h7; // EDI/DI
             default: return 3'h0;
@@ -367,8 +379,14 @@ module ea_calc (
         !meta_addrsz &&
         (meta_modrm_class == MRM_MEM_DISP8) &&
         (meta_modrm_byte[7:6] == 2'b01);
+    assign addr16_disp16_mem_form_w =
+        !meta_addrsz &&
+        (meta_modrm_class == MRM_MEM_DISP16) &&
+        (meta_modrm_byte[7:6] == 2'b10);
     assign addr16_reg_mem_form_w =
-        addr16_nodisp_mem_form_w || addr16_disp8_mem_form_w;
+        addr16_nodisp_mem_form_w ||
+        addr16_disp8_mem_form_w ||
+        addr16_disp16_mem_form_w;
     assign addr16_two_reg_mem_form_w =
         addr16_reg_mem_form_w &&
         ((meta_modrm_byte[2:0] == 3'b000) ||

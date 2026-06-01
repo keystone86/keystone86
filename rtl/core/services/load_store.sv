@@ -27,7 +27,9 @@
 // Pass 6H-3 additionally allows only 0x67 address-size no-displacement
 // BP-based [BP+SI]/[BP+DI] forms after EA_CALC_16 has staged T2.
 // Pass 6H-4 additionally allows only 0x67 address-size ModRM.mod=01 signed
-// disp8 forms after EA_CALC_16 has staged T2.
+// disp8 forms after EA_CALC_16 has staged T2. Pass 6H-5 additionally allows
+// only 0x67 address-size ModRM.mod=10 disp16 forms after EA_CALC_16 has
+// staged T2.
 
 import keystone86_pkg::*;
 
@@ -84,6 +86,7 @@ module load_store (
     localparam logic [3:0] MRM_MEM_NO_DISP = 4'h1;
     localparam logic [3:0] MRM_MEM_DISP8 = 4'h2;
     localparam logic [3:0] MRM_MEM_DISP32 = 4'h3;
+    localparam logic [3:0] MRM_MEM_DISP16 = 4'h4;
     localparam logic [3:0] MRM_DIRECT16 = 4'h8;
     localparam logic [3:0] MRM_SIB = 4'h5;
     localparam logic [3:0] MRM_SIB_DISP8 = 4'h6;
@@ -171,6 +174,12 @@ module load_store (
                (meta_modrm_byte[7:6] == 2'b01);
     endfunction
 
+    function automatic logic is_addr16_disp16_mem_form;
+        return !meta_addrsz &&
+               (meta_modrm_class == MRM_MEM_DISP16) &&
+               (meta_modrm_byte[7:6] == 2'b10);
+    endfunction
+
     function automatic logic is_base_nodisp_mem_form;
         return meta_addrsz &&
                (meta_modrm_class == MRM_MEM_NO_DISP) &&
@@ -242,6 +251,7 @@ module load_store (
                is_direct_disp16_mem_form() ||
                is_addr16_nodisp_mem_form() ||
                is_addr16_disp8_mem_form() ||
+               is_addr16_disp16_mem_form() ||
                is_base_nodisp_mem_form() ||
                is_base_disp8_mem_form() ||
                is_base_disp32_mem_form() ||
