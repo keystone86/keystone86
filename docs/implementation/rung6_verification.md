@@ -7,24 +7,96 @@ This document records verification evidence for committed Rung 6 work.
 Current recorded implementation commit:
 
 ```text
-1b57e6555041428232b4a8fc078b8069fdcdc8a0
+6b25c5925cafa9ce765e914d42d649bd41949b82
 ```
 
 Short commit:
 
 ```text
-1b57e65
+6b25c59
 ```
 
 Recorded scope:
 
 ```text
-Bounded Rung 6 Pass 6H-4 only:
-0x67 address-size override for 16-bit ModRM.mod=01 signed disp8
+Bounded Rung 6 Pass 6H-5 only:
+0x67 address-size override for 16-bit ModRM.mod=10 disp16
 MOV memory addressing, offset-only
 ```
 
-Implemented Pass 6H-4 addressing subset:
+Implemented Pass 6H-5 addressing subset:
+
+- `0x67` address-size override present
+- 16-bit addressing only
+- `ModRM.mod = 10`
+- disp16 present
+- authorized `r/m` forms:
+  - `r/m=000` `[BX+SI] + disp16`
+  - `r/m=001` `[BX+DI] + disp16`
+  - `r/m=010` `[BP+SI] + disp16`
+  - `r/m=011` `[BP+DI] + disp16`
+  - `r/m=100` `[SI] + disp16`
+  - `r/m=101` `[DI] + disp16`
+  - `r/m=110` `[BP] + disp16`
+  - `r/m=111` `[BX] + disp16`
+- effective offset computed from low 16 bits plus disp16
+- result wraps to 16 bits before zero-extension
+- `EA_CALC_16` writes `T2 = zero-extended wrapped 16-bit effective offset`
+- no segment-base addition
+- no default-SS linearization
+- no protected/page/segment behavior
+- no full `0x67` architecture
+- no broad `0x66` architecture
+- no Rung 7
+
+Implemented Pass 6H-5 MOV forms over this EA subset only:
+
+- `0x67` + `8A /r` `MOV r8, r/m8`, memory source
+- `0x67` + `8B /r` `MOV r32, r/m32`, memory source
+- `0x66` + `0x67` + `8B /r` `MOV r16, r/m16`, memory source
+- `0x67` + `88 /r` `MOV r/m8, r8`, memory destination
+- `0x67` + `89 /r` `MOV r/m32, r32`, memory destination
+- `0x66` + `0x67` + `89 /r` `MOV r/m16, r16`, memory destination
+- `0x67` + `C6 /0 ib` `MOV r/m8, imm8`, memory destination
+- `0x67` + `C7 /0 id` `MOV r/m32, imm32`, memory destination
+- `0x66` + `0x67` + `C7 /0 iw` `MOV r/m16, imm16`, memory destination
+
+Implemented Pass 6H-5 behavior:
+
+- reuses existing MOV microcode structure after `EA_CALC_16` produces `T2`
+- reuses existing `0x67` / address-size metadata from Pass 6H-1 through
+  Pass 6H-4
+- reuses existing decoder displacement metadata patterns from direct disp16
+  and default-32 displacement handling
+- reuses existing `EA_CALC_16` service ID and output contract
+- extends `EA_CALC_16` only for authorized `mod=10` disp16 forms
+- reads low 16 bits of existing committed 32-bit GPRs for BX, BP, SI, and DI
+- uses existing single committed-GPR read plumbing
+- does not add a second physical committed-GPR read port
+- two-register forms sequence inside `EA_CALC_16` over the existing single
+  read path
+- reuses `LOAD_RM8`, `LOAD_RM16`, and `LOAD_RM32` for memory-source reads
+- reuses `STORE_RM8`, `STORE_RM16`, and `STORE_RM32` for memory-destination
+  writes
+- reuses `FETCH_IMM8`, `FETCH_IMM16`, and `FETCH_IMM32` for `C6/C7`
+  immediate-to-memory forms
+- preserves Pass 6H-1 direct disp16 behavior
+- preserves Pass 6H-2 no-displacement non-BP behavior
+- preserves Pass 6H-3 no-displacement BP-based behavior
+- preserves Pass 6H-4 `mod=01` signed disp8 behavior
+- preserves all default-32 behavior verified through Pass 6G-2
+- preserves bounded `0x66` behavior for authorized MOV forms only
+- preserves `ModRM.mod=11` register forms for non-`0x67` forms
+- keeps `0x67` + `ModRM.mod=11` register forms unsupported
+- preserves `C6/C7` non-`/0` unsupported behavior
+- preserves EFLAGS unchanged
+- does not add new frozen-spec fields
+- does not add a new service ID
+- does not add a new microinstruction opcode
+- does not add a new commit mask
+- does not add a new opcode class
+
+Previously implemented Pass 6H-4 addressing subset:
 
 - `0x67` address-size override present
 - 16-bit addressing only
@@ -50,7 +122,7 @@ Implemented Pass 6H-4 addressing subset:
 - no broad `0x66` architecture
 - no Rung 7
 
-Implemented Pass 6H-4 MOV forms over this EA subset only:
+Previously implemented Pass 6H-4 MOV forms over this EA subset only:
 
 - `0x67` + `8A /r` `MOV r8, r/m8`, memory source
 - `0x67` + `8B /r` `MOV r32, r/m32`, memory source
@@ -62,7 +134,7 @@ Implemented Pass 6H-4 MOV forms over this EA subset only:
 - `0x67` + `C7 /0 id` `MOV r/m32, imm32`, memory destination
 - `0x66` + `0x67` + `C7 /0 iw` `MOV r/m16, imm16`, memory destination
 
-Implemented Pass 6H-4 behavior:
+Previously implemented Pass 6H-4 behavior:
 
 - reuses existing MOV microcode structure after `EA_CALC_16` produces `T2`
 - reuses existing `0x67` / address-size metadata from Pass 6H-1 through
@@ -714,11 +786,49 @@ Pass 3 target for the `B8-BF` `MOV r32, imm32` GPR/commit proof.
 
 This is not full Rung 6 completion.
 This does not claim the full Appendix D MOV matrix.
-This confirms only bounded Pass 6H-3 `0x67` no-displacement BP-based MOV
-support, plus the previously recorded bounded Pass 6H-2, Pass 6H-1,
-Pass 6G-2, Pass 6G-1, Pass 6F-2, Pass 6F-1, Pass 6E-3, Pass 6E-2,
-Pass 6E-1, Pass 6D-1, Pass 6C-1, Pass 6B-1, Pass 6A-1, Pass 4B,
-Pass 5A, and Pass 5B support:
+This confirms only bounded Pass 6H-5 `0x67` `mod=10` disp16 MOV support,
+plus the previously recorded bounded Pass 6H-4, Pass 6H-3, Pass 6H-2,
+Pass 6H-1, Pass 6G-2, Pass 6G-1, Pass 6F-2, Pass 6F-1, Pass 6E-3,
+Pass 6E-2, Pass 6E-1, Pass 6D-1, Pass 6C-1, Pass 6B-1, Pass 6A-1,
+Pass 4B, Pass 5A, and Pass 5B support:
+
+- `0x67` + `8A /r` `MOV r8, r/m8`, memory source, 16-bit `mod=10`
+  disp16 EA only
+- `0x67` + `8B /r` `MOV r32, r/m32`, memory source, 16-bit `mod=10`
+  disp16 EA only
+- `0x66` + `0x67` + `8B /r` `MOV r16, r/m16`, memory source, 16-bit
+  `mod=10` disp16 EA only
+- `0x67` + `88 /r` `MOV r/m8, r8`, memory destination, 16-bit `mod=10`
+  disp16 EA only
+- `0x67` + `89 /r` `MOV r/m32, r32`, memory destination, 16-bit `mod=10`
+  disp16 EA only
+- `0x66` + `0x67` + `89 /r` `MOV r/m16, r16`, memory destination,
+  16-bit `mod=10` disp16 EA only
+- `0x67` + `C6 /0 ib` `MOV r/m8, imm8`, memory destination, 16-bit
+  `mod=10` disp16 EA only
+- `0x67` + `C7 /0 id` `MOV r/m32, imm32`, memory destination, 16-bit
+  `mod=10` disp16 EA only
+- `0x66` + `0x67` + `C7 /0 iw` `MOV r/m16, imm16`, memory destination,
+  16-bit `mod=10` disp16 EA only
+
+- `0x67` + `8A /r` `MOV r8, r/m8`, memory source, 16-bit `mod=01`
+  signed disp8 EA only
+- `0x67` + `8B /r` `MOV r32, r/m32`, memory source, 16-bit `mod=01`
+  signed disp8 EA only
+- `0x66` + `0x67` + `8B /r` `MOV r16, r/m16`, memory source, 16-bit
+  `mod=01` signed disp8 EA only
+- `0x67` + `88 /r` `MOV r/m8, r8`, memory destination, 16-bit `mod=01`
+  signed disp8 EA only
+- `0x67` + `89 /r` `MOV r/m32, r32`, memory destination, 16-bit `mod=01`
+  signed disp8 EA only
+- `0x66` + `0x67` + `89 /r` `MOV r/m16, r16`, memory destination,
+  16-bit `mod=01` signed disp8 EA only
+- `0x67` + `C6 /0 ib` `MOV r/m8, imm8`, memory destination, 16-bit
+  `mod=01` signed disp8 EA only
+- `0x67` + `C7 /0 id` `MOV r/m32, imm32`, memory destination, 16-bit
+  `mod=01` signed disp8 EA only
+- `0x66` + `0x67` + `C7 /0 iw` `MOV r/m16, imm16`, memory destination,
+  16-bit `mod=01` signed disp8 EA only
 
 - `0x67` + `8A /r` `MOV r8, r/m8`, memory source, 16-bit no-displacement
   BP-based EA only
@@ -976,6 +1086,184 @@ ignored `unique` case qualities were present during simulation builds. They did
 not fail the commands.
 
 Rung 5 regression still passes at this committed state.
+Rung 7 remains blocked.
+
+## Pass 6H-5 Evidence
+
+Date recorded: 2026-06-01 UTC.
+
+Commands run after commit `6b25c5925cafa9ce765e914d42d649bd41949b82`:
+
+```sh
+make codegen
+make ucode
+make rung5-regress
+make rung6-pass2-sim
+make rung6-pass4a-sim
+make rung6-pass4b-sim
+make rung6-pass5a-sim
+make rung6-pass5b-sim
+make rung6-pass6a1-sim
+make rung6-pass6b1-sim
+make rung6-pass6c1-sim
+make rung6-pass6d1-sim
+make rung6-pass6e1-sim
+make rung6-pass6e2-sim
+make rung6-pass6e3-sim
+make rung6-pass6f1-sim
+make rung6-pass6g1-sim
+make rung6-pass6g2-sim
+make rung6-pass6h1-sim
+make rung6-pass6h2-sim
+make rung6-pass6h3-sim
+make rung6-pass6h4-sim
+make rung6-pass6h5-sim
+git diff --check
+git status --short
+```
+
+Run state:
+
+- tested implementation commit:
+  `6b25c5925cafa9ce765e914d42d649bd41949b82`
+- verification was run after that implementation commit
+- final `git status --short` from the run was clean
+- `make codegen` and `make ucode` did not leave tracked generated drift
+- this documentation update is separate from the tested implementation commit
+
+Results:
+
+| Command | Result |
+|---|---|
+| `make codegen` | PASS |
+| `make ucode` | PASS |
+| `make rung5-regress` | PASS |
+| `make rung6-pass2-sim` | PASS |
+| `make rung6-pass4a-sim` | PASS |
+| `make rung6-pass4b-sim` | PASS |
+| `make rung6-pass5a-sim` | PASS |
+| `make rung6-pass5b-sim` | PASS |
+| `make rung6-pass6a1-sim` | PASS |
+| `make rung6-pass6b1-sim` | PASS |
+| `make rung6-pass6c1-sim` | PASS |
+| `make rung6-pass6d1-sim` | PASS |
+| `make rung6-pass6e1-sim` | PASS |
+| `make rung6-pass6e2-sim` | PASS |
+| `make rung6-pass6e3-sim` | PASS |
+| `make rung6-pass6f1-sim` | PASS |
+| `make rung6-pass6g1-sim` | PASS |
+| `make rung6-pass6g2-sim` | PASS |
+| `make rung6-pass6h1-sim` | PASS |
+| `make rung6-pass6h2-sim` | PASS |
+| `make rung6-pass6h3-sim` | PASS |
+| `make rung6-pass6h4-sim` | PASS |
+| `make rung6-pass6h5-sim` | PASS |
+| `git diff --check` | PASS, no output |
+| `git status --short` | PASS, clean output |
+
+Existing non-fatal Icarus/Iverilog warnings about time units, constant selects,
+and ignored `unique` case qualities were present during simulation builds. They
+did not fail the commands.
+
+The bounded Rung 6 Pass 6H-5 simulation proves only the authorized `0x67`
+16-bit `ModRM.mod=10` disp16 effective-address slice:
+
+- `0x67` + `8A /r` byte loads from authorized 16-bit `mod=10` disp16
+  memory sources pass
+- `0x67` + `8B /r` dword loads from authorized 16-bit `mod=10` disp16
+  memory sources pass
+- `0x66` + `0x67` + `8B /r` word loads from authorized 16-bit `mod=10`
+  disp16 memory sources pass
+- `0x67` + `88 /r` byte stores to authorized 16-bit `mod=10` disp16
+  memory destinations pass
+- `0x67` + `89 /r` dword stores to authorized 16-bit `mod=10` disp16
+  memory destinations pass
+- `0x66` + `0x67` + `89 /r` word stores to authorized 16-bit `mod=10`
+  disp16 memory destinations pass
+- `0x67` + `C6 /0 ib` byte immediate stores to authorized 16-bit `mod=10`
+  disp16 memory destinations pass
+- `0x67` + `C7 /0 id` dword immediate stores to authorized 16-bit `mod=10`
+  disp16 memory destinations pass
+- `0x66` + `0x67` + `C7 /0 iw` word immediate stores to authorized
+  16-bit `mod=10` disp16 memory destinations pass
+- authorized `ModRM.mod=10` forms include all eight 16-bit `r/m` encodings:
+  `[BX+SI]`, `[BX+DI]`, `[BP+SI]`, `[BP+DI]`, `[SI]`, `[DI]`, `[BP]`, and
+  `[BX]`, each plus disp16
+- `EA_CALC_16` computes the effective offset from the low 16 bits of selected
+  committed GPRs plus disp16
+- effective offsets wrap to 16 bits before zero-extension
+- `EA_CALC_16` writes `T2 = zero-extended wrapped 16-bit effective offset`
+  for the authorized subset
+- two-register forms sequence inside `EA_CALC_16` over the existing single
+  committed-GPR read path
+- no second physical committed-GPR read port is added
+- Pass 6H-1 direct disp16 behavior remains preserved
+- Pass 6H-2 no-displacement non-BP behavior remains preserved
+- Pass 6H-3 no-displacement BP-based behavior remains preserved
+- Pass 6H-4 `mod=01` signed disp8 behavior remains preserved
+- default-32 behavior verified through Pass 6G-2 remains preserved
+- bounded `0x66` behavior remains limited to authorized MOV forms only
+- `ModRM.mod=11` register forms for non-`0x67` forms remain preserved
+- `0x67` + `ModRM.mod=11` register forms remain unsupported
+- `C6/C7` non-`/0` forms remain unsupported
+- no new frozen-spec field, opcode class, service ID, commit mask, or
+  microinstruction opcode is used
+- EFLAGS remain unchanged
+- no segment-base addition is implemented
+- no default-SS linearization is implemented
+- no protected/page/segment behavior is implemented
+- no full `0x67` architecture is implemented
+- no broad `0x66` architecture is implemented
+- no fault occurs during the authorized bounded Pass 6H-5 MOV sequence
+
+The existing Pass 2, Pass 4A, Pass 4B, Pass 5A, Pass 5B, Pass 6A-1,
+Pass 6B-1, Pass 6C-1, Pass 6D-1, Pass 6E-1, Pass 6E-2, Pass 6E-3,
+Pass 6F-1, Pass 6G-1, Pass 6G-2, Pass 6H-1, Pass 6H-2, Pass 6H-3, and
+Pass 6H-4 simulations still prove preservation of:
+
+- `B8-BF` `MOV r32, imm32`
+- `B0-B7` `MOV r8, imm8`
+- `0x66` + `B8-BF` `MOV r16, imm16`
+- `88/89/8A/8B` register-register `r8/r32` with `ModRM.mod=11`
+- `0x66` + `89/8B` register-register `r16` with `ModRM.mod=11`
+- `8A/8B/66+8B` memory-source absolute disp32
+- `88/89/66+89` memory-destination absolute disp32
+- `C6/C7/66+C7` immediate-to-memory absolute disp32
+- `C6/C7/66+C7` immediate-to-register `ModRM.mod=11`
+- default-32 non-SIB base-only no-displacement memory addressing
+- default-32 non-SIB `mod=01` signed disp8 memory addressing
+- default-32 non-SIB `mod=10` signed disp32 memory addressing
+- default-32 base-only SIB memory addressing
+- default-32 SIB no-base disp32 memory addressing
+- default-32 base-present indexed SIB memory addressing
+- default-32 no-base indexed SIB disp32 memory addressing
+- `0x67` direct disp16 memory addressing from Pass 6H-1
+- `0x67` no-displacement non-BP memory addressing from Pass 6H-2
+- `0x67` no-displacement BP-based memory addressing from Pass 6H-3
+- `0x67` `mod=01` signed disp8 memory addressing from Pass 6H-4
+
+Explicit Pass 6H-5 non-claims:
+
+- this is not full Rung 6 completion
+- this does not claim the full Appendix D MOV matrix
+- this proves only bounded Pass 6H-5 `0x67` `mod=10` disp16 MOV support
+- segment-base addition remains unsupported
+- default-SS linearization remains unsupported
+- protected/page/segment behavior remains unsupported
+- full `0x67` architecture is not implemented
+- broad `0x66` architecture is not implemented
+- broader MOV families and the full MOV matrix remain unverified
+- final Rung 6 acceptance remains blocked
+
+Remaining Rung 6 blockers include segment-base/default-SS/protected/page
+behavior, broader MOV families, full MOV matrix verification, and final
+Rung 6 acceptance.
+
+Rung 5 regression still passes at this committed state.
+Existing Rung 6 Pass 2, Pass 4A, Pass 4B, Pass 5A, Pass 5B, Pass 6A-1,
+Pass 6B-1, Pass 6C-1, Pass 6D-1, Pass 6E-1, Pass 6E-2, Pass 6E-3,
+Pass 6F-1, Pass 6G-1, Pass 6G-2, Pass 6H-1, Pass 6H-2, Pass 6H-3, and
+Pass 6H-4 tests still pass.
 Rung 7 remains blocked.
 
 ## Pass 6H-4 Evidence
@@ -3382,8 +3670,9 @@ This verification record does not claim:
 - full Rung 6 completion
 - full Rung 6 SIB/addressing completion beyond bounded Pass 6G-2
 - full Rung 6 16-bit addressing completion beyond bounded Pass 6H-1 direct
-  disp16, Pass 6H-2 no-displacement non-BP forms, and Pass 6H-3
-  no-displacement BP-based forms, and Pass 6H-4 `mod=01` signed disp8 forms
+  disp16, Pass 6H-2 no-displacement non-BP forms, Pass 6H-3
+  no-displacement BP-based forms, Pass 6H-4 `mod=01` signed disp8 forms, and
+  Pass 6H-5 `mod=10` disp16 forms
 - full Appendix D MOV matrix completion
 - full Rung 6 acceptance
 - broad `0x66` prefix architecture
@@ -3396,22 +3685,22 @@ This verification record does not claim:
   disp8, non-SIB `mod=10` signed disp32, base-only SIB forms, and SIB no-base
   disp32 forms, base-present indexed SIB forms, and no-base indexed SIB disp32
   forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, and `0x67` `mod=01` signed disp8
-  forms
+  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
+  and `0x67` `mod=10` disp16 forms
 - `8A/8B` memory-source addressing beyond direct absolute disp32, authorized
   default-32 base-only no-displacement, non-SIB `mod=01` signed disp8,
   non-SIB `mod=10` signed disp32 forms, base-only SIB forms, and SIB no-base
   disp32 forms, base-present indexed SIB forms, no-base indexed SIB disp32
   forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, and `0x67` `mod=01` signed disp8
-  forms
+  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
+  and `0x67` `mod=10` disp16 forms
 - `C6/C7` immediate-to-memory addressing beyond direct absolute disp32,
   authorized default-32 base-only no-displacement, non-SIB `mod=01` signed
   disp8, non-SIB `mod=10` signed disp32, base-only SIB forms, and SIB no-base
   disp32 forms, base-present indexed SIB forms, no-base indexed SIB disp32
   forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, and `0x67` `mod=01` signed disp8
-  forms
+  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
+  and `0x67` `mod=10` disp16 forms
 - `C6/C7` register-destination forms beyond `ModRM.mod=11` and `/0`
 - `C6/C7` non-`/0` opcode-extension forms
 - `C6/C7` behavior without the tested immediate fetch, direct absolute
@@ -3420,8 +3709,8 @@ This verification record does not claim:
   `STORE_RM*`, `STAGE_GPR`, `ENDI CM_NOP|CM_EIP`, or `ENDI CM_MOV_REG`
   sequence
 - `EA_CALC_16` support beyond bounded Pass 6H-1 direct disp16, Pass 6H-2
-  no-displacement non-BP forms, Pass 6H-3 no-displacement BP-based forms, and
-  Pass 6H-4 `mod=01` signed disp8 forms
+  no-displacement non-BP forms, Pass 6H-3 no-displacement BP-based forms,
+  Pass 6H-4 `mod=01` signed disp8 forms, and Pass 6H-5 `mod=10` disp16 forms
 - `EA_CALC_32` beyond direct absolute disp32 and authorized default-32
   base-only no-displacement, non-SIB `mod=01` signed disp8, and non-SIB
   `mod=10` signed disp32 forms, base-only SIB forms, SIB no-base disp32
@@ -3431,23 +3720,22 @@ This verification record does not claim:
   disp8, non-SIB `mod=10` signed disp32, base-only SIB forms, SIB no-base
   disp32 forms, base-present indexed SIB forms, no-base indexed SIB disp32
   forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, and `0x67` `mod=01` signed disp8
-  forms
+  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
+  and `0x67` `mod=10` disp16 forms
 - `STORE_RM*` beyond bounded memory-destination writes for direct absolute
   disp32 MOV, authorized default-32 base-only no-displacement MOV, and
   authorized default-32 non-SIB `mod=01` signed disp8 and non-SIB `mod=10`
   signed disp32 MOV, base-only SIB MOV, SIB no-base disp32 MOV, and
-  base-present indexed SIB MOV, no-base indexed SIB disp32 MOV, `0x67` direct
-  disp16 MOV, `0x67` no-displacement non-BP MOV, and `0x67`
-  no-displacement BP-based MOV, and `0x67` `mod=01` signed disp8 MOV,
-  including bounded immediate-to-memory writes
+  base-present indexed SIB MOV, no-base indexed SIB disp32 MOV, `0x67`
+  direct disp16 MOV, `0x67` no-displacement non-BP MOV, `0x67`
+  no-displacement BP-based MOV, `0x67` `mod=01` signed disp8 MOV, and
+  `0x67` `mod=10` disp16 MOV, including bounded immediate-to-memory writes
 - general-purpose `LOAD_REG_META` or `STORE_REG_META` completion beyond the
   bounded Pass 5A/5B register-register MOV and Pass 6B-1 memory-destination MOV
   metadata use
 - SIB addressing beyond bounded base-only no-index forms, no-base disp32
   no-index forms, base-present indexed forms, and no-base indexed SIB disp32
   forms
-- 16-bit `mod=10` disp16 addressing behavior
 - segment-base addition for 16-bit addressing
 - default-SS linearization
 - protected-mode, page, or segment behavior
@@ -3465,18 +3753,19 @@ Remaining Rung 6 blockers include:
   non-SIB `mod=10` signed disp32 forms, base-only SIB forms, and SIB no-base
   disp32 forms, base-present indexed SIB forms, no-base indexed SIB disp32
   forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, and `0x67` `mod=01` signed disp8
-  forms
+  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
+  and `0x67` `mod=10` disp16 forms
 - `STORE_RM*` beyond bounded memory-destination direct absolute disp32 and
   default-32 base-only no-displacement, non-SIB `mod=01` signed disp8, and
   non-SIB `mod=10` signed disp32 MOV, base-only SIB MOV, SIB no-base disp32
   MOV, base-present indexed SIB MOV, no-base indexed SIB disp32 MOV, `0x67`
-  direct disp16 MOV, `0x67` no-displacement non-BP MOV, and `0x67`
-  no-displacement BP-based MOV, and `0x67` `mod=01` signed disp8 MOV
+  direct disp16 MOV, `0x67` no-displacement non-BP MOV, `0x67`
+  no-displacement BP-based MOV, `0x67` `mod=01` signed disp8 MOV, and
+  `0x67` `mod=10` disp16 MOV
 - full `0x67` address-size override architecture
 - `EA_CALC_16` beyond bounded direct disp16, no-displacement non-BP forms,
-  no-displacement BP-based forms, and `mod=01` signed disp8 forms
-- 16-bit `mod=10` disp16 addressing
+  no-displacement BP-based forms, `mod=01` signed disp8 forms, and `mod=10`
+  disp16 forms
 - segment-base addition
 - default-SS linearization
 - protected-mode/page/segment behavior
