@@ -4,25 +4,27 @@
 
 This document records verification evidence for committed Rung 6 work.
 
-Current recorded implementation commit:
+Current recorded implementation/test commit:
 
 ```text
-6b25c5925cafa9ce765e914d42d649bd41949b82
+39749d4643642eef1b41b354505c9ff26d271002
 ```
 
 Short commit:
 
 ```text
-6b25c59
+39749d4
 ```
 
 Recorded scope:
 
 ```text
-Bounded Rung 6 Pass 6H-5 only:
-0x67 address-size override for 16-bit ModRM.mod=10 disp16
-MOV memory addressing, offset-only
+Test-only final Appendix D MOV matrix/reference harness after Pass 6H-5.
 ```
+
+This top-level scope records the latest committed verification checkpoint.
+The previously recorded Pass 6H-5 implementation scope remains below as
+historical context for the implementation exercised by the final MOV matrix.
 
 Implemented Pass 6H-5 addressing subset:
 
@@ -784,9 +786,10 @@ Pass 3 records a documentation-only confirmation. No implementation change was
 required: the committed Pass 2 implementation already satisfies the bounded
 Pass 3 target for the `B8-BF` `MOV r32, imm32` GPR/commit proof.
 
-This is not full Rung 6 completion.
-This does not claim the full Appendix D MOV matrix.
-This confirms only bounded Pass 6H-5 `0x67` `mod=10` disp16 MOV support,
+Historical Pass 6H-5 scope was not full Rung 6 completion and did not claim
+the full Appendix D MOV matrix. The final MOV matrix regression proof is
+recorded later in this document. The historical Pass 6H-5 scope confirmed only
+bounded Pass 6H-5 `0x67` `mod=10` disp16 MOV support,
 plus the previously recorded bounded Pass 6H-4, Pass 6H-3, Pass 6H-2,
 Pass 6H-1, Pass 6G-2, Pass 6G-1, Pass 6F-2, Pass 6F-1, Pass 6E-3,
 Pass 6E-2, Pass 6E-1, Pass 6D-1, Pass 6C-1, Pass 6B-1, Pass 6A-1,
@@ -1087,6 +1090,170 @@ not fail the commands.
 
 Rung 5 regression still passes at this committed state.
 Rung 7 remains blocked.
+
+## Final MOV Matrix Regression Evidence
+
+Date recorded: 2026-06-02 UTC.
+
+Implementation/test commit:
+
+```text
+39749d4643642eef1b41b354505c9ff26d271002
+```
+
+Short commit:
+
+```text
+39749d4
+```
+
+Implementation/test commit changed only:
+
+- `Makefile`
+- `sim/tb/tb_rung6_mov_matrix.sv`
+
+Implemented test-only behavior:
+
+- added one table-driven final MOV matrix/reference harness:
+  `sim/tb/tb_rung6_mov_matrix.sv`
+- added `Makefile` targets:
+  - `rung6-mov-matrix-sim`
+  - `rung6-mov-matrix-clean`
+  - `rung6-regress`
+- `rung6-regress` includes `rung5-regress`, all existing Rung 6 pass targets
+  through `rung6-pass6h5-sim`, including `rung6-pass6f2-sim`, and
+  `rung6-mov-matrix-sim`
+
+Commands run after commit
+`39749d4643642eef1b41b354505c9ff26d271002`:
+
+```sh
+make codegen
+make ucode
+make rung5-regress
+make rung6-regress
+git diff --check
+git status --short
+```
+
+Run state:
+
+- tested implementation/test commit:
+  `39749d4643642eef1b41b354505c9ff26d271002`
+- verification was run after that implementation/test commit
+- final `git status --short` from the run was clean
+- `make codegen` and `make ucode` did not leave tracked generated drift
+- this documentation update is separate from the tested implementation/test
+  commit
+
+Results:
+
+| Command | Result |
+|---|---|
+| `make codegen` | PASS |
+| `make ucode` | PASS |
+| `make rung5-regress` | PASS |
+| `make rung6-regress` | PASS, including `PASS: Rung 6 Appendix D MOV matrix completed` |
+| `git diff --check` | PASS, no output |
+| `git status --short` | PASS, clean output |
+
+Existing non-fatal Icarus/Iverilog warnings about time units, constant selects,
+and ignored `unique` case qualities were present during simulation builds. They
+did not fail the commands.
+
+The final MOV matrix regression proves the following Appendix D MOV opcode
+forms against the deterministic in-test reference oracle:
+
+- `B0-B7` `MOV r8, imm8`
+- `B8-BF` `MOV r32, imm32`
+- `0x66` + `B8-BF` `MOV r16, imm16`
+- `88 /r` `MOV r/m8, r8`
+- `89 /r` `MOV r/m32, r32`
+- `0x66` + `89 /r` `MOV r/m16, r16`
+- `8A /r` `MOV r8, r/m8`
+- `8B /r` `MOV r32, r/m32`
+- `0x66` + `8B /r` `MOV r16, r/m16`
+- `C6 /0 ib` `MOV r/m8, imm8`
+- `C7 /0 id` `MOV r/m32, imm32`
+- `0x66` + `C7 /0 iw` `MOV r/m16, imm16`
+- bounded `C6/C7 /0` `ModRM.mod=11` immediate-to-register forms already
+  supported by the current Rung 6 flow
+
+Matrix dimensions proven:
+
+- register-immediate forms cover all eight destinations for 8-bit, 16-bit, and
+  32-bit widths
+- register-register forms cover all 8x8 source/destination combinations for
+  8-bit, 16-bit, and 32-bit widths in both opcode directions
+- register-from-memory forms cover all eight destination registers across all
+  13 listed addressing classes
+- memory-from-register forms cover all eight source registers across all
+  13 listed addressing classes
+- memory-immediate forms cover all 13 listed addressing classes for the
+  applicable 8-bit, 16-bit, and 32-bit forms
+- EFLAGS unchanged checks pass
+- EIP advance / `M_NEXT_EIP` checks pass
+- store bus address checks pass
+- store byte-enable checks pass
+- store data-byte checks pass
+
+Addressing classes covered by the matrix:
+
+- default-32 direct disp32
+- default-32 non-SIB no-displacement base
+- default-32 non-SIB `mod=01` signed disp8
+- default-32 non-SIB `mod=10` signed disp32
+- default-32 base-only SIB
+- default-32 SIB no-base disp32
+- default-32 SIB base-present indexed
+- default-32 SIB no-base indexed disp32
+- addr16 direct disp16
+- addr16 no-displacement non-BP
+- addr16 no-displacement BP pair
+- addr16 `mod=01` signed disp8
+- addr16 `mod=10` disp16
+
+Reference oracle behavior:
+
+- deterministic in-test oracle derived from Appendix D plus `CMD_MOV`
+  semantics
+- expected register write/merge for 8-bit, 16-bit, and 32-bit destinations
+- expected memory bytes and byte enables for 8-bit, 16-bit, and 32-bit stores
+- expected EIP advance / `M_NEXT_EIP` behavior
+- expected EFLAGS unchanged
+- expected effective offset only for the listed addressing modes
+- explicitly excludes segment-base addition
+- explicitly excludes default-SS linearization
+- explicitly excludes protected/page/segment behavior
+
+Unsupported and out-of-scope coverage remains bounded:
+
+- `C6/C7` non-`/0` forms remain unsupported
+- `0x67` + `ModRM.mod=11` remains unsupported
+- unsupported `0x67` + `0x66` prefix order remains an unsupported/prefix-only
+  boundary
+- `A0-A3` moffs forms are not generated and remain out of scope
+- segment/control/debug/test MOV forms are not generated and remain out of
+  scope
+- `MOVS`, `MOVSX`, and `MOVZX` are not generated and remain out of scope
+- broad `0x66` and full `0x67` architecture are not claimed
+- segment-base addition remains out of scope
+- default-SS linearization remains out of scope
+- protected/page/segment behavior remains out of scope
+
+This records the final MOV matrix regression proof. It is still not final
+Rung 6 acceptance by itself. Final Rung 6 acceptance cleanup remains separate.
+
+No RTL changed in commit `39749d4`. No microcode changed. No scripts changed.
+No protected authority files changed. No `AGENTS.md` change. No frozen spec
+change. No `docs/implementation/bringup/rung6.md` change.
+
+EFLAGS remain unchanged by the verified MOV forms. Rung 5 regression still
+passes. Rung 7 remains blocked.
+
+Older dated pass-evidence sections below preserve the non-claims and blockers
+that were true at those earlier checkpoints; the final MOV matrix verification
+status is the `39749d4` record above.
 
 ## Pass 6H-5 Evidence
 
@@ -3668,74 +3835,20 @@ The bounded Rung 6 Pass 2 simulation proves the first slice only:
 This verification record does not claim:
 
 - full Rung 6 completion
-- full Rung 6 SIB/addressing completion beyond bounded Pass 6G-2
-- full Rung 6 16-bit addressing completion beyond bounded Pass 6H-1 direct
-  disp16, Pass 6H-2 no-displacement non-BP forms, Pass 6H-3
-  no-displacement BP-based forms, Pass 6H-4 `mod=01` signed disp8 forms, and
-  Pass 6H-5 `mod=10` disp16 forms
-- full Appendix D MOV matrix completion
 - full Rung 6 acceptance
 - broad `0x66` prefix architecture
 - `0x66` support for non-authorized instructions
 - full `0x67` address-size override architecture
 - full prefixed-sequence coverage; the existing `0x67` MOV tests prove only the
   bounded 16-bit addressing slices explicitly recorded in this document
-- `88/89` memory-destination addressing beyond direct absolute disp32,
-  authorized default-32 base-only no-displacement, non-SIB `mod=01` signed
-  disp8, non-SIB `mod=10` signed disp32, base-only SIB forms, and SIB no-base
-  disp32 forms, base-present indexed SIB forms, and no-base indexed SIB disp32
-  forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
-  and `0x67` `mod=10` disp16 forms
-- `8A/8B` memory-source addressing beyond direct absolute disp32, authorized
-  default-32 base-only no-displacement, non-SIB `mod=01` signed disp8,
-  non-SIB `mod=10` signed disp32 forms, base-only SIB forms, and SIB no-base
-  disp32 forms, base-present indexed SIB forms, no-base indexed SIB disp32
-  forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
-  and `0x67` `mod=10` disp16 forms
-- `C6/C7` immediate-to-memory addressing beyond direct absolute disp32,
-  authorized default-32 base-only no-displacement, non-SIB `mod=01` signed
-  disp8, non-SIB `mod=10` signed disp32, base-only SIB forms, and SIB no-base
-  disp32 forms, base-present indexed SIB forms, no-base indexed SIB disp32
-  forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
-  and `0x67` `mod=10` disp16 forms
+- memory-source, memory-destination, or immediate-to-memory addressing beyond
+  the 13 listed final matrix addressing classes
 - `C6/C7` register-destination forms beyond `ModRM.mod=11` and `/0`
 - `C6/C7` non-`/0` opcode-extension forms
-- `C6/C7` behavior without the tested immediate fetch, direct absolute
-  disp32, base-only no-displacement, signed disp8, signed disp32, base-only
-  SIB, no-base SIB disp32, or base-present indexed SIB `EA_CALC_32`,
-  `STORE_RM*`, `STAGE_GPR`, `ENDI CM_NOP|CM_EIP`, or `ENDI CM_MOV_REG`
-  sequence
-- `EA_CALC_16` support beyond bounded Pass 6H-1 direct disp16, Pass 6H-2
-  no-displacement non-BP forms, Pass 6H-3 no-displacement BP-based forms,
-  Pass 6H-4 `mod=01` signed disp8 forms, and Pass 6H-5 `mod=10` disp16 forms
-- `EA_CALC_32` beyond direct absolute disp32 and authorized default-32
-  base-only no-displacement, non-SIB `mod=01` signed disp8, and non-SIB
-  `mod=10` signed disp32 forms, base-only SIB forms, SIB no-base disp32
-  forms, base-present indexed SIB forms, and no-base indexed SIB disp32 forms
-- `LOAD_RM*` beyond bounded memory-source reads for direct absolute disp32 and
-  authorized default-32 base-only no-displacement, non-SIB `mod=01` signed
-  disp8, non-SIB `mod=10` signed disp32, base-only SIB forms, SIB no-base
-  disp32 forms, base-present indexed SIB forms, no-base indexed SIB disp32
-  forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
-  and `0x67` `mod=10` disp16 forms
-- `STORE_RM*` beyond bounded memory-destination writes for direct absolute
-  disp32 MOV, authorized default-32 base-only no-displacement MOV, and
-  authorized default-32 non-SIB `mod=01` signed disp8 and non-SIB `mod=10`
-  signed disp32 MOV, base-only SIB MOV, SIB no-base disp32 MOV, and
-  base-present indexed SIB MOV, no-base indexed SIB disp32 MOV, `0x67`
-  direct disp16 MOV, `0x67` no-displacement non-BP MOV, `0x67`
-  no-displacement BP-based MOV, `0x67` `mod=01` signed disp8 MOV, and
-  `0x67` `mod=10` disp16 MOV, including bounded immediate-to-memory writes
-- general-purpose `LOAD_REG_META` or `STORE_REG_META` completion beyond the
-  bounded Pass 5A/5B register-register MOV and Pass 6B-1 memory-destination MOV
-  metadata use
-- SIB addressing beyond bounded base-only no-index forms, no-base disp32
-  no-index forms, base-present indexed forms, and no-base indexed SIB disp32
-  forms
+- `A0-A3` moffs MOV forms
+- segment/control/debug/test MOV forms
+- `MOVS`, `MOVSX`, or `MOVZX`
+- broad MOV-family behavior outside the generated final matrix cases
 - segment-base addition for 16-bit addressing
 - default-SS linearization
 - protected-mode, page, or segment behavior
@@ -3746,32 +3859,10 @@ This verification record does not claim:
 
 Remaining Rung 6 blockers include:
 
-- broader EA/addressing support
-- `C6/C7` non-`/0` extensions
-- `C6/C7` memory addressing beyond already verified direct absolute disp32,
-  default-32 base-only no-displacement, non-SIB `mod=01` signed disp8,
-  non-SIB `mod=10` signed disp32 forms, base-only SIB forms, and SIB no-base
-  disp32 forms, base-present indexed SIB forms, no-base indexed SIB disp32
-  forms, `0x67` direct disp16 forms, `0x67` no-displacement non-BP forms,
-  `0x67` no-displacement BP-based forms, `0x67` `mod=01` signed disp8 forms,
-  and `0x67` `mod=10` disp16 forms
-- `STORE_RM*` beyond bounded memory-destination direct absolute disp32 and
-  default-32 base-only no-displacement, non-SIB `mod=01` signed disp8, and
-  non-SIB `mod=10` signed disp32 MOV, base-only SIB MOV, SIB no-base disp32
-  MOV, base-present indexed SIB MOV, no-base indexed SIB disp32 MOV, `0x67`
-  direct disp16 MOV, `0x67` no-displacement non-BP MOV, `0x67`
-  no-displacement BP-based MOV, `0x67` `mod=01` signed disp8 MOV, and
-  `0x67` `mod=10` disp16 MOV
-- full `0x67` address-size override architecture
-- `EA_CALC_16` beyond bounded direct disp16, no-displacement non-BP forms,
-  no-displacement BP-based forms, `mod=01` signed disp8 forms, and `mod=10`
-  disp16 forms
 - segment-base addition
 - default-SS linearization
 - protected-mode/page/segment behavior
-- broader MOV families
-- general-purpose `LOAD_REG_META` / `STORE_REG_META` beyond bounded
-  register-register and Pass 6B-1 memory-destination MOV
-- full MOV matrix verification
-- full opcode-class dispatch
-- final Rung 6 acceptance
+- final Rung 6 acceptance cleanup and owner acceptance
+
+The final MOV matrix regression proof is recorded above. That proof does not
+start or complete final Rung 6 acceptance cleanup. Rung 7 remains blocked.
