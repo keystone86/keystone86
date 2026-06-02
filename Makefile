@@ -33,6 +33,7 @@ HOST_GID := $(shell id -g)
         rung6-pass6f2-sim rung6-pass6f2-clean \
         rung6-pass6g1-sim rung6-pass6g1-clean \
         rung6-pass6h5-sim rung6-pass6h5-clean \
+        rung6-mov-matrix-sim rung6-mov-matrix-clean rung6-regress \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -154,6 +155,9 @@ help:
 	@echo "  make rung6-pass6h4-clean   - remove Rung 6 Pass 6H-4 simulation artifacts"
 	@echo "  make rung6-pass6h5-sim     - compile and run bounded Rung 6 Pass 6H-5 MOV addr16 disp16 simulation"
 	@echo "  make rung6-pass6h5-clean   - remove Rung 6 Pass 6H-5 simulation artifacts"
+	@echo "  make rung6-mov-matrix-sim  - compile and run Rung 6 Appendix D MOV matrix simulation"
+	@echo "  make rung6-mov-matrix-clean - remove Rung 6 MOV matrix simulation artifacts"
+	@echo "  make rung6-regress         - run Rung 5 regression plus all required Rung 6 simulations"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -1041,6 +1045,54 @@ rung6-pass6h5-sim: require-container ucode
 rung6-pass6h5-clean: require-container
 	@rm -rf build/sim/rung6_pass6h5
 	@echo "Rung 6 Pass 6H-5 build artifacts removed."
+
+# ----------------------------------------------------------------
+# Rung 6 final MOV matrix — Appendix D proof harness
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG6_MOV_MATRIX = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung6_mov_matrix.sv
+
+rung6-mov-matrix-sim: require-container ucode
+	@echo "--- Rung 6 MOV matrix: compiling Appendix D MOV matrix RTL simulation ---"
+	@mkdir -p build/sim/rung6_mov_matrix
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung6_mov_matrix/tb_rung6_mov_matrix.vvp \
+		$(IVERILOG_SOURCES_RUNG6_MOV_MATRIX)
+	@echo "--- Rung 6 MOV matrix: running Appendix D MOV matrix simulation ---"
+	vvp build/sim/rung6_mov_matrix/tb_rung6_mov_matrix.vvp
+
+rung6-mov-matrix-clean: require-container
+	@rm -rf build/sim/rung6_mov_matrix
+	@echo "Rung 6 MOV matrix build artifacts removed."
+
+rung6-regress: require-container ucode
+	@echo "--- Rung 6 regression (includes Rung 5 baseline and required Rung 6 simulations) ---"
+	$(MAKE) rung5-regress
+	$(MAKE) rung6-pass2-sim
+	$(MAKE) rung6-pass4a-sim
+	$(MAKE) rung6-pass4b-sim
+	$(MAKE) rung6-pass5a-sim
+	$(MAKE) rung6-pass5b-sim
+	$(MAKE) rung6-pass6a1-sim
+	$(MAKE) rung6-pass6b1-sim
+	$(MAKE) rung6-pass6c1-sim
+	$(MAKE) rung6-pass6d1-sim
+	$(MAKE) rung6-pass6e1-sim
+	$(MAKE) rung6-pass6e2-sim
+	$(MAKE) rung6-pass6e3-sim
+	$(MAKE) rung6-pass6f1-sim
+	$(MAKE) rung6-pass6f2-sim
+	$(MAKE) rung6-pass6g1-sim
+	$(MAKE) rung6-pass6g2-sim
+	$(MAKE) rung6-pass6h1-sim
+	$(MAKE) rung6-pass6h2-sim
+	$(MAKE) rung6-pass6h3-sim
+	$(MAKE) rung6-pass6h4-sim
+	$(MAKE) rung6-pass6h5-sim
+	$(MAKE) rung6-mov-matrix-sim
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything
