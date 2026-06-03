@@ -12,13 +12,13 @@
 //   Test 5:  microsequencer returns to FETCH_DECODE after NOP
 //   Test 6:  10 consecutive NOPs execute without fault or deadlock
 //   Test 7:  100 consecutive NOPs — zero spurious faults, stable decode
-//   Test 8:  prefix-only: 0x66 classifies as ENTRY_PREFIX_ONLY (0x12),
+//   Test 8:  prefix-only: 0x67 classifies as ENTRY_PREFIX_ONLY (0x12),
 //            dispatches to uPC 0x030, no fault, EIP+1, FETCH_DECODE return
 //
 // Memory model (ctrl_mem):
 //   Returns 0x90 (NOP) normally.
 //   When inject_prefix is held high by the testbench, the NEXT fetch
-//   that starts (rd && !rd_pending) returns 0x66 instead of 0x90.
+//   that starts (rd && !rd_pending) returns 0x67 instead of 0x90.
 //   inject_prefix is raised after Test 7 completes and held until
 //   prefix_classification_seen fires — guaranteeing the prefix byte
 //   is delivered and observed while Test 8 is active.
@@ -265,7 +265,7 @@ module tb_rung1_nop_loop;
                 test7_done        = 1'b1;
                 prefix_test_armed = 1'b1;
                 // Raise inject_prefix and hold it until prefix_classification_seen.
-                // ctrl_mem will insert 0x66 on the next fetch transaction it starts.
+                // ctrl_mem will insert 0x67 on the next fetch transaction it starts.
                 inject_prefix     = 1'b1;
             end
         end
@@ -279,7 +279,7 @@ module tb_rung1_nop_loop;
     end
 
     // ----------------------------------------------------------------
-    // Test 8: prefix-only classification (0x66 -> ENTRY_PREFIX_ONLY)
+    // Test 8: prefix-only classification (0x67 -> ENTRY_PREFIX_ONLY)
     // ----------------------------------------------------------------
 
     // 8a: classification seen
@@ -330,7 +330,7 @@ module tb_rung1_nop_loop;
             test8_eip_snap = dbg_eip;
 
             if (!prefix_classification_seen) begin
-                $display("FAIL Test 8a: 0x66 not classified as ENTRY_PREFIX_ONLY");
+                $display("FAIL Test 8a: 0x67 not classified as ENTRY_PREFIX_ONLY");
                 fail_count++;
             end
             if (!prefix_upc_seen) begin
@@ -355,7 +355,7 @@ module tb_rung1_nop_loop;
                     prefix_fault_count == 0 &&
                     test8_eip_snap === eip_at_prefix_decode + 32'h1 &&
                     prefix_fetch_decode_seen) begin
-                $display("PASS Test 8: 0x66 -> ENTRY_PREFIX_ONLY (0x%02X), uPC=0x%03X,",
+                $display("PASS Test 8: 0x67 -> ENTRY_PREFIX_ONLY (0x%02X), uPC=0x%03X,",
                          EXPECTED_PFX_ENTRY, EXPECTED_PREFIX_UPC);
                 $display("            no fault, EIP 0x%08X -> 0x%08X, FETCH_DECODE returned",
                          eip_at_prefix_decode, test8_eip_snap);
@@ -415,7 +415,7 @@ endmodule
 // ctrl_mem: testbench-controlled memory
 //   - Returns 0x90 normally
 //   - When inject_prefix=1 at the moment a new fetch starts (rd && !rd_pending),
-//     that fetch returns 0x66 instead of 0x90
+//     that fetch returns 0x67 instead of 0x90
 //   - After that one fetch completes, resumes returning 0x90
 // ----------------------------------------------------------------
 module ctrl_mem #(
@@ -444,8 +444,8 @@ module ctrl_mem #(
             ready <= 1'b0;
             if (rd && !rd_pending) begin
                 // Latch inject_prefix at the moment this fetch starts.
-                // If inject_prefix is currently held high, this fetch returns 0x66.
-                pending_byte <= inject_prefix ? 8'h66 : 8'h90;
+                // If inject_prefix is currently held high, this fetch returns 0x67.
+                pending_byte <= inject_prefix ? 8'h67 : 8'h90;
                 rd_pending   <= 1'b1;
                 latency_cnt  <= READY_LATENCY;
             end

@@ -1,7 +1,14 @@
 // Keystone86 / Aegis
 // rtl/core/cpu_top.sv
 //
-// Rung 2/3 top-level with service-based control-transfer paths.
+// Rung 6 Pass 6H-5 top-level with service-based control-transfer paths,
+// bounded MOV immediate/register-register slices, direct-disp32 memory MOV,
+// base-only no-displacement memory MOV, signed-disp8 memory MOV, signed
+// disp32 base memory MOV, bounded base-only SIB memory MOV, bounded no-base
+// SIB disp32 MOV, bounded base-present indexed SIB MOV, bounded no-base
+// indexed SIB disp32 MOV, 0x67 direct disp16 MOV, 0x67 no-displacement
+// non-BP plus BP-based 16-bit MOV forms, 0x67 mod=01 signed disp8, and
+// 0x67 mod=10 disp16 16-bit MOV forms through EA_CALC_16.
 
 import keystone86_pkg::*;
 
@@ -85,6 +92,13 @@ module cpu_top (
     logic        dec_payload16_valid;
     logic        dec_payload16_signed;
     logic [15:0] dec_payload16;
+    logic [7:0]  dec_opcode_class;
+    logic [1:0]  dec_opsz;
+    logic        dec_addrsz;
+    logic [2:0]  dec_imm_class;
+    logic [2:0]  dec_reg_dst;
+    logic [2:0]  dec_reg_src;
+    logic [2:0]  dec_reg_rm;
     logic [3:0]  dec_cond_code;
     logic        dec_ack;
 
@@ -110,6 +124,14 @@ module cpu_top (
     logic [31:0] pc_eip_val;
     logic        pc_target_en;
     logic [31:0] pc_target_val;
+    logic        pc_gpr_en;
+    logic [2:0]  pc_gpr_idx;
+    logic [1:0]  pc_gpr_opsz;
+    logic [31:0] pc_gpr_val;
+    logic        commit_pc_gpr_en;
+    logic [2:0]  commit_pc_gpr_idx;
+    logic [1:0]  commit_pc_gpr_opsz;
+    logic [31:0] commit_pc_gpr_val;
     logic        pc_stack_adj_en;
     logic [31:0] pc_stack_adj_val;
     logic [31:0] stack_push_data;
@@ -163,6 +185,50 @@ module cpu_top (
     logic        op_mem_rd_ready;
     logic [31:0] op_mem_rd_data;
 
+    // ea_calc side: bounded EA_CALC_32 direct disp32 plus default-32
+    // base-only, base+disp8, base+disp32 non-SIB forms, base-only SIB,
+    // no-base SIB disp32, base-present indexed SIB, no-base indexed SIB,
+    // and the bounded 0x67 16-bit no-displacement non-BP/BP plus mod=01
+    // signed disp8 forms.
+    logic [7:0]  ea_svc_id;
+    logic        ea_svc_req;
+    logic        ea_svc_done;
+    logic [1:0]  ea_svc_sr;
+    logic        ea_t2_wr_en;
+    logic [31:0] ea_t2_wr_data;
+
+    // load_store side: register metadata plus bounded memory-source LOAD_RM*
+    // and memory-destination STORE_RM* direct-disp32/base-only/base+disp8/
+    // base+disp32 operations, plus the bounded base-only, no-base,
+    // base-present indexed SIB, no-base indexed SIB, and 0x67 16-bit
+    // no-displacement non-BP/BP and mod=01 signed disp8 subsets.
+    logic [7:0]  ls_svc_id;
+    logic        ls_svc_req;
+    logic        ls_svc_done;
+    logic [1:0]  ls_svc_sr;
+    logic        ls_t4_wr_en;
+    logic [31:0] ls_t4_wr_data;
+    logic        ls_mem_rd_req;
+    logic [31:0] ls_mem_rd_addr;
+    logic [3:0]  ls_mem_rd_byteen;
+    logic        ls_mem_rd_ready;
+    logic [31:0] ls_mem_rd_data;
+    logic        ls_mem_wr_req;
+    logic [31:0] ls_mem_wr_addr;
+    logic [3:0]  ls_mem_wr_byteen;
+    logic [31:0] ls_mem_wr_data;
+    logic        ls_mem_wr_ready;
+    logic        ls_pc_gpr_en;
+    logic [2:0]  ls_pc_gpr_idx;
+    logic [1:0]  ls_pc_gpr_opsz;
+    logic [31:0] ls_pc_gpr_val;
+    logic [2:0]  ls_gpr_rd_idx;
+    logic [1:0]  ls_gpr_rd_opsz;
+    logic [2:0]  ea_base_gpr_rd_idx;
+    logic [2:0]  gpr_rd_idx;
+    logic [1:0]  gpr_rd_opsz;
+    logic [31:0] gpr_rd_val;
+
     // stack_engine side
     logic [7:0]  se_svc_id;
     logic        se_svc_req;
@@ -206,10 +272,21 @@ module cpu_top (
     logic [31:0] t2_r;
     logic [31:0] t3_r;
     logic [31:0] t4_r;
+    logic        mseq_t2_wr_en;
+    logic [31:0] mseq_t2_wr_data;
+    logic        mseq_t3_wr_en;
+    logic [31:0] mseq_t3_wr_data;
     logic        mseq_t4_wr_en;
     logic [31:0] mseq_t4_wr_data;
     logic [31:0] meta_next_eip;
     logic [3:0]  meta_cond_code;
+    logic [7:0]  meta_opcode_class_r;
+    logic [1:0]  meta_opsz_r;
+    logic        meta_addrsz_r;
+    logic [2:0]  meta_imm_class_r;
+    logic [2:0]  meta_reg_dst_r;
+    logic [2:0]  meta_reg_src_r;
+    logic [2:0]  meta_reg_rm_r;
     logic        meta_modrm_present_r;
     logic [7:0]  meta_modrm_byte_r;
     logic [7:0]  meta_sib_byte_r;
@@ -220,6 +297,7 @@ module cpu_top (
     logic [1:0]  dbg_mseq_state_w;
     logic [11:0] dbg_upc_w;
     logic [7:0]  dbg_entry_id_w;
+    logic        decode_frontend_enable;
 
     assign dbg_eip           = eip;
     assign dbg_esp           = esp;
@@ -232,23 +310,61 @@ module cpu_top (
     assign dbg_fault_class   = fault_class;
     assign dbg_decode_done   = decode_done;
     assign dbg_fetch_addr    = fetch_addr_internal;
+    // Decode must not consume payload bytes while microcode-owned services are
+    // fetching immediates/displacements from the shared prefetch queue.
+    assign decode_frontend_enable = (dbg_mseq_state_w == 2'h0);
 
     assign eu_req     = commit_stack_wr_pending || ie_mem_rd_req ||
-                        se_stk_rd_req || op_mem_rd_req;
-    assign eu_wr      = commit_stack_wr_pending;
+                        se_stk_rd_req || ls_mem_rd_req ||
+                        ls_mem_wr_req || op_mem_rd_req;
+    assign eu_wr      = commit_stack_wr_pending ||
+                        ((!ie_mem_rd_req) && (!se_stk_rd_req) && ls_mem_wr_req);
     assign eu_addr    = commit_stack_wr_pending ? commit_stack_wr_addr_r :
                         (ie_mem_rd_req ? ie_mem_rd_addr :
-                        (se_stk_rd_req ? se_stk_rd_addr : op_mem_rd_addr));
-    assign eu_byteen  = commit_stack_wr_pending ? commit_stack_wr_byteen_r : 4'b1111;
-    assign eu_wdata   = commit_stack_wr_pending ? commit_stack_wr_data_r : 32'h0;
+                        (se_stk_rd_req ? se_stk_rd_addr :
+                        (ls_mem_wr_req ? ls_mem_wr_addr :
+                        (ls_mem_rd_req ? ls_mem_rd_addr : op_mem_rd_addr))));
+    assign eu_byteen  = commit_stack_wr_pending ? commit_stack_wr_byteen_r :
+                        (ie_mem_rd_req ? 4'b1111 :
+                        (se_stk_rd_req ? 4'b1111 :
+                        (ls_mem_wr_req ? ls_mem_wr_byteen :
+                        (ls_mem_rd_req ? ls_mem_rd_byteen : 4'b1111))));
+    assign eu_wdata   = commit_stack_wr_pending ? commit_stack_wr_data_r :
+                        (((!ie_mem_rd_req) && (!se_stk_rd_req) && ls_mem_wr_req) ?
+                         ls_mem_wr_data : 32'h0);
 
     assign ie_mem_rd_ready = (!commit_stack_wr_pending) && ie_mem_rd_req && eu_done;
     assign ie_mem_rd_data  = eu_rdata;
     assign se_stk_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) && eu_done;
     assign se_stk_rd_data  = eu_rdata;
     assign op_mem_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) &&
-                             (!se_stk_rd_req) && eu_done;
+                             (!se_stk_rd_req) && (!ls_mem_rd_req) &&
+                             (!ls_mem_wr_req) && eu_done;
     assign op_mem_rd_data  = eu_rdata;
+    assign ls_mem_rd_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) &&
+                             (!se_stk_rd_req) && ls_mem_rd_req && eu_done;
+    assign ls_mem_rd_data  = eu_rdata;
+    assign ls_mem_wr_ready = (!commit_stack_wr_pending) && (!ie_mem_rd_req) &&
+                             (!se_stk_rd_req) && ls_mem_wr_req && eu_done;
+    assign commit_pc_gpr_en   = pc_gpr_en | ls_pc_gpr_en;
+    assign commit_pc_gpr_idx  = ls_pc_gpr_en ? ls_pc_gpr_idx : pc_gpr_idx;
+    assign commit_pc_gpr_opsz = ls_pc_gpr_en ? ls_pc_gpr_opsz : pc_gpr_opsz;
+    assign commit_pc_gpr_val  = ls_pc_gpr_en ? ls_pc_gpr_val : pc_gpr_val;
+    // EA_CALC_32 owns selection of the one committed-GPR read index. Base-only
+    // forms select the base register; Pass 6G-1 indexed SIB forms first select
+    // SIB.base, then SIB.index on a wait cycle. The no-base SIB disp32 forms
+    // either ignore the read value (index=100) or select SIB.index directly
+    // (Pass 6G-2). EA_CALC_16 direct disp16 does not consume the read value;
+    // Pass 6H-2/6H-3 no-displacement forms, Pass 6H-4 signed-disp8 forms,
+    // and Pass 6H-5 disp16 forms use this same single read path, sequencing
+    // [BX/BP+SI/DI] internally.
+    // No second architectural read owner is introduced.
+    assign gpr_rd_idx  = ((ea_svc_id == EA_CALC_32) ||
+                          (ea_svc_id == EA_CALC_16)) ? ea_base_gpr_rd_idx :
+                                                        ls_gpr_rd_idx;
+    assign gpr_rd_opsz = ((ea_svc_id == EA_CALC_32) ||
+                          (ea_svc_id == EA_CALC_16)) ? 2'h2 :
+                                                        ls_gpr_rd_opsz;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -288,6 +404,13 @@ module cpu_top (
             meta_sib_byte_r      <= 8'h0;
             meta_modrm_class_r   <= 4'hF;
             meta_disp_value_r    <= 32'h0;
+            meta_opcode_class_r  <= 8'h0;
+            meta_opsz_r          <= 2'h0;
+            meta_addrsz_r        <= 1'b1;
+            meta_imm_class_r     <= 3'h0;
+            meta_reg_dst_r       <= 3'h0;
+            meta_reg_src_r       <= 3'h0;
+            meta_reg_rm_r        <= 3'h0;
         end else begin
             if (dec_ack) begin
                 meta_modrm_present_r <= dec_modrm_present;
@@ -295,8 +418,19 @@ module cpu_top (
                 meta_sib_byte_r      <= dec_sib_byte;
                 meta_modrm_class_r   <= dec_modrm_class;
                 meta_disp_value_r    <= dec_disp_value;
+                meta_opcode_class_r  <= dec_opcode_class;
+                meta_opsz_r          <= dec_opsz;
+                meta_addrsz_r        <= dec_addrsz;
+                meta_imm_class_r     <= dec_imm_class;
+                meta_reg_dst_r       <= dec_reg_dst;
+                meta_reg_src_r       <= dec_reg_src;
+                meta_reg_rm_r        <= dec_reg_rm;
             end
+            if (mseq_t2_wr_en) t2_r <= mseq_t2_wr_data;
+            if (ea_t2_wr_en) t2_r <= ea_t2_wr_data;
+            if (mseq_t3_wr_en) t3_r <= mseq_t3_wr_data;
             if (fe_t4_wr_en) t4_r <= fe_t4_wr_data;
+            if (ls_t4_wr_en) t4_r <= ls_t4_wr_data;
             if (mseq_t4_wr_en) t4_r <= mseq_t4_wr_data;
             if (dec_ack && dec_payload16_valid) begin
                 if (dec_payload16_signed)
@@ -369,7 +503,7 @@ module cpu_top (
         .mode_prot    (mode_prot),
         .cs_d_bit     (cs_d_bit),
         .q_data       (q_data),
-        .q_valid      (q_valid),
+        .q_valid      (q_valid && decode_frontend_enable),
         .q_consume    (q_consume_dec),
         .decode_done  (decode_done),
         .entry_id     (entry_id),
@@ -390,6 +524,13 @@ module cpu_top (
         .payload16_valid (dec_payload16_valid),
         .payload16_signed(dec_payload16_signed),
         .payload16    (dec_payload16),
+        .opcode_class (dec_opcode_class),
+        .opsz         (dec_opsz),
+        .addrsz       (dec_addrsz),
+        .imm_class    (dec_imm_class),
+        .reg_dst      (dec_reg_dst),
+        .reg_src      (dec_reg_src),
+        .reg_rm       (dec_reg_rm),
         .cond_code    (dec_cond_code),
         .dec_ack      (dec_ack),
         .q_fetch_eip  (q_fetch_eip)
@@ -426,9 +567,17 @@ module cpu_top (
         .pc_eip_val      (pc_eip_val),
         .pc_target_en    (pc_target_en),
         .pc_target_val   (pc_target_val),
+        .pc_gpr_en       (pc_gpr_en),
+        .pc_gpr_idx      (pc_gpr_idx),
+        .pc_gpr_opsz     (pc_gpr_opsz),
+        .pc_gpr_val      (pc_gpr_val),
         .pc_stack_adj_en (pc_stack_adj_en),
         .pc_stack_adj_val(pc_stack_adj_val),
         .stack_push_data (stack_push_data),
+        .mseq_t2_wr_en   (mseq_t2_wr_en),
+        .mseq_t2_wr_data (mseq_t2_wr_data),
+        .mseq_t3_wr_en   (mseq_t3_wr_en),
+        .mseq_t3_wr_data (mseq_t3_wr_data),
         .mseq_t4_wr_en   (mseq_t4_wr_en),
         .mseq_t4_wr_data (mseq_t4_wr_data),
 
@@ -440,6 +589,13 @@ module cpu_top (
         .t2_data         (t2_r),
         .t4_data         (t4_r),
         .t3_data         (t3_r),
+        .meta_opcode_class_in(dec_opcode_class),
+        .meta_opsz_in    (dec_opsz),
+        .meta_addrsz_in  (dec_addrsz),
+        .meta_imm_class_in(dec_imm_class),
+        .meta_modrm_class_in(dec_modrm_class),
+        .meta_reg_dst_in (dec_reg_dst),
+        .meta_reg_rm_in  (dec_reg_rm),
         .meta_next_eip   (meta_next_eip),
         .meta_cond_code  (meta_cond_code),
 
@@ -462,6 +618,8 @@ module cpu_top (
     service_dispatch u_sdispatch (
         .svc_id      (svc_id_out),
         .svc_req     (svc_req_out),
+        .mov_rm_service_select((meta_opcode_class_r == 8'h01) &&
+                               (meta_modrm_class_r != 4'h0)),
         .svc_done    (svc_done_in),
         .svc_sr      (svc_sr_in),
 
@@ -479,6 +637,16 @@ module cpu_top (
         .op_svc_req  (op_svc_req),
         .op_svc_done (op_svc_done),
         .op_svc_sr   (op_svc_sr),
+
+        .ea_svc_id   (ea_svc_id),
+        .ea_svc_req  (ea_svc_req),
+        .ea_svc_done (ea_svc_done),
+        .ea_svc_sr   (ea_svc_sr),
+
+        .ls_svc_id   (ls_svc_id),
+        .ls_svc_req  (ls_svc_req),
+        .ls_svc_done (ls_svc_done),
+        .ls_svc_sr   (ls_svc_sr),
 
         .se_svc_id   (se_svc_id),
         .se_svc_req  (se_svc_req),
@@ -549,6 +717,63 @@ module cpu_top (
         .t2_wr_data    (op_t2_wr_data)
     );
 
+    ea_calc u_ea_calc (
+        .clk              (clk),
+        .reset_n          (reset_n),
+        .svc_id           (ea_svc_id),
+        .svc_req          (ea_svc_req),
+        .svc_done         (ea_svc_done),
+        .svc_sr           (ea_svc_sr),
+        .meta_modrm_byte  (meta_modrm_byte_r),
+        .meta_sib_byte    (meta_sib_byte_r),
+        .meta_modrm_class (meta_modrm_class_r),
+        .meta_addrsz      (meta_addrsz_r),
+        .meta_disp_value  (meta_disp_value_r),
+        .base_gpr_rd_idx  (ea_base_gpr_rd_idx),
+        .base_gpr_rd_val  (gpr_rd_val),
+        .t2_wr_en         (ea_t2_wr_en),
+        .t2_wr_data       (ea_t2_wr_data)
+    );
+
+    load_store u_load_store (
+        .clk              (clk),
+        .reset_n          (reset_n),
+        .svc_id           (ls_svc_id),
+        .svc_req          (ls_svc_req),
+        .svc_done         (ls_svc_done),
+        .svc_sr           (ls_svc_sr),
+        .meta_opcode_class(meta_opcode_class_r),
+        .meta_opsz        (meta_opsz_r),
+        .meta_addrsz      (meta_addrsz_r),
+        .meta_modrm_byte  (meta_modrm_byte_r),
+        .meta_sib_byte    (meta_sib_byte_r),
+        .meta_modrm_class (meta_modrm_class_r),
+        .meta_reg_dst     (meta_reg_dst_r),
+        .meta_reg_src     (meta_reg_src_r),
+        .meta_reg_rm      (meta_reg_rm_r),
+        .gpr_rd_idx       (ls_gpr_rd_idx),
+        .gpr_rd_opsz      (ls_gpr_rd_opsz),
+        .gpr_rd_val       (gpr_rd_val),
+        .t4_in            (t4_r),
+        .t2_in            (t2_r),
+        .t4_wr_en         (ls_t4_wr_en),
+        .t4_wr_data       (ls_t4_wr_data),
+        .mem_rd_req       (ls_mem_rd_req),
+        .mem_rd_addr      (ls_mem_rd_addr),
+        .mem_rd_byteen    (ls_mem_rd_byteen),
+        .mem_rd_data      (ls_mem_rd_data),
+        .mem_rd_ready     (ls_mem_rd_ready),
+        .mem_wr_req       (ls_mem_wr_req),
+        .mem_wr_addr      (ls_mem_wr_addr),
+        .mem_wr_byteen    (ls_mem_wr_byteen),
+        .mem_wr_data      (ls_mem_wr_data),
+        .mem_wr_ready     (ls_mem_wr_ready),
+        .pc_gpr_en        (ls_pc_gpr_en),
+        .pc_gpr_idx       (ls_pc_gpr_idx),
+        .pc_gpr_opsz      (ls_pc_gpr_opsz),
+        .pc_gpr_val       (ls_pc_gpr_val)
+    );
+
     stack_engine u_stack (
         .clk              (clk),
         .reset_n          (reset_n),
@@ -610,9 +835,14 @@ module cpu_top (
         .raise_fc                   (raise_fc),
         .raise_fe                   (raise_fe),
 
-        .pc_gpr_en                  (1'b0),
-        .pc_gpr_idx                 (3'h0),
-        .pc_gpr_val                 (32'h0),
+        .pc_gpr_en                  (commit_pc_gpr_en),
+        .pc_gpr_idx                 (commit_pc_gpr_idx),
+        .pc_gpr_opsz                (commit_pc_gpr_opsz),
+        .pc_gpr_val                 (commit_pc_gpr_val),
+
+        .gpr_rd_idx                 (gpr_rd_idx),
+        .gpr_rd_opsz                (gpr_rd_opsz),
+        .gpr_rd_val                 (gpr_rd_val),
 
         .pc_eip_en                  (pc_eip_en),
         .pc_eip_val                 (pc_eip_val),

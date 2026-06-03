@@ -119,11 +119,16 @@ ENV PATH="/root/.local/bin:${PATH}"
 # Credentials are NOT baked in. Runtime auth/config/session persistence is
 # handled by a project-scoped Docker named volume mounted at /home/dev/.codex.
 # That persistent state is convenience state only, not project authority.
+#
+# Pin Codex CLI instead of using floating latest so rebuilds are reproducible.
+# This replaces the older 0.125.0 image install with 0.136.0 during docker build,
+# avoiding permission issues from trying to update /usr/lib/node_modules as dev
+# inside a running container.
 # --------------------------------------------------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get update \
  && apt-get install -y --no-install-recommends nodejs \
- && npm install -g @openai/codex \
+ && npm install -g @openai/codex@0.136.0 \
  && npm cache clean --force \
  && rm -rf /var/lib/apt/lists/*
 

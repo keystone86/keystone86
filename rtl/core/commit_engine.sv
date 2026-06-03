@@ -4,7 +4,8 @@
 // Current active role:
 //   Commit behavior required by the delivered Rung 2 direct-JMP path, the
 //   Rung 3 near CALL/RET stack-visible path, and the Rung 4 Jcc architectural
-//   flag/EIP visibility path.
+//   flag/EIP visibility path, plus the bounded Rung 6 Pass 2 MOV r32, imm32
+//   GPR visibility path.
 //
 // Active commit contract:
 //   - Redirect becomes architecturally visible only at ENDI.
@@ -21,6 +22,11 @@
 //     the 16-bit IP/CS/FLAGS frame bytes at ENDI. Rung 5 Pass 3 IRET_FLOW uses
 //     the same bounded interrupt-control record without a frame write, applying
 //     the popped EIP/CS/FLAGS/ESP only at ENDI/CM_IRET.
+//   - Rung 6 MOV register slices stage one GPR write and publish it only on
+//     ENDI CM_MOV_REG. Byte writes merge into the containing 32-bit GPR, and
+//     16-bit writes merge the low word while preserving bits [31:16]; EFLAGS
+//     are not written. The read port exposes only committed GPR state to the
+//     bounded LOAD_REG_META service.
 //
 // Scope note:
 //   This file may contain structural surfaces that later rungs can build on.
@@ -45,7 +51,13 @@ module commit_engine (
     // --- Pending GPR commit (unused in active Rung 2/3 paths) ---
     input  logic        pc_gpr_en,
     input  logic [2:0]  pc_gpr_idx,
+    input  logic [1:0]  pc_gpr_opsz,
     input  logic [31:0] pc_gpr_val,
+
+    // --- Committed GPR read port for bounded register-metadata services ---
+    input  logic [2:0]  gpr_rd_idx,
+    input  logic [1:0]  gpr_rd_opsz,
+    output logic [31:0] gpr_rd_val,
 
     // --- Pending fall-through EIP commit ---
     input  logic        pc_eip_en,
@@ -107,6 +119,7 @@ module commit_engine (
     logic [31:0] esp_r;
     logic [31:0] eflags_r;
     logic [15:0] cs_r;
+    logic [31:0] gpr_r [0:7];
     logic        fault_pending_r;
     logic [3:0]  fault_class_r;
     logic [31:0] fault_error_r;
@@ -117,6 +130,10 @@ module commit_engine (
     logic [31:0] pc_eip_val_r;
     logic        pc_target_en_r;
     logic [31:0] pc_target_val_r;
+    logic        pc_gpr_en_r;
+    logic [2:0]  pc_gpr_idx_r;
+    logic [1:0]  pc_gpr_opsz_r;
+    logic [31:0] pc_gpr_val_r;
     logic        pc_stack_en_r;
     logic        pc_stack_write_en_r;
     logic [31:0] pc_stack_addr_r;
@@ -147,6 +164,10 @@ module commit_engine (
     logic [31:0] eff_pc_eip_val;
     logic        eff_pc_target_en;
     logic [31:0] eff_pc_target_val;
+    logic        eff_pc_gpr_en;
+    logic [2:0]  eff_pc_gpr_idx;
+    logic [1:0]  eff_pc_gpr_opsz;
+    logic [31:0] eff_pc_gpr_val;
     logic        eff_pc_stack_en;
     logic        eff_pc_stack_write_en;
     logic [31:0] eff_pc_stack_addr;
@@ -172,11 +193,18 @@ module commit_engine (
     assign fault_pending = fault_pending_r;
     assign fault_class   = fault_class_r;
     assign fault_error   = fault_error_r;
+    assign gpr_rd_val    = read_gpr_value(gpr_r[gpr_commit_index(gpr_rd_idx,
+                                                                  gpr_rd_opsz)],
+                                           gpr_rd_idx, gpr_rd_opsz);
 
     assign eff_pc_eip_en       = pc_eip_en | pc_eip_en_r;
     assign eff_pc_eip_val      = pc_eip_en ? pc_eip_val : pc_eip_val_r;
     assign eff_pc_target_en    = pc_target_en | pc_target_en_r;
     assign eff_pc_target_val   = pc_target_en ? pc_target_val : pc_target_val_r;
+    assign eff_pc_gpr_en       = pc_gpr_en | pc_gpr_en_r;
+    assign eff_pc_gpr_idx      = pc_gpr_en ? pc_gpr_idx : pc_gpr_idx_r;
+    assign eff_pc_gpr_opsz     = pc_gpr_en ? pc_gpr_opsz : pc_gpr_opsz_r;
+    assign eff_pc_gpr_val      = pc_gpr_en ? pc_gpr_val : pc_gpr_val_r;
     assign eff_pc_stack_en       = pc_stack_en | pc_stack_en_r;
     assign eff_pc_stack_write_en = pc_stack_en ? pc_stack_write_en : pc_stack_write_en_r;
     assign eff_pc_stack_addr     = pc_stack_en ? pc_stack_addr : pc_stack_addr_r;
@@ -193,6 +221,57 @@ module commit_engine (
                                        pc_int_frame_write_en_r;
     assign eff_pc_int_frame_addr  = pc_int_en ? pc_int_frame_addr : pc_int_frame_addr_r;
     assign eff_pc_int_frame_bytes = pc_int_en ? pc_int_frame_bytes : pc_int_frame_bytes_r;
+
+    function automatic logic [2:0] gpr_commit_index(input logic [2:0] raw_idx,
+                                                    input logic [1:0] opsz_val);
+        if (opsz_val == 2'h0)
+            return {1'b0, raw_idx[1:0]};
+        return raw_idx;
+    endfunction
+
+    function automatic logic [31:0] merge_gpr_write(
+        input logic [31:0] old_val,
+        input logic [2:0]  raw_idx,
+        input logic [1:0]  opsz_val,
+        input logic [31:0] new_val
+    );
+        logic [31:0] merged;
+        begin
+            merged = old_val;
+            unique case (opsz_val)
+                2'h0: begin
+                    if (raw_idx[2])
+                        merged[15:8] = new_val[7:0];
+                    else
+                        merged[7:0] = new_val[7:0];
+                    return merged;
+                end
+                2'h1: begin
+                    merged[15:0] = new_val[15:0];
+                    return merged;
+                end
+                default: return new_val;
+            endcase
+        end
+    endfunction
+
+    function automatic logic [31:0] read_gpr_value(
+        input logic [31:0] old_val,
+        input logic [2:0]  raw_idx,
+        input logic [1:0]  opsz_val
+    );
+        begin
+            unique case (opsz_val)
+                2'h0: begin
+                    if (raw_idx[2])
+                        return {24'h0, old_val[15:8]};
+                    return {24'h0, old_val[7:0]};
+                end
+                2'h1: return {16'h0, old_val[15:0]};
+                default: return old_val;
+            endcase
+        end
+    endfunction
 
     function automatic logic [7:0] frame_byte(
         input logic [47:0] frame,
@@ -215,6 +294,8 @@ module commit_engine (
             esp_r             <= RESET_ESP;
             eflags_r          <= 32'h00000002;
             cs_r              <= 16'h0000;
+            for (int i = 0; i < 8; i++)
+                gpr_r[i] <= 32'h0;
             fault_pending_r   <= 1'b0;
             fault_class_r     <= 4'h0;
             fault_error_r     <= 32'h0;
@@ -223,6 +304,10 @@ module commit_engine (
             pc_eip_val_r      <= 32'h0;
             pc_target_en_r    <= 1'b0;
             pc_target_val_r   <= 32'h0;
+            pc_gpr_en_r       <= 1'b0;
+            pc_gpr_idx_r      <= 3'h0;
+            pc_gpr_opsz_r     <= 2'h0;
+            pc_gpr_val_r      <= 32'h0;
             pc_stack_en_r       <= 1'b0;
             pc_stack_write_en_r <= 1'b0;
             pc_stack_addr_r     <= 32'h0;
@@ -284,6 +369,13 @@ module commit_engine (
             if (pc_target_en) begin
                 pc_target_en_r  <= 1'b1;
                 pc_target_val_r <= pc_target_val;
+            end
+
+            if (pc_gpr_en) begin
+                pc_gpr_en_r  <= 1'b1;
+                pc_gpr_idx_r <= pc_gpr_idx;
+                pc_gpr_opsz_r <= pc_gpr_opsz;
+                pc_gpr_val_r <= pc_gpr_val;
             end
 
             if (pc_stack_en) begin
@@ -385,6 +477,10 @@ module commit_engine (
                     pc_eip_val_r      <= 32'h0;
                     pc_target_en_r    <= 1'b0;
                     pc_target_val_r   <= 32'h0;
+                    pc_gpr_en_r       <= 1'b0;
+                    pc_gpr_idx_r      <= 3'h0;
+                    pc_gpr_opsz_r     <= 2'h0;
+                    pc_gpr_val_r      <= 32'h0;
                     pc_stack_en_r       <= 1'b0;
                     pc_stack_write_en_r <= 1'b0;
                     pc_stack_addr_r     <= 32'h0;
@@ -443,6 +539,10 @@ module commit_engine (
                     pc_eip_val_r      <= 32'h0;
                     pc_target_en_r    <= 1'b0;
                     pc_target_val_r   <= 32'h0;
+                    pc_gpr_en_r       <= 1'b0;
+                    pc_gpr_idx_r      <= 3'h0;
+                    pc_gpr_opsz_r     <= 2'h0;
+                    pc_gpr_val_r      <= 32'h0;
                     pc_stack_en_r       <= 1'b0;
                     pc_stack_write_en_r <= 1'b0;
                     pc_stack_addr_r     <= 32'h0;
@@ -456,6 +556,44 @@ module commit_engine (
                         fault_class_r   <= 4'h0;
                         fault_error_r   <= 32'h0;
                     end
+                end
+                // Bounded Rung 6 register commit path. The GPR value and width
+                // metadata are staged before ENDI; commit publishes the merged
+                // register result and fall-through EIP together.
+                else if ((endi_mask == CM_MOV_REG) && !fault_pending_r) begin
+                    if (eff_pc_gpr_en)
+                        gpr_r[gpr_commit_index(eff_pc_gpr_idx, eff_pc_gpr_opsz)] <=
+                            merge_gpr_write(gpr_r[gpr_commit_index(eff_pc_gpr_idx,
+                                                                    eff_pc_gpr_opsz)],
+                                            eff_pc_gpr_idx, eff_pc_gpr_opsz,
+                                            eff_pc_gpr_val);
+
+                    if (eff_pc_eip_en)
+                        eip_r <= eff_pc_eip_val;
+
+                    pc_eip_en_r       <= 1'b0;
+                    pc_eip_val_r      <= 32'h0;
+                    pc_target_en_r    <= 1'b0;
+                    pc_target_val_r   <= 32'h0;
+                    pc_gpr_en_r       <= 1'b0;
+                    pc_gpr_idx_r      <= 3'h0;
+                    pc_gpr_opsz_r     <= 2'h0;
+                    pc_gpr_val_r      <= 32'h0;
+                    pc_stack_en_r       <= 1'b0;
+                    pc_stack_write_en_r <= 1'b0;
+                    pc_stack_addr_r     <= 32'h0;
+                    pc_stack_data_r     <= 32'h0;
+                    pc_stack_esp_val_r  <= 32'h0;
+                    pc_stack_adj_en_r   <= 1'b0;
+                    pc_stack_adj_val_r  <= 32'h0;
+
+                    if (endi_mask[8]) begin
+                        fault_pending_r <= 1'b0;
+                        fault_class_r   <= 4'h0;
+                        fault_error_r   <= 32'h0;
+                    end
+
+                    endi_done <= 1'b1;
                 end
                 // Active Rung 3 stack commit path. Stack services stage the
                 // pending record; commit_engine only makes it visible at ENDI.
@@ -487,6 +625,10 @@ module commit_engine (
                     pc_eip_val_r      <= 32'h0;
                     pc_target_en_r    <= 1'b0;
                     pc_target_val_r   <= 32'h0;
+                    pc_gpr_en_r       <= 1'b0;
+                    pc_gpr_idx_r      <= 3'h0;
+                    pc_gpr_opsz_r     <= 2'h0;
+                    pc_gpr_val_r      <= 32'h0;
                     pc_stack_en_r       <= 1'b0;
                     pc_stack_write_en_r <= 1'b0;
                     pc_stack_addr_r     <= 32'h0;
@@ -523,6 +665,10 @@ module commit_engine (
                     pc_eip_val_r      <= 32'h0;
                     pc_target_en_r    <= 1'b0;
                     pc_target_val_r   <= 32'h0;
+                    pc_gpr_en_r       <= 1'b0;
+                    pc_gpr_idx_r      <= 3'h0;
+                    pc_gpr_opsz_r     <= 2'h0;
+                    pc_gpr_val_r      <= 32'h0;
                     pc_stack_en_r       <= 1'b0;
                     pc_stack_write_en_r <= 1'b0;
                     pc_stack_addr_r     <= 32'h0;
@@ -548,6 +694,10 @@ module commit_engine (
                     pc_eip_val_r      <= 32'h0;
                     pc_target_en_r    <= 1'b0;
                     pc_target_val_r   <= 32'h0;
+                    pc_gpr_en_r       <= 1'b0;
+                    pc_gpr_idx_r      <= 3'h0;
+                    pc_gpr_opsz_r     <= 2'h0;
+                    pc_gpr_val_r      <= 32'h0;
                     pc_stack_en_r       <= 1'b0;
                     pc_stack_write_en_r <= 1'b0;
                     pc_stack_addr_r     <= 32'h0;
@@ -570,6 +720,10 @@ module commit_engine (
                     pc_eip_val_r      <= 32'h0;
                     pc_target_en_r    <= 1'b0;
                     pc_target_val_r   <= 32'h0;
+                    pc_gpr_en_r       <= 1'b0;
+                    pc_gpr_idx_r      <= 3'h0;
+                    pc_gpr_opsz_r     <= 2'h0;
+                    pc_gpr_val_r      <= 32'h0;
                     pc_stack_en_r       <= 1'b0;
                     pc_stack_write_en_r <= 1'b0;
                     pc_stack_addr_r     <= 32'h0;
