@@ -449,6 +449,54 @@
       "value": 7
     }
   ],
+  "alu_ops": [
+    {
+      "name": "ALU_ADD",
+      "value": 0
+    },
+    {
+      "name": "ALU_CMP",
+      "value": 7
+    }
+  ],
+  "uop_classes": [
+    {
+      "name": "UOP_NOP",
+      "value": 0
+    },
+    {
+      "name": "UOP_BR",
+      "value": 4
+    },
+    {
+      "name": "UOP_MOV",
+      "value": 5
+    },
+    {
+      "name": "UOP_EXTRACT",
+      "value": 7
+    },
+    {
+      "name": "UOP_SVCW",
+      "value": 9
+    },
+    {
+      "name": "UOP_STAGE",
+      "value": 10
+    },
+    {
+      "name": "UOP_RAISE",
+      "value": 12
+    },
+    {
+      "name": "UOP_ENDI",
+      "value": 14
+    },
+    {
+      "name": "UOP_EXT",
+      "value": 15
+    }
+  ],
   "extract_fields": [
     {
       "name": "MF_ENTRY_ID",

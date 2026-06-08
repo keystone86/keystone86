@@ -32,6 +32,7 @@ RTL_SOURCES = [
     "rtl/core/services/ea_calc.sv",
     "rtl/core/services/operand_engine.sv",
     "rtl/core/services/load_store.sv",
+    "rtl/core/services/alu.sv",
     "rtl/core/services/stack_engine.sv",
     "rtl/core/services/interrupt_engine.sv",
     "rtl/core/services/service_dispatch.sv",

@@ -42,8 +42,9 @@
 ;   C6/C7 /0 and 66+C7 /0 immediate-to-register only for ModRM.mod=11
 ; Decoder supplies OC_MOV_R_IMM, M_OPSZ, and raw M_REG_DST from opcode[2:0].
 ; For 88/89/8A/8B it supplies OC_MOV_RM_R or OC_MOV_R_RM, M_REG_SRC,
-; M_REG_RM, and M_REG_DST. LOAD_REG_META/STORE_REG_META are bounded to
-; ModRM.mod=11 metadata. The memory-source path uses EA_CALC_32 and
+; M_REG_RM, and M_REG_DST. LOAD_REG_META reads the microcode-selected
+; register index from T3; STORE_REG_META remains register-form write staging.
+; The memory-source path uses EA_CALC_32 and
 ; LOAD_RM8/16/32 only for direct absolute disp32 and Pass 6E-1 base-only
 ; no-displacement forms, plus Pass 6E-2 signed disp8 and Pass 6E-3 signed
 ; disp32 forms, plus Pass 6F-1 base-only SIB forms with SIB.index=100,
@@ -97,6 +98,7 @@ ENTRY_MOV:
     SVCW EA_CALC_16
     BR C_FAULT, SUB_FAULT_HANDLER
 .mov_rm_r_after_ea:
+    EXTRACT T3, M_REG_SRC
     SVCW LOAD_REG_META
     BR C_FAULT, SUB_FAULT_HANDLER
     BR C_W8, .mov_mem_store8
@@ -105,6 +107,7 @@ ENTRY_MOV:
     BR C_FAULT, SUB_FAULT_HANDLER
     ENDI CM_NOP|CM_EIP
 .mov_rm_r_reg:
+    EXTRACT T3, M_REG_SRC
     SVCW LOAD_REG_META
     BR C_FAULT, SUB_FAULT_HANDLER
     SVCW STORE_REG_META
@@ -136,6 +139,7 @@ ENTRY_MOV:
     STAGE STAGE_GPR, T4
     ENDI CM_MOV_REG
 .mov_r_rm_reg:
+    EXTRACT T3, M_REG_RM
     SVCW LOAD_REG_META
     BR C_FAULT, SUB_FAULT_HANDLER
     SVCW STORE_REG_META

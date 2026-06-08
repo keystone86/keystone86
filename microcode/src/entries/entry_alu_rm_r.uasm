@@ -1,0 +1,39 @@
+.entry ENTRY_ALU_RM_R, 0x02
+
+; Rung 7 first implementation slice:
+;   01 /r ADD r/m32, r32, ModRM.mod=11 only
+;   39 /r CMP r/m32, r32, ModRM.mod=11 only
+;
+; Decoder supplies M_ALU_OP, M_IS_CMP, M_REG_RM, M_REG_SRC, M_REG_DST,
+; M_OPSZ=32, and M_NEXT_EIP. Microcode explicitly loads both operands
+; through LOAD_REG_META before calling the bounded ALU service. CMP
+; suppression is owned here: CMP does not stage a GPR and ends with CM_FLAGS.
+;
+; Bootstrap ROM layout keeps the local fault tail at 0x1FE/0x1FF so the
+; direct branch to SUB_FAULT_HANDLER remains inside the bounded BR range.
+.alu_fault:
+    RAISE FC_UD
+    BR C_ALWAYS, SUB_FAULT_HANDLER
+
+ENTRY_ALU_RM_R:
+    EXTRACT T3, M_REG_RM
+    SVCW LOAD_REG_META
+    BR C_FAULT, .alu_fault
+    MOV T0, T4
+    EXTRACT T3, M_REG_SRC
+    SVCW LOAD_REG_META
+    BR C_FAULT, .alu_fault
+    MOV T1, T4
+    EXTRACT T4, M_ALU_OP
+    EXTRACT T3, M_IS_CMP
+    BR C_T3NZ, .cmp
+    SVCW ALU_ADD32
+    BR C_FAULT, .alu_fault
+    STAGE STAGE_EFLAGS, T3, T4
+    STAGE STAGE_GPR, T0
+    ENDI CM_ALU_REG
+.cmp:
+    SVCW ALU_CMP32
+    BR C_FAULT, .alu_fault
+    STAGE STAGE_EFLAGS, T3, T4
+    ENDI CM_FLAGS

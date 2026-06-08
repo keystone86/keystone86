@@ -70,11 +70,18 @@ module microsequencer (
     output logic [2:0]  pc_gpr_idx,
     output logic [1:0]  pc_gpr_opsz,
     output logic [31:0] pc_gpr_val,
+    output logic        pc_eflags_en,
+    output logic [31:0] pc_eflags_val,
+    output logic [31:0] pc_eflags_mask,
     output logic        pc_stack_adj_en,
     output logic [31:0] pc_stack_adj_val,
 
     // --- Service metadata inputs ---
     output logic [31:0] stack_push_data,
+    output logic        mseq_t0_wr_en,
+    output logic [31:0] mseq_t0_wr_data,
+    output logic        mseq_t1_wr_en,
+    output logic [31:0] mseq_t1_wr_data,
     output logic        mseq_t2_wr_en,
     output logic [31:0] mseq_t2_wr_data,
     output logic        mseq_t3_wr_en,
@@ -90,6 +97,8 @@ module microsequencer (
 
     // --- T2 read (computed target from flow_control) ---
     input  logic [31:0] t2_data,
+    input  logic [31:0] t0_data,
+    input  logic [31:0] t1_data,
     input  logic [31:0] t4_data,
     input  logic [31:0] t3_data,
 
@@ -100,7 +109,10 @@ module microsequencer (
     input  logic [2:0]  meta_imm_class_in,
     input  logic [3:0]  meta_modrm_class_in,
     input  logic [2:0]  meta_reg_dst_in,
+    input  logic [2:0]  meta_reg_src_in,
     input  logic [2:0]  meta_reg_rm_in,
+    input  logic [3:0]  meta_alu_op_in,
+    input  logic        meta_is_cmp_in,
     output logic [31:0] meta_next_eip,
     output logic [3:0]  meta_cond_code,
 
@@ -109,24 +121,6 @@ module microsequencer (
     output logic [11:0] dbg_upc,
     output logic [7:0]  dbg_entry_id
 );
-
-    localparam logic [3:0] UOP_NOP   = 4'h0;
-    localparam logic [3:0] UOP_BR    = 4'h4;
-    localparam logic [3:0] UOP_EXTRACT = 4'h7;
-    localparam logic [3:0] UOP_SVCW  = 4'h9;
-    localparam logic [3:0] UOP_STAGE = 4'hA;
-    localparam logic [3:0] UOP_RAISE = 4'hC;
-    localparam logic [3:0] UOP_ENDI  = 4'hE;
-    localparam logic [3:0] UOP_EXT   = 4'hF;
-
-    localparam logic [9:0] MF_OPSZ         = 10'h001;
-    localparam logic [9:0] MF_MODRM_CLASS  = 10'h003;
-    localparam logic [9:0] MF_IMM_CLASS    = 10'h004;
-    localparam logic [9:0] MF_OPCODE_CLASS = 10'h006;
-    localparam logic [9:0] MF_REG_DST      = 10'h009;
-    localparam logic [9:0] MF_REG_RM       = 10'h00B;
-    localparam logic [9:0] MF_NEXT_EIP     = 10'h012;
-    localparam logic [9:0] MF_FC_TO_VECTOR = 10'h013;
 
     logic [1:0]  state, state_next;
     logic [11:0] upc_r, upc_next;
@@ -156,7 +150,10 @@ module microsequencer (
     logic [2:0]  meta_imm_class_r;
     logic [3:0]  meta_modrm_class_r;
     logic [2:0]  meta_reg_dst_r;
+    logic [2:0]  meta_reg_src_r;
     logic [2:0]  meta_reg_rm_r;
+    logic [3:0]  meta_alu_op_r;
+    logic        meta_is_cmp_r;
 
     assign upc            = upc_r;
     assign dispatch_entry = dispatch_entry_latch;
@@ -187,6 +184,8 @@ module microsequencer (
 
     function automatic logic [31:0] temp_value(input logic [3:0] reg_id);
         case (reg_id)
+            REG_T0:  return t0_data;
+            REG_T1:  return t1_data;
             REG_T2:  return t2_data;
             REG_T3:  return t3_data;
             REG_T4:  return t4_data;
@@ -200,7 +199,10 @@ module microsequencer (
             MF_MODRM_CLASS:  return {28'h0, meta_modrm_class_r};
             MF_IMM_CLASS:    return {29'h0, meta_imm_class_r};
             MF_OPCODE_CLASS: return {24'h0, meta_opcode_class_r};
+            MF_ALU_OP:       return {28'h0, meta_alu_op_r};
+            MF_IS_CMP:       return {31'h0, meta_is_cmp_r};
             MF_REG_DST:      return {29'h0, meta_reg_dst_r};
+            MF_REG_SRC:      return {29'h0, meta_reg_src_r};
             MF_REG_RM:       return {29'h0, meta_reg_rm_r};
             MF_NEXT_EIP:     return next_eip_r;
             MF_FC_TO_VECTOR: return (fault_class_in == FC_UD) ? 32'h00000006 :
@@ -269,7 +271,10 @@ module microsequencer (
             meta_imm_class_r      <= 3'h0;
             meta_modrm_class_r    <= 4'hF;
             meta_reg_dst_r        <= 3'h0;
+            meta_reg_src_r        <= 3'h0;
             meta_reg_rm_r         <= 3'h0;
+            meta_alu_op_r         <= 4'h0;
+            meta_is_cmp_r         <= 1'b0;
         end else begin
             state <= state_next;
             upc_r <= upc_next;
@@ -292,7 +297,10 @@ module microsequencer (
                         meta_imm_class_r     <= meta_imm_class_in;
                         meta_modrm_class_r   <= meta_modrm_class_in;
                         meta_reg_dst_r       <= meta_reg_dst_in;
+                        meta_reg_src_r       <= meta_reg_src_in;
                         meta_reg_rm_r        <= meta_reg_rm_in;
+                        meta_alu_op_r        <= meta_alu_op_in;
+                        meta_is_cmp_r        <= meta_is_cmp_in;
                         is_jmp_r             <= (entry_id_in == ENTRY_JMP_NEAR);
                         is_jcc_r             <= (entry_id_in == ENTRY_JCC);
                         is_call_r            <= dec_is_call;
@@ -350,6 +358,10 @@ module microsequencer (
                                 execute_fetch_pending <= 1'b1;
                             end
 
+                            UOP_MOV: begin
+                                execute_fetch_pending <= 1'b1;
+                            end
+
                             UOP_EXTRACT: begin
                                 execute_fetch_pending <= 1'b1;
                             end
@@ -403,9 +415,16 @@ module microsequencer (
         pc_gpr_idx      = 3'h0;
         pc_gpr_opsz     = 2'h0;
         pc_gpr_val      = 32'h0;
+        pc_eflags_en    = 1'b0;
+        pc_eflags_val   = 32'h0;
+        pc_eflags_mask  = 32'h0;
         pc_stack_adj_en = 1'b0;
         pc_stack_adj_val= 32'h0;
         stack_push_data = next_eip_r;
+        mseq_t0_wr_en   = 1'b0;
+        mseq_t0_wr_data = 32'h0;
+        mseq_t1_wr_en   = 1'b0;
+        mseq_t1_wr_data = 32'h0;
         mseq_t2_wr_en   = 1'b0;
         mseq_t2_wr_data = 32'h0;
         mseq_t3_wr_en   = 1'b0;
@@ -447,6 +466,26 @@ module microsequencer (
                                 upc_next = upc_r + 12'h1;
                         end
 
+                        UOP_MOV: begin
+                            if (uop_dst_reg == REG_T0) begin
+                                mseq_t0_wr_en   = 1'b1;
+                                mseq_t0_wr_data = temp_value(uop_src_reg);
+                            end else if (uop_dst_reg == REG_T1) begin
+                                mseq_t1_wr_en   = 1'b1;
+                                mseq_t1_wr_data = temp_value(uop_src_reg);
+                            end else if (uop_dst_reg == REG_T2) begin
+                                mseq_t2_wr_en   = 1'b1;
+                                mseq_t2_wr_data = temp_value(uop_src_reg);
+                            end else if (uop_dst_reg == REG_T3) begin
+                                mseq_t3_wr_en   = 1'b1;
+                                mseq_t3_wr_data = temp_value(uop_src_reg);
+                            end else if (uop_dst_reg == REG_T4) begin
+                                mseq_t4_wr_en   = 1'b1;
+                                mseq_t4_wr_data = temp_value(uop_src_reg);
+                            end
+                            upc_next = upc_r + 12'h1;
+                        end
+
                         UOP_EXT: begin
                             upc_next = upc_r + 12'h1;
                         end
@@ -456,7 +495,13 @@ module microsequencer (
                             // mechanism as the existing fault-vector extract:
                             // metadata is selected by Appendix A field id, and
                             // only implemented temp destinations are written.
-                            if (uop_dst_reg == REG_T2) begin
+                            if (uop_dst_reg == REG_T0) begin
+                                mseq_t0_wr_en   = 1'b1;
+                                mseq_t0_wr_data = extract_value(uop_imm10);
+                            end else if (uop_dst_reg == REG_T1) begin
+                                mseq_t1_wr_en   = 1'b1;
+                                mseq_t1_wr_data = extract_value(uop_imm10);
+                            end else if (uop_dst_reg == REG_T2) begin
                                 mseq_t2_wr_en   = 1'b1;
                                 mseq_t2_wr_data = extract_value(uop_imm10);
                             end else if (uop_dst_reg == REG_T3) begin
@@ -484,6 +529,10 @@ module microsequencer (
                                 pc_gpr_idx = meta_reg_dst_r;
                                 pc_gpr_opsz = meta_opsz_r;
                                 pc_gpr_val = temp_value(uop_src_reg);
+                            end else if (uop_imm10[5:0] == STAGE_EFLAGS) begin
+                                pc_eflags_en   = 1'b1;
+                                pc_eflags_val  = temp_value(uop_src_reg);
+                                pc_eflags_mask = temp_value(uop_dst_reg);
                             end
                             upc_next = upc_r + 12'h1;
                         end

@@ -81,6 +81,9 @@ def gen_pkg(d):
       - FC_* fault class codes
       - CM_* commit mask bits and combined masks
       - STAGE_* field selectors
+      - ALU_* operation selectors
+      - UOP_* microinstruction classes
+      - MF_* and M_* metadata extract field selectors
       - REG_* register namespace
       - C_* condition codes
       - MSEQ_* microsequencer states (hardcoded — not in JSON)
@@ -204,6 +207,40 @@ def gen_pkg(d):
     ]
     for x in d["stage_fields"]:
         lines.append(f"    localparam logic [5:0] {x['name']:<18} = 6'h{hexw(x['value'],2)};")
+
+    if "alu_ops" in d:
+        lines += [
+            "",
+            "    // ----------------------------------------------------------------",
+            "    // ALU OPERATION SELECTORS (Appendix A Section 2.6)",
+            "    // ----------------------------------------------------------------",
+        ]
+        for x in d["alu_ops"]:
+            lines.append(f"    localparam logic [3:0] {x['name']:<12} = 4'h{x['value']:X};")
+
+    if "uop_classes" in d:
+        lines += [
+            "",
+            "    // ----------------------------------------------------------------",
+            "    // MICROINSTRUCTION CLASSES (Appendix A Section 7.2)",
+            "    // ----------------------------------------------------------------",
+        ]
+        for x in d["uop_classes"]:
+            lines.append(f"    localparam logic [3:0] {x['name']:<12} = 4'h{x['value']:X};")
+
+    lines += [
+        "",
+        "    // ----------------------------------------------------------------",
+        "    // METADATA EXTRACT FIELDS (Appendix A Section 7.6)",
+        "    // ----------------------------------------------------------------",
+    ]
+    for x in d["extract_fields"]:
+        name = x["name"]
+        val = x["value"]
+        lines.append(f"    localparam logic [9:0] {name:<16} = 10'h{hexw(val,3)};")
+        if name.startswith("MF_"):
+            canonical_name = "M_" + name[3:]
+            lines.append(f"    localparam logic [9:0] {canonical_name:<16} = {name};")
 
     lines += [
         "",

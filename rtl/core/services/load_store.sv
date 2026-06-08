@@ -1,14 +1,18 @@
 // Keystone86 / Aegis
 // rtl/core/services/load_store.sv
 //
-// Bounded Rung 6 load/store service.
+// Bounded Rung 6 load/store service with Rung 7 reg32 ALU metadata reuse.
 //
-// Existing STORE_REG_META behavior remains limited to ModRM.mod=11 MOV
-// register-register forms. Pass 6A-1 adds memory-source LOAD_RM8/16/32 for
-// the direct absolute disp32 form after EA_CALC_32 has staged the effective
-// address in T2. Pass 6B-1 adds memory-destination STORE_RM* for the same
-// direct absolute disp32 form; LOAD_REG_META may read the source register for
-// that bounded store path, and the memory write is completed before ENDI.
+// LOAD_REG_META reads the microcode-selected register index from T3 and returns
+// that register value in T4. Rung 6 MOV uses it for register operands and
+// memory-destination store sources; the bounded Rung 7 ADD/CMP reg32 first
+// slice uses it for ModRM.mod=11 operand reads. STORE_REG_META remains
+// register-form write staging.
+//
+// Pass 6A-1 adds memory-source LOAD_RM8/16/32 for the direct absolute disp32
+// form after EA_CALC_32 has staged the effective address in T2. Pass 6B-1 adds
+// memory-destination STORE_RM* for the same direct absolute disp32 form, and the
+// memory write is completed before ENDI.
 // Pass 6C-1 reuses STORE_RM* for OC_MOV_RM_IMM after FETCH_IMM* leaves the
 // immediate in T4. Pass 6E-1 extends the same LOAD_RM*/STORE_RM* paths only to
 // default-32 base-only no-displacement ModRM.mod=00 r/m!=100/101 forms.
@@ -57,6 +61,7 @@ module load_store (
     input  logic [31:0] gpr_rd_val,
 
     input  logic [31:0] t4_in,
+    input  logic [31:0] t3_in,
     input  logic [31:0] t2_in,
     output logic        t4_wr_en,
     output logic [31:0] t4_wr_data,
@@ -116,7 +121,8 @@ module load_store (
     logic [1:0]  pc_gpr_opsz_r;
     logic [31:0] pc_gpr_val_r;
 
-    assign gpr_rd_idx = (meta_opcode_class == OC_MOV_RM_R) ? meta_reg_src :
+    assign gpr_rd_idx = (svc_id == LOAD_REG_META) ? t3_in[2:0] :
+                        (meta_opcode_class == OC_MOV_RM_R) ? meta_reg_src :
                         (meta_opcode_class == OC_MOV_R_RM) ? meta_reg_rm  :
                                                              3'h0;
     assign gpr_rd_opsz = meta_opsz;
@@ -347,15 +353,9 @@ module load_store (
                         unique case (svc_id)
                             LOAD_REG_META: begin
                                 done_r <= 1'b1;
-                                if (!((meta_modrm_class == MRM_REG) ||
-                                      ((meta_opcode_class == OC_MOV_RM_R) &&
-                                       is_authorized_mem_form()))) begin
-                                    sr_r <= SR_FAULT;
-                                end else begin
-                                    sr_r         <= SR_OK;
-                                    t4_wr_en_r   <= 1'b1;
-                                    t4_wr_data_r <= gpr_rd_val;
-                                end
+                                sr_r         <= SR_OK;
+                                t4_wr_en_r   <= 1'b1;
+                                t4_wr_data_r <= gpr_rd_val;
                             end
 
                             STORE_REG_META: begin

@@ -99,6 +99,8 @@ module cpu_top (
     logic [2:0]  dec_reg_dst;
     logic [2:0]  dec_reg_src;
     logic [2:0]  dec_reg_rm;
+    logic [3:0]  dec_alu_op;
+    logic        dec_is_cmp;
     logic [3:0]  dec_cond_code;
     logic        dec_ack;
 
@@ -128,6 +130,9 @@ module cpu_top (
     logic [2:0]  pc_gpr_idx;
     logic [1:0]  pc_gpr_opsz;
     logic [31:0] pc_gpr_val;
+    logic        pc_eflags_en;
+    logic [31:0] pc_eflags_val;
+    logic [31:0] pc_eflags_mask;
     logic        commit_pc_gpr_en;
     logic [2:0]  commit_pc_gpr_idx;
     logic [1:0]  commit_pc_gpr_opsz;
@@ -229,6 +234,18 @@ module cpu_top (
     logic [1:0]  gpr_rd_opsz;
     logic [31:0] gpr_rd_val;
 
+    // alu service side
+    logic [7:0]  alu_svc_id;
+    logic        alu_svc_req;
+    logic        alu_svc_done;
+    logic [1:0]  alu_svc_sr;
+    logic        alu_t0_wr_en;
+    logic [31:0] alu_t0_wr_data;
+    logic        alu_t3_wr_en;
+    logic [31:0] alu_t3_wr_data;
+    logic        alu_t4_wr_en;
+    logic [31:0] alu_t4_wr_data;
+
     // stack_engine side
     logic [7:0]  se_svc_id;
     logic        se_svc_req;
@@ -269,9 +286,15 @@ module cpu_top (
     logic [47:0] pc_int_frame_bytes;
 
     // scratch/state registers used by current rung2 path
+    logic [31:0] t0_r;
+    logic [31:0] t1_r;
     logic [31:0] t2_r;
     logic [31:0] t3_r;
     logic [31:0] t4_r;
+    logic        mseq_t0_wr_en;
+    logic [31:0] mseq_t0_wr_data;
+    logic        mseq_t1_wr_en;
+    logic [31:0] mseq_t1_wr_data;
     logic        mseq_t2_wr_en;
     logic [31:0] mseq_t2_wr_data;
     logic        mseq_t3_wr_en;
@@ -292,6 +315,8 @@ module cpu_top (
     logic [7:0]  meta_sib_byte_r;
     logic [3:0]  meta_modrm_class_r;
     logic [31:0] meta_disp_value_r;
+    logic [3:0]  meta_alu_op_r;
+    logic        meta_is_cmp_r;
 
     // debug wires from microsequencer
     logic [1:0]  dbg_mseq_state_w;
@@ -396,6 +421,8 @@ module cpu_top (
     // ------------------------------------------------------------
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
+            t0_r <= 32'h0;
+            t1_r <= 32'h0;
             t2_r <= 32'h0;
             t3_r <= 32'h0;
             t4_r <= 32'h0;
@@ -411,6 +438,8 @@ module cpu_top (
             meta_reg_dst_r       <= 3'h0;
             meta_reg_src_r       <= 3'h0;
             meta_reg_rm_r        <= 3'h0;
+            meta_alu_op_r        <= 4'h0;
+            meta_is_cmp_r        <= 1'b0;
         end else begin
             if (dec_ack) begin
                 meta_modrm_present_r <= dec_modrm_present;
@@ -425,7 +454,11 @@ module cpu_top (
                 meta_reg_dst_r       <= dec_reg_dst;
                 meta_reg_src_r       <= dec_reg_src;
                 meta_reg_rm_r        <= dec_reg_rm;
+                meta_alu_op_r        <= dec_alu_op;
+                meta_is_cmp_r        <= dec_is_cmp;
             end
+            if (mseq_t0_wr_en) t0_r <= mseq_t0_wr_data;
+            if (mseq_t1_wr_en) t1_r <= mseq_t1_wr_data;
             if (mseq_t2_wr_en) t2_r <= mseq_t2_wr_data;
             if (ea_t2_wr_en) t2_r <= ea_t2_wr_data;
             if (mseq_t3_wr_en) t3_r <= mseq_t3_wr_data;
@@ -444,6 +477,9 @@ module cpu_top (
             if (fc_t3_wr_en) t3_r <= fc_t3_wr_data;
             if (op_t2_wr_en) t2_r <= op_t2_wr_data;
             if (se_t2_wr_en) t2_r <= se_t2_wr_data;
+            if (alu_t0_wr_en) t0_r <= alu_t0_wr_data;
+            if (alu_t3_wr_en) t3_r <= alu_t3_wr_data;
+            if (alu_t4_wr_en) t4_r <= alu_t4_wr_data;
         end
     end
 
@@ -531,6 +567,8 @@ module cpu_top (
         .reg_dst      (dec_reg_dst),
         .reg_src      (dec_reg_src),
         .reg_rm       (dec_reg_rm),
+        .alu_op       (dec_alu_op),
+        .is_cmp       (dec_is_cmp),
         .cond_code    (dec_cond_code),
         .dec_ack      (dec_ack),
         .q_fetch_eip  (q_fetch_eip)
@@ -571,9 +609,16 @@ module cpu_top (
         .pc_gpr_idx      (pc_gpr_idx),
         .pc_gpr_opsz     (pc_gpr_opsz),
         .pc_gpr_val      (pc_gpr_val),
+        .pc_eflags_en    (pc_eflags_en),
+        .pc_eflags_val   (pc_eflags_val),
+        .pc_eflags_mask  (pc_eflags_mask),
         .pc_stack_adj_en (pc_stack_adj_en),
         .pc_stack_adj_val(pc_stack_adj_val),
         .stack_push_data (stack_push_data),
+        .mseq_t0_wr_en   (mseq_t0_wr_en),
+        .mseq_t0_wr_data (mseq_t0_wr_data),
+        .mseq_t1_wr_en   (mseq_t1_wr_en),
+        .mseq_t1_wr_data (mseq_t1_wr_data),
         .mseq_t2_wr_en   (mseq_t2_wr_en),
         .mseq_t2_wr_data (mseq_t2_wr_data),
         .mseq_t3_wr_en   (mseq_t3_wr_en),
@@ -587,6 +632,8 @@ module cpu_top (
         .svc_sr_in       (svc_sr_in),
 
         .t2_data         (t2_r),
+        .t0_data         (t0_r),
+        .t1_data         (t1_r),
         .t4_data         (t4_r),
         .t3_data         (t3_r),
         .meta_opcode_class_in(dec_opcode_class),
@@ -595,7 +642,10 @@ module cpu_top (
         .meta_imm_class_in(dec_imm_class),
         .meta_modrm_class_in(dec_modrm_class),
         .meta_reg_dst_in (dec_reg_dst),
+        .meta_reg_src_in (dec_reg_src),
         .meta_reg_rm_in  (dec_reg_rm),
+        .meta_alu_op_in  (dec_alu_op),
+        .meta_is_cmp_in  (dec_is_cmp),
         .meta_next_eip   (meta_next_eip),
         .meta_cond_code  (meta_cond_code),
 
@@ -647,6 +697,11 @@ module cpu_top (
         .ls_svc_req  (ls_svc_req),
         .ls_svc_done (ls_svc_done),
         .ls_svc_sr   (ls_svc_sr),
+
+        .alu_svc_id  (alu_svc_id),
+        .alu_svc_req (alu_svc_req),
+        .alu_svc_done(alu_svc_done),
+        .alu_svc_sr  (alu_svc_sr),
 
         .se_svc_id   (se_svc_id),
         .se_svc_req  (se_svc_req),
@@ -755,6 +810,7 @@ module cpu_top (
         .gpr_rd_opsz      (ls_gpr_rd_opsz),
         .gpr_rd_val       (gpr_rd_val),
         .t4_in            (t4_r),
+        .t3_in            (t3_r),
         .t2_in            (t2_r),
         .t4_wr_en         (ls_t4_wr_en),
         .t4_wr_data       (ls_t4_wr_data),
@@ -772,6 +828,25 @@ module cpu_top (
         .pc_gpr_idx       (ls_pc_gpr_idx),
         .pc_gpr_opsz      (ls_pc_gpr_opsz),
         .pc_gpr_val       (ls_pc_gpr_val)
+    );
+
+    alu u_alu (
+        .clk          (clk),
+        .reset_n      (reset_n),
+        .svc_id       (alu_svc_id),
+        .svc_req      (alu_svc_req),
+        .svc_done     (alu_svc_done),
+        .svc_sr       (alu_svc_sr),
+        .operand_a    (t0_r),
+        .operand_b    (t1_r),
+        .alu_op       (t4_r[3:0]),
+        .meta_opsz    (meta_opsz_r),
+        .t0_wr_en     (alu_t0_wr_en),
+        .t0_wr_data   (alu_t0_wr_data),
+        .t3_wr_en     (alu_t3_wr_en),
+        .t3_wr_data   (alu_t3_wr_data),
+        .t4_wr_en     (alu_t4_wr_en),
+        .t4_wr_data   (alu_t4_wr_data)
     );
 
     stack_engine u_stack (
@@ -839,6 +914,10 @@ module cpu_top (
         .pc_gpr_idx                 (commit_pc_gpr_idx),
         .pc_gpr_opsz                (commit_pc_gpr_opsz),
         .pc_gpr_val                 (commit_pc_gpr_val),
+
+        .pc_eflags_en               (pc_eflags_en),
+        .pc_eflags_val              (pc_eflags_val),
+        .pc_eflags_mask             (pc_eflags_mask),
 
         .gpr_rd_idx                 (gpr_rd_idx),
         .gpr_rd_opsz                (gpr_rd_opsz),

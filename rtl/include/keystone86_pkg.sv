@@ -158,6 +158,73 @@ package keystone86_pkg;
     localparam logic [5:0] STAGE_EFLAGS_MASK  = 6'h07;
 
     // ----------------------------------------------------------------
+    // ALU OPERATION SELECTORS (Appendix A Section 2.6)
+    // ----------------------------------------------------------------
+    localparam logic [3:0] ALU_ADD      = 4'h0;
+    localparam logic [3:0] ALU_CMP      = 4'h7;
+
+    // ----------------------------------------------------------------
+    // MICROINSTRUCTION CLASSES (Appendix A Section 7.2)
+    // ----------------------------------------------------------------
+    localparam logic [3:0] UOP_NOP      = 4'h0;
+    localparam logic [3:0] UOP_BR       = 4'h4;
+    localparam logic [3:0] UOP_MOV      = 4'h5;
+    localparam logic [3:0] UOP_EXTRACT  = 4'h7;
+    localparam logic [3:0] UOP_SVCW     = 4'h9;
+    localparam logic [3:0] UOP_STAGE    = 4'hA;
+    localparam logic [3:0] UOP_RAISE    = 4'hC;
+    localparam logic [3:0] UOP_ENDI     = 4'hE;
+    localparam logic [3:0] UOP_EXT      = 4'hF;
+
+    // ----------------------------------------------------------------
+    // METADATA EXTRACT FIELDS (Appendix A Section 7.6)
+    // ----------------------------------------------------------------
+    localparam logic [9:0] MF_ENTRY_ID      = 10'h000;
+    localparam logic [9:0] M_ENTRY_ID       = MF_ENTRY_ID;
+    localparam logic [9:0] MF_OPSZ          = 10'h001;
+    localparam logic [9:0] M_OPSZ           = MF_OPSZ;
+    localparam logic [9:0] MF_ADDRSZ        = 10'h002;
+    localparam logic [9:0] M_ADDRSZ         = MF_ADDRSZ;
+    localparam logic [9:0] MF_MODRM_CLASS   = 10'h003;
+    localparam logic [9:0] M_MODRM_CLASS    = MF_MODRM_CLASS;
+    localparam logic [9:0] MF_IMM_CLASS     = 10'h004;
+    localparam logic [9:0] M_IMM_CLASS      = MF_IMM_CLASS;
+    localparam logic [9:0] MF_DISP_CLASS    = 10'h005;
+    localparam logic [9:0] M_DISP_CLASS     = MF_DISP_CLASS;
+    localparam logic [9:0] MF_OPCODE_CLASS  = 10'h006;
+    localparam logic [9:0] M_OPCODE_CLASS   = MF_OPCODE_CLASS;
+    localparam logic [9:0] MF_ALU_OP        = 10'h007;
+    localparam logic [9:0] M_ALU_OP         = MF_ALU_OP;
+    localparam logic [9:0] MF_IS_CMP        = 10'h008;
+    localparam logic [9:0] M_IS_CMP         = MF_IS_CMP;
+    localparam logic [9:0] MF_REG_DST       = 10'h009;
+    localparam logic [9:0] M_REG_DST        = MF_REG_DST;
+    localparam logic [9:0] MF_REG_SRC       = 10'h00A;
+    localparam logic [9:0] M_REG_SRC        = MF_REG_SRC;
+    localparam logic [9:0] MF_REG_RM        = 10'h00B;
+    localparam logic [9:0] M_REG_RM         = MF_REG_RM;
+    localparam logic [9:0] MF_SIB_SCALE     = 10'h00C;
+    localparam logic [9:0] M_SIB_SCALE      = MF_SIB_SCALE;
+    localparam logic [9:0] MF_SIB_INDEX     = 10'h00D;
+    localparam logic [9:0] M_SIB_INDEX      = MF_SIB_INDEX;
+    localparam logic [9:0] MF_SIB_BASE      = 10'h00E;
+    localparam logic [9:0] M_SIB_BASE       = MF_SIB_BASE;
+    localparam logic [9:0] MF_COND_CODE     = 10'h00F;
+    localparam logic [9:0] M_COND_CODE      = MF_COND_CODE;
+    localparam logic [9:0] MF_FLAG_BIT      = 10'h010;
+    localparam logic [9:0] M_FLAG_BIT       = MF_FLAG_BIT;
+    localparam logic [9:0] MF_FLAG_VAL      = 10'h011;
+    localparam logic [9:0] M_FLAG_VAL       = MF_FLAG_VAL;
+    localparam logic [9:0] MF_NEXT_EIP      = 10'h012;
+    localparam logic [9:0] M_NEXT_EIP       = MF_NEXT_EIP;
+    localparam logic [9:0] MF_FC_TO_VECTOR  = 10'h013;
+    localparam logic [9:0] M_FC_TO_VECTOR   = MF_FC_TO_VECTOR;
+    localparam logic [9:0] MF_PREFIX1       = 10'h014;
+    localparam logic [9:0] M_PREFIX1        = MF_PREFIX1;
+    localparam logic [9:0] MF_PREFIX2       = 10'h015;
+    localparam logic [9:0] M_PREFIX2        = MF_PREFIX2;
+
+    // ----------------------------------------------------------------
     // MICROINSTRUCTION REGISTER NAMESPACE (Appendix A Section 7.4)
     // ----------------------------------------------------------------
     localparam logic [3:0] REG_T0       = 4'h0;

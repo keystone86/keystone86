@@ -34,6 +34,7 @@ HOST_GID := $(shell id -g)
         rung6-pass6g1-sim rung6-pass6g1-clean \
         rung6-pass6h5-sim rung6-pass6h5-clean \
         rung6-mov-matrix-sim rung6-mov-matrix-clean rung6-regress \
+        rung7-alu-reg32-sim rung7-alu-reg32-clean \
         dev dev-build dev-fpga
 
 # Host-side targets:
@@ -158,6 +159,7 @@ help:
 	@echo "  make rung6-mov-matrix-sim  - compile and run Rung 6 Appendix D MOV matrix simulation"
 	@echo "  make rung6-mov-matrix-clean - remove Rung 6 MOV matrix simulation artifacts"
 	@echo "  make rung6-regress         - run Rung 5 regression plus all required Rung 6 simulations"
+	@echo "  make rung7-alu-reg32-sim   - compile and run first-slice Rung 7 ADD/CMP reg32 simulation"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -323,6 +325,7 @@ RTL_SOURCES_COMMON = \
   rtl/core/services/ea_calc.sv \
   rtl/core/services/operand_engine.sv \
   rtl/core/services/load_store.sv \
+  rtl/core/services/alu.sv \
   rtl/core/services/stack_engine.sv \
   rtl/core/services/interrupt_engine.sv \
   rtl/core/services/service_dispatch.sv \
@@ -1093,6 +1096,28 @@ rung6-regress: require-container ucode
 	$(MAKE) rung6-pass6h4-sim
 	$(MAKE) rung6-pass6h5-sim
 	$(MAKE) rung6-mov-matrix-sim
+
+# ----------------------------------------------------------------
+# Rung 7 first slice — 32-bit register-register ADD/CMP only
+# ----------------------------------------------------------------
+
+IVERILOG_SOURCES_RUNG7_ALU_REG32 = \
+  $(RTL_SOURCES_COMMON) \
+  sim/tb/tb_rung7_alu_reg32_add_cmp.sv
+
+rung7-alu-reg32-sim: require-container ucode
+	@echo "--- Rung 7 first slice: compiling ADD/CMP reg32 RTL simulation ---"
+	@mkdir -p build/sim/rung7_alu_reg32
+	iverilog -g2012 -Wall \
+		$(IVERILOG_INCDIRS) \
+		-o build/sim/rung7_alu_reg32/tb_rung7_alu_reg32_add_cmp.vvp \
+		$(IVERILOG_SOURCES_RUNG7_ALU_REG32)
+	@echo "--- Rung 7 first slice: running ADD/CMP reg32 simulation ---"
+	vvp build/sim/rung7_alu_reg32/tb_rung7_alu_reg32_add_cmp.vvp
+
+rung7-alu-reg32-clean: require-container
+	@rm -rf build/sim/rung7_alu_reg32
+	@echo "Rung 7 first-slice ADD/CMP reg32 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything
