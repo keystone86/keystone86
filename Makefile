@@ -159,7 +159,7 @@ help:
 	@echo "  make rung6-mov-matrix-sim  - compile and run Rung 6 Appendix D MOV matrix simulation"
 	@echo "  make rung6-mov-matrix-clean - remove Rung 6 MOV matrix simulation artifacts"
 	@echo "  make rung6-regress         - run Rung 5 regression plus all required Rung 6 simulations"
-	@echo "  make rung7-alu-reg32-sim   - compile and run first-slice Rung 7 ADD/CMP reg32 simulation"
+	@echo "  make rung7-alu-reg32-sim   - compile and run focused Rung 7 ADD/CMP reg32 simulation"
 	@echo "  make clean                 - remove all generated files"
 
 # ----------------------------------------------------------------
@@ -1098,7 +1098,7 @@ rung6-regress: require-container ucode
 	$(MAKE) rung6-mov-matrix-sim
 
 # ----------------------------------------------------------------
-# Rung 7 first slice — 32-bit register-register ADD/CMP only
+# Rung 7 focused slice — 32-bit register-register ADD/CMP only
 # ----------------------------------------------------------------
 
 IVERILOG_SOURCES_RUNG7_ALU_REG32 = \
@@ -1106,18 +1106,18 @@ IVERILOG_SOURCES_RUNG7_ALU_REG32 = \
   sim/tb/tb_rung7_alu_reg32_add_cmp.sv
 
 rung7-alu-reg32-sim: require-container ucode
-	@echo "--- Rung 7 first slice: compiling ADD/CMP reg32 RTL simulation ---"
+	@echo "--- Rung 7 focused slice: compiling ADD/CMP reg32 RTL simulation ---"
 	@mkdir -p build/sim/rung7_alu_reg32
 	iverilog -g2012 -Wall \
 		$(IVERILOG_INCDIRS) \
 		-o build/sim/rung7_alu_reg32/tb_rung7_alu_reg32_add_cmp.vvp \
 		$(IVERILOG_SOURCES_RUNG7_ALU_REG32)
-	@echo "--- Rung 7 first slice: running ADD/CMP reg32 simulation ---"
+	@echo "--- Rung 7 focused slice: running ADD/CMP reg32 simulation ---"
 	vvp build/sim/rung7_alu_reg32/tb_rung7_alu_reg32_add_cmp.vvp
 
 rung7-alu-reg32-clean: require-container
 	@rm -rf build/sim/rung7_alu_reg32
-	@echo "Rung 7 first-slice ADD/CMP reg32 build artifacts removed."
+	@echo "Rung 7 focused ADD/CMP reg32 build artifacts removed."
 
 # ----------------------------------------------------------------
 # Clean — single build/ directory covers everything

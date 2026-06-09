@@ -27,6 +27,9 @@ for i in range(256):
     elif i == 0x02:
         val = 0x200
         meaning = "ENTRY_ALU_RM_R"
+    elif i == 0x03:
+        val = 0x1D1
+        meaning = "ENTRY_ALU_R_RM"
     elif i == 0x07:
         val = 0x050       # Rung 2: ENTRY_JMP_NEAR
         meaning = "ENTRY_JMP_NEAR"
@@ -447,14 +450,38 @@ rom[0x1CD] = br(C_FAULT, rel10(0x1CD, 0x000))
 rom[0x1CE] = endi(CM_NOP_EIP)
 
 # --------------------------------------------------------------------
-# Rung 7 first slice: ENTRY_ALU_RM_R register-register ADD/CMP at 0x200.
+# Rung 7 bounded reg32 ADD/CMP register-register slices.
 #
-# Decoder supplies only Appendix A metadata. Microcode explicitly loads both
-# committed register operands through LOAD_REG_META, invokes the bounded ALU
-# service with staged operands, stages masked candidate flags, then selects
-# ADD writeback or CMP flags-only commit at ENDI. The local fault tail is placed
-# at 0x1FE/0x1FF so its direct branch to SUB_FAULT_HANDLER stays in BR range.
+# ENTRY_ALU_R_RM is placed in the free 0x1D1 window before the existing
+# ENTRY_ALU_RM_R path so all direct BR instructions remain in range. Decoder
+# supplies only Appendix A metadata. Microcode explicitly loads both committed
+# register operands through LOAD_REG_META, invokes the bounded ALU service with
+# staged operands, stages masked candidate flags, then selects ADD writeback or
+# CMP flags-only commit at ENDI.
 # --------------------------------------------------------------------
+rom[0x1CF] = raise_fc(0x6)
+rom[0x1D0] = br(C_ALWAYS, rel10(0x1D0, 0x000))
+rom[0x1D1] = extract(REG_T3, MF_REG_DST)
+rom[0x1D2] = svcw_small(LOAD_REG_META)
+rom[0x1D3] = br(C_FAULT, rel10(0x1D3, 0x1CF))
+rom[0x1D4] = mov(REG_T0, REG_T4)
+rom[0x1D5] = extract(REG_T3, MF_REG_RM)
+rom[0x1D6] = svcw_small(LOAD_REG_META)
+rom[0x1D7] = br(C_FAULT, rel10(0x1D7, 0x1CF))
+rom[0x1D8] = mov(REG_T1, REG_T4)
+rom[0x1D9] = extract(REG_T4, MF_ALU_OP)
+rom[0x1DA] = extract(REG_T3, MF_IS_CMP)
+rom[0x1DB] = br(C_T3NZ, rel10(0x1DB, 0x1E5))
+rom[0x1DC] = svcw_small(ALU_ADD32)
+rom[0x1DD] = br(C_FAULT, rel10(0x1DD, 0x1CF))
+rom[0x1DE] = stage(STAGE_EFLAGS, REG_T3, REG_T4)
+rom[0x1DF] = stage(STAGE_GPR, REG_T0)
+rom[0x1E0] = endi(CM_ALU_REG)
+rom[0x1E5] = svcw_small(ALU_CMP32)
+rom[0x1E6] = br(C_FAULT, rel10(0x1E6, 0x1CF))
+rom[0x1E7] = stage(STAGE_EFLAGS, REG_T3, REG_T4)
+rom[0x1E8] = endi(CM_FLAGS)
+
 rom[0x1FE] = raise_fc(0x6)
 rom[0x1FF] = br(C_ALWAYS, rel10(0x1FF, 0x000))
 rom[0x200] = extract(REG_T3, MF_REG_RM)
@@ -487,8 +514,8 @@ listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; and Rung 6 Pass 6H-3 bounded MOV immediate/register/direct-disp32,
 ; non-SIB, base-only-SIB, no-base-SIB-disp32, base-present indexed SIB,
 ; no-base indexed SIB, 0x67 direct disp16, and 0x67 no-displacement non-BP/BP
-; coverage, plus the first Rung 7 32-bit register-register ADD/CMP slice.
-; No broader 16-bit addressing or broader Rung 7 behavior.
+; coverage, plus the bounded Rung 7 32-bit register-register ADD/CMP
+; 01/03/39/3B slices. No broader 16-bit addressing or broader Rung 7 behavior.
 address  encoding     source
 0x000    {extract(REG_T4, MF_FC_TO_VECTOR)}   SUB_FAULT_HANDLER: EXTRACT T4, MF_FC_TO_VECTOR
 0x001    {ext_word()}   EXT
@@ -664,6 +691,28 @@ address  encoding     source
 0x1CC    {svcw_small(STORE_RM16)}   mov_rm_imm16_after_ea: SVCW STORE_RM16
 0x1CD    {br(C_FAULT, rel10(0x1CD, 0x000))}   BR C_FAULT, SUB_FAULT_HANDLER
 0x1CE    {endi(CM_NOP_EIP)}   ENDI CM_NOP|CM_EIP (0x{CM_NOP_EIP:03X})
+0x1CF    {raise_fc(0x6)}   alu_r_rm_fault: RAISE FC_UD
+0x1D0    {br(C_ALWAYS, rel10(0x1D0, 0x000))}   BR C_ALWAYS, SUB_FAULT_HANDLER
+0x1D1    {extract(REG_T3, MF_REG_DST)}   ENTRY_ALU_R_RM: EXTRACT T3, M_REG_DST
+0x1D2    {svcw_small(LOAD_REG_META)}   SVCW LOAD_REG_META
+0x1D3    {br(C_FAULT, rel10(0x1D3, 0x1CF))}   BR C_FAULT, alu_r_rm_fault
+0x1D4    {mov(REG_T0, REG_T4)}   MOV T0, T4
+0x1D5    {extract(REG_T3, MF_REG_RM)}   EXTRACT T3, M_REG_RM
+0x1D6    {svcw_small(LOAD_REG_META)}   SVCW LOAD_REG_META
+0x1D7    {br(C_FAULT, rel10(0x1D7, 0x1CF))}   BR C_FAULT, alu_r_rm_fault
+0x1D8    {mov(REG_T1, REG_T4)}   MOV T1, T4
+0x1D9    {extract(REG_T4, MF_ALU_OP)}   EXTRACT T4, M_ALU_OP
+0x1DA    {extract(REG_T3, MF_IS_CMP)}   EXTRACT T3, M_IS_CMP
+0x1DB    {br(C_T3NZ, rel10(0x1DB, 0x1E5))}   BR C_T3NZ, alu_r_rm_cmp
+0x1DC    {svcw_small(ALU_ADD32)}   SVCW ALU_ADD32
+0x1DD    {br(C_FAULT, rel10(0x1DD, 0x1CF))}   BR C_FAULT, alu_r_rm_fault
+0x1DE    {stage(STAGE_EFLAGS, REG_T3, REG_T4)}   STAGE STAGE_EFLAGS, T3, T4
+0x1DF    {stage(STAGE_GPR, REG_T0)}   STAGE STAGE_GPR, T0
+0x1E0    {endi(CM_ALU_REG)}   ENDI CM_ALU_REG (0x{CM_ALU_REG:03X})
+0x1E5    {svcw_small(ALU_CMP32)}   alu_r_rm_cmp: SVCW ALU_CMP32
+0x1E6    {br(C_FAULT, rel10(0x1E6, 0x1CF))}   BR C_FAULT, alu_r_rm_fault
+0x1E7    {stage(STAGE_EFLAGS, REG_T3, REG_T4)}   STAGE STAGE_EFLAGS, T3, T4
+0x1E8    {endi(CM_FLAGS)}   ENDI CM_FLAGS (0x{CM_FLAGS:03X})
 0x1FE    {raise_fc(0x6)}   alu_fault: RAISE FC_UD
 0x1FF    {br(C_ALWAYS, rel10(0x1FF, 0x000))}   BR C_ALWAYS, SUB_FAULT_HANDLER
 0x200    {extract(REG_T3, MF_REG_RM)}   ENTRY_ALU_RM_R: EXTRACT T3, M_REG_RM
@@ -704,4 +753,5 @@ print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
 print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6H-5 MOV immediate/register/memory/immediate-to-memory/immediate-to-register/SIB-base/SIB-no-base/SIB-indexed-base/SIB-indexed-no-base/addr16-direct/addr16-nobp-nodisp/addr16-bp-nodisp/addr16-disp8/addr16-disp16)")
 print(f"  CM_ALU_REG = 0x{CM_ALU_REG:03X}")
 print(f"  CM_FLAGS   = 0x{CM_FLAGS:03X}")
-print(f"  ENTRY_ALU_RM_R  at dispatch[0x02] -> uPC 0x200 (Rung 7 first slice ADD/CMP r/m32,r32 register-register)")
+print(f"  ENTRY_ALU_RM_R  at dispatch[0x02] -> uPC 0x200 (Rung 7 bounded ADD/CMP r/m32,r32 register-register)")
+print(f"  ENTRY_ALU_R_RM  at dispatch[0x03] -> uPC 0x1D1 (Rung 7 bounded ADD/CMP r32,r/m32 register-register)")

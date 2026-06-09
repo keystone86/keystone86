@@ -1,11 +1,11 @@
 // Keystone86 / Aegis
 // sim/tb/tb_rung7_alu_reg32_add_cmp.sv
-// First-slice Rung 7 smoke: 01 /r ADD and 39 /r CMP register-register only.
+// Focused Rung 7 smoke: 01/03 /r ADD and 39/3B /r CMP register-register only.
 //
 // Each case seeds committed architectural state before the tested instruction.
 // The checks then prove operands are loaded before the bounded ALU service,
 // architectural GPR/EFLAGS visibility waits until ENDI, and unsupported
-// adjacent forms do not dispatch through ENTRY_ALU_RM_R.
+// adjacent forms do not dispatch through either bounded ALU entry.
 
 `timescale 1ns/1ps
 
@@ -17,6 +17,7 @@ module tb_rung7_alu_reg32_add_cmp;
     localparam logic [31:0] RESET_EIP         = 32'hFFFFFFF0;
     localparam logic [7:0]  ENTRY_NULL_ID     = 8'h00;
     localparam logic [7:0]  ENTRY_ALU_RM_R_ID = 8'h02;
+    localparam logic [7:0]  ENTRY_ALU_R_RM_ID = 8'h03;
     localparam logic [7:0]  SVC_LOAD_REG_META = 8'h26;
     localparam logic [7:0]  SVC_ALU_ADD32     = 8'h32;
     localparam logic [7:0]  SVC_ALU_CMP32     = 8'h3B;
@@ -227,11 +228,15 @@ module tb_rung7_alu_reg32_add_cmp;
     endfunction
 
     task automatic run_alu_case(input string name,
+                                input logic [7:0] opcode,
                                 input bit is_cmp,
+                                input bit dest_is_reg_field,
                                 input logic [2:0] dst,
                                 input logic [2:0] src,
                                 input logic [31:0] dst_val,
                                 input logic [31:0] src_val);
+        logic [7:0] expected_entry;
+        logic [7:0] wrong_entry;
         logic [31:0] before_flags;
         logic [31:0] expected_flags;
         logic [31:0] result;
@@ -239,7 +244,9 @@ module tb_rung7_alu_reg32_add_cmp;
         int cycles;
         int load_count;
         int alu_count;
+        int wrong_alu_count;
         int alu_route_count;
+        int wrong_route_count;
         int alu_endi_count;
         int bus_wr_count;
         bit timed_out;
@@ -253,8 +260,10 @@ module tb_rung7_alu_reg32_add_cmp;
                 add_case_count++;
 
             clear_memory();
-            mem[pa16(RESET_EIP + 32'd0)] = is_cmp ? 8'h39 : 8'h01;
-            mem[pa16(RESET_EIP + 32'd1)] = modrm_rr(dst, src);
+            mem[pa16(RESET_EIP + 32'd0)] = opcode;
+            mem[pa16(RESET_EIP + 32'd1)] = dest_is_reg_field ?
+                                           modrm_rr(src, dst) :
+                                           modrm_rr(dst, src);
 
             reset_cpu();
             seed_arch_state(dst, dst_val, src, src_val);
@@ -277,12 +286,18 @@ module tb_rung7_alu_reg32_add_cmp;
 
             load_count = 0;
             alu_count = 0;
+            wrong_alu_count = 0;
             alu_route_count = 0;
+            wrong_route_count = 0;
             alu_endi_count = 0;
             bus_wr_count = 0;
             timed_out = 1'b1;
             early_gpr_visible = 1'b0;
             early_eflags_visible = 1'b0;
+            expected_entry = dest_is_reg_field ? ENTRY_ALU_R_RM_ID :
+                                                 ENTRY_ALU_RM_R_ID;
+            wrong_entry = dest_is_reg_field ? ENTRY_ALU_RM_R_ID :
+                                             ENTRY_ALU_R_RM_ID;
 
             begin : wait_case
                 for (cycles = 0; cycles < CASE_TIMEOUT; cycles++) begin
@@ -293,23 +308,30 @@ module tb_rung7_alu_reg32_add_cmp;
                         bus_wr_count++;
 
                     if (dut.u_mseq.dispatch_rom_pending &&
-                        (dut.u_mseq.dispatch_entry_latch == ENTRY_ALU_RM_R_ID))
+                        (dut.u_mseq.dispatch_entry_latch == expected_entry))
                         alu_route_count++;
+                    if (dut.u_mseq.dispatch_rom_pending &&
+                        (dut.u_mseq.dispatch_entry_latch == wrong_entry))
+                        wrong_route_count++;
 
                     if (dut.svc_req_out && (dut.svc_id_out == SVC_LOAD_REG_META))
                         load_count++;
 
                     if (dut.svc_req_out &&
-                        ((dut.svc_id_out == SVC_ALU_ADD32) ||
-                         (dut.svc_id_out == SVC_ALU_CMP32)))
+                        (dut.svc_id_out == (is_cmp ? SVC_ALU_CMP32 :
+                                                     SVC_ALU_ADD32)))
                         alu_count++;
+                    if (dut.svc_req_out &&
+                        (dut.svc_id_out == (is_cmp ? SVC_ALU_ADD32 :
+                                                     SVC_ALU_CMP32)))
+                        wrong_alu_count++;
 
                     if (dut.endi_req &&
                         (dut.endi_mask == (is_cmp ? CM_FLAGS_MASK :
                                                    CM_ALU_REG_MASK)))
                         alu_endi_count++;
 
-                    if (dbg_endi_pulse && (dbg_entry_id == ENTRY_ALU_RM_R_ID)) begin
+                    if (dbg_endi_pulse && (dbg_entry_id == expected_entry)) begin
                         timed_out = 1'b0;
                         @(posedge clk);
                         #1;
@@ -324,9 +346,14 @@ module tb_rung7_alu_reg32_add_cmp;
             end
 
             check({name, " completed"}, !timed_out);
-            check({name, " routed to ENTRY_ALU_RM_R once"}, alu_route_count == 1);
+            check({name, dest_is_reg_field ? " routed to ENTRY_ALU_R_RM once" :
+                                             " routed to ENTRY_ALU_RM_R once"},
+                  alu_route_count == 1);
+            check({name, " did not route to opposite ALU entry"},
+                  wrong_route_count == 0);
             check({name, " loaded two explicit register operands"}, load_count == 2);
-            check({name, " invoked one bounded ALU service"}, alu_count == 1);
+            check({name, " invoked one expected bounded ALU service"}, alu_count == 1);
+            check({name, " did not invoke opposite ALU service"}, wrong_alu_count == 0);
             check({name, is_cmp ? " used CM_FLAGS" : " used CM_ALU_REG"},
                   alu_endi_count > 0);
             check({name, " issued no memory write bus request"}, bus_wr_count == 0);
@@ -396,7 +423,8 @@ module tb_rung7_alu_reg32_add_cmp;
                     if (bus_wr)
                         saw_bus_wr = 1'b1;
                     if (dut.u_mseq.dispatch_rom_pending &&
-                        (dut.u_mseq.dispatch_entry_latch == ENTRY_ALU_RM_R_ID))
+                        ((dut.u_mseq.dispatch_entry_latch == ENTRY_ALU_RM_R_ID) ||
+                         (dut.u_mseq.dispatch_entry_latch == ENTRY_ALU_R_RM_ID)))
                         saw_alu_entry = 1'b1;
                     if (dut.svc_req_out &&
                         ((dut.svc_id_out == SVC_ALU_ADD32) ||
@@ -415,7 +443,7 @@ module tb_rung7_alu_reg32_add_cmp;
             end
 
             check({name, " routes to ENTRY_NULL"}, saw_entry_null);
-            check({name, " does not route to ENTRY_ALU_RM_R"}, !saw_alu_entry);
+            check({name, " does not route to bounded ALU entries"}, !saw_alu_entry);
             check({name, " does not invoke ALU service"}, !saw_alu_service);
             check({name, " does not use ALU ENDI masks"}, !saw_alu_endi);
             check({name, " issues no bus write before unsupported dispatch"}, !saw_bus_wr);
@@ -440,19 +468,31 @@ module tb_rung7_alu_reg32_add_cmp;
         bus_addr_pending = 32'h0;
         clear_memory();
 
-        $display("Keystone86 / Aegis - Rung 7 first-slice ADD/CMP reg32 Smoke");
+        $display("Keystone86 / Aegis - Rung 7 focused ADD/CMP reg32 Smoke");
 
-        run_alu_case("ADD 7fffffff+1 OF/SF/AF/PF", 1'b0,
+        run_alu_case("ADD 01 /r 7fffffff+1 OF/SF/AF/PF", 8'h01, 1'b0, 1'b0,
                      3'd0, 3'd3, 32'h7FFFFFFF, 32'h00000001);
-        run_alu_case("ADD ffffffff+1 CF/ZF/AF/PF", 1'b0,
+        run_alu_case("ADD 01 /r ffffffff+1 CF/ZF/AF/PF", 8'h01, 1'b0, 1'b0,
                      3'd1, 3'd2, 32'hFFFFFFFF, 32'h00000001);
-        run_alu_case("ADD 0000000f+1 AF/PF clear", 1'b0,
+        run_alu_case("ADD 01 /r 0000000f+1 AF/PF clear", 8'h01, 1'b0, 1'b0,
                      3'd6, 3'd7, 32'h0000000F, 32'h00000001);
-        run_alu_case("CMP 0-1 CF/SF/AF/PF", 1'b1,
+        run_alu_case("ADD 03 /r 7fffffff+1 OF/SF/AF/PF", 8'h03, 1'b0, 1'b1,
+                     3'd0, 3'd3, 32'h7FFFFFFF, 32'h00000001);
+        run_alu_case("ADD 03 /r ffffffff+1 CF/ZF/AF/PF", 8'h03, 1'b0, 1'b1,
+                     3'd1, 3'd2, 32'hFFFFFFFF, 32'h00000001);
+        run_alu_case("ADD 03 /r 0000000f+1 AF/PF clear", 8'h03, 1'b0, 1'b1,
+                     3'd6, 3'd7, 32'h0000000F, 32'h00000001);
+        run_alu_case("CMP 39 /r 0-1 CF/SF/AF/PF", 8'h39, 1'b1, 1'b0,
                      3'd0, 3'd3, 32'h00000000, 32'h00000001);
-        run_alu_case("CMP 80000000-1 OF/AF/PF", 1'b1,
+        run_alu_case("CMP 39 /r 80000000-1 OF/AF/PF", 8'h39, 1'b1, 1'b0,
                      3'd1, 3'd2, 32'h80000000, 32'h00000001);
-        run_alu_case("CMP equal ZF/PF", 1'b1,
+        run_alu_case("CMP 39 /r equal ZF/PF", 8'h39, 1'b1, 1'b0,
+                     3'd6, 3'd7, 32'h12345678, 32'h12345678);
+        run_alu_case("CMP 3B /r 0-1 CF/SF/AF/PF", 8'h3B, 1'b1, 1'b1,
+                     3'd0, 3'd3, 32'h00000000, 32'h00000001);
+        run_alu_case("CMP 3B /r 80000000-1 OF/AF/PF", 8'h3B, 1'b1, 1'b1,
+                     3'd1, 3'd2, 32'h80000000, 32'h00000001);
+        run_alu_case("CMP 3B /r equal ZF/PF", 8'h3B, 1'b1, 1'b1,
                      3'd6, 3'd7, 32'h12345678, 32'h12345678);
 
         run_unsupported("00 /r byte ADD", 8'h00, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
@@ -460,9 +500,9 @@ module tb_rung7_alu_reg32_add_cmp;
         run_unsupported("38 /r byte CMP", 8'h38, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("3A /r byte opposite CMP direction", 8'h3A, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("66 01 /r operand override ADD", 8'h66, 8'h01, 8'hD8, 8'h90, 8'h90, 8'h90);
+        run_unsupported("66 03 /r operand override ADD", 8'h66, 8'h03, 8'hD8, 8'h90, 8'h90, 8'h90);
         run_unsupported("66 39 /r operand override CMP", 8'h66, 8'h39, 8'hD8, 8'h90, 8'h90, 8'h90);
-        run_unsupported("03 /r opposite ADD direction", 8'h03, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
-        run_unsupported("3B /r opposite CMP direction", 8'h3B, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
+        run_unsupported("66 3B /r operand override CMP", 8'h66, 8'h3B, 8'hD8, 8'h90, 8'h90, 8'h90);
         run_unsupported("81 /0 id immediate ADD", 8'h81, 8'hC0, 8'h78, 8'h56, 8'h34, 8'h12);
         run_unsupported("83 /7 ib immediate CMP", 8'h83, 8'hF8, 8'h7F, 8'h90, 8'h90, 8'h90);
         run_unsupported("05 id accumulator ADD", 8'h05, 8'h78, 8'h56, 8'h34, 8'h12, 8'h90);
@@ -472,18 +512,20 @@ module tb_rung7_alu_reg32_add_cmp;
         run_unsupported("11 /r adjacent ADC", 8'h11, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("19 /r adjacent SBB", 8'h19, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("01 /r memory ModRM", 8'h01, 8'h00, 8'h90, 8'h90, 8'h90, 8'h90);
+        run_unsupported("03 /r memory ModRM", 8'h03, 8'h00, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("39 /r memory ModRM", 8'h39, 8'h00, 8'h90, 8'h90, 8'h90, 8'h90);
+        run_unsupported("3B /r memory ModRM", 8'h3B, 8'h00, 8'h90, 8'h90, 8'h90, 8'h90);
 
-        check("three ADD cases ran", add_case_count == 3);
-        check("three CMP cases ran", cmp_case_count == 3);
-        check("eighteen unsupported adjacent forms checked", unsupported_count == 18);
+        check("six ADD cases ran", add_case_count == 6);
+        check("six CMP cases ran", cmp_case_count == 6);
+        check("twenty unsupported adjacent forms checked", unsupported_count == 20);
 
         if (failures == 0) begin
-            $display("PASS: Rung 7 first-slice ADD/CMP reg32 smoke completed");
+            $display("PASS: Rung 7 focused ADD/CMP reg32 smoke completed");
         end else begin
-            $display("FAIL: Rung 7 first-slice ADD/CMP reg32 smoke had %0d failure(s)",
+            $display("FAIL: Rung 7 focused ADD/CMP reg32 smoke had %0d failure(s)",
                      failures);
-            $fatal(1, "Rung 7 first-slice ADD/CMP reg32 smoke failed");
+            $fatal(1, "Rung 7 focused ADD/CMP reg32 smoke failed");
         end
 
         $finish;

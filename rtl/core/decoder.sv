@@ -1,8 +1,8 @@
 // Keystone86 / Aegis
 // rtl/core/decoder.sv
 //
-// Decoder role through bounded Rung 6 Pass 6H-5 plus the first bounded
-// Rung 7 ADD/CMP reg32 register-form slice:
+// Decoder role through bounded Rung 6 Pass 6H-5 plus the bounded Rung 7
+// ADD/CMP reg32 register-form slices:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -43,7 +43,7 @@
 //     6H-5 additionally accepts only 0x67 ModRM.mod=10 disp16 16-bit
 //     addressing forms. Segment-base addition, default-SS linearization,
 //     protected/page behavior, and Rung 7 behavior outside the bounded
-//     ADD/CMP reg32 ModRM.mod=11 first slice remain unsupported.
+//     ADD/CMP reg32 ModRM.mod=11 01/03/39/3B slices remain unsupported.
 //   - For the bounded Pass 6B-1 memory-destination slice, accept only 88/89
 //     and 66+89 with ModRM.mod=00 and r/m=101, consume the disp32 absolute
 //     address, and report M_NEXT_EIP after that displacement. Pass 6E-1
@@ -178,6 +178,7 @@ module decoder (
     logic        is_mov_modrm;
     logic        is_mov_rm_imm;
     logic        is_alu_rm_r;
+    logic        is_alu_r_rm;
     logic        prefix66_active;
     logic        prefix67_active;
     logic [1:0]  prefix_count;
@@ -229,6 +230,7 @@ module decoder (
             is_mov_modrm      <= 1'b0;
             is_mov_rm_imm     <= 1'b0;
             is_alu_rm_r        <= 1'b0;
+            is_alu_r_rm        <= 1'b0;
             prefix66_active   <= 1'b0;
             prefix67_active   <= 1'b0;
             prefix_count      <= 2'h0;
@@ -259,6 +261,7 @@ module decoder (
             is_mov_modrm      <= 1'b0;
             is_mov_rm_imm     <= 1'b0;
             is_alu_rm_r        <= 1'b0;
+            is_alu_r_rm        <= 1'b0;
             prefix66_active   <= 1'b0;
             prefix67_active   <= 1'b0;
             prefix_count      <= 2'h0;
@@ -289,6 +292,8 @@ module decoder (
                                              ((q_data == 8'hC6) || (q_data == 8'hC7));
                         is_alu_rm_r        <= !is_prefix_byte(q_data) &&
                                              ((q_data == 8'h01) || (q_data == 8'h39));
+                        is_alu_r_rm        <= !is_prefix_byte(q_data) &&
+                                             ((q_data == 8'h03) || (q_data == 8'h3B));
                         prefix66_active   <= (q_data == 8'h66);
                         prefix67_active   <= (q_data == 8'h67);
                         prefix_count      <= is_prefix_byte(q_data) ? 2'd1 : 2'd0;
@@ -343,6 +348,7 @@ module decoder (
                                                    (q_data == 8'hC6)) ||
                                                   (q_data == 8'hC7));
                             is_alu_rm_r        <= 1'b0;
+                            is_alu_r_rm        <= 1'b0;
                         end
                     end
                 end
@@ -423,7 +429,8 @@ module decoder (
                     else if (q_data == 8'hE8 || q_data == 8'hC2)
                         state_next = DEC_DISP16;
                     else if (q_data == 8'hFF || q_data == 8'h01 ||
-                             q_data == 8'h39 || q_data == 8'h88 ||
+                             q_data == 8'h03 || q_data == 8'h39 ||
+                             q_data == 8'h3B || q_data == 8'h88 ||
                              q_data == 8'h89 || q_data == 8'h8A ||
                              q_data == 8'h8B || q_data == 8'hC6 ||
                              q_data == 8'hC7)
@@ -1308,6 +1315,9 @@ module decoder (
             8'h01,
             8'h39:            return ((!addr16 && (m[7:6] == 2'b11)) ?
                                       ENTRY_ALU_RM_R : ENTRY_NULL);
+            8'h03,
+            8'h3B:            return ((!addr16 && (m[7:6] == 2'b11)) ?
+                                      ENTRY_ALU_R_RM : ENTRY_NULL);
             8'h90:            return ENTRY_NOP_XCHG_AX;
             8'hEB, 8'hE9:     return ENTRY_JMP_NEAR;
             8'h70, 8'h71, 8'h72, 8'h73,
@@ -1379,7 +1389,7 @@ module decoder (
             next_eip = opcode_eip_latch + 32'h5;
         else if (is_mov_modrm)
             next_eip = opcode_eip_latch + mov_modrm_length();
-        else if (is_alu_rm_r)
+        else if (is_alu_rm_r || is_alu_r_rm)
             next_eip = opcode_eip_latch + 32'h2;
         else if (is_mov_rm_imm) begin
             if (mov_rm_imm_mem_form(opcode_byte_latch, modrm_latch,
@@ -1408,7 +1418,8 @@ module decoder (
         ret_imm      = 16'h0;
         modrm_byte   = modrm_latch;
         sib_byte     = sib_latch;
-        modrm_present= is_call_ff || is_mov_modrm || is_mov_rm_imm || is_alu_rm_r;
+        modrm_present= is_call_ff || is_mov_modrm || is_mov_rm_imm ||
+                       is_alu_rm_r || is_alu_r_rm;
         // Immediate-to-register MOV has no ModRM byte but shares ENTRY_MOV's
         // immediate dispatch with C6/C7. Report the non-memory class here so
         // microcode can use M_MODRM_CLASS as the explicit memory-vs-register
@@ -1438,7 +1449,7 @@ module decoder (
                            is_mov_r_imm32 ? OPSZ_32 :
                            is_mov_rm_imm  ? ((opcode_byte_latch == 8'hC6) ? OPSZ_8 :
                                               (prefix66_active ? OPSZ_16 : OPSZ_32)) :
-                           is_alu_rm_r    ? OPSZ_32 :
+                           (is_alu_rm_r || is_alu_r_rm) ? OPSZ_32 :
                            is_mov_modrm   ? (opcode_byte_latch[0] ? OPSZ_32 : OPSZ_8) :
                                             2'h0;
         addrsz           = prefix67_active ? 1'b0 : 1'b1;
@@ -1456,15 +1467,21 @@ module decoder (
             reg_dst = opcode_byte_latch[1] ? modrm_latch[5:3] : modrm_latch[2:0];
         else if (is_alu_rm_r)
             reg_dst = modrm_latch[2:0];
+        else if (is_alu_r_rm)
+            reg_dst = modrm_latch[5:3];
         else
             reg_dst = 3'h0;
-        reg_src          = (is_mov_modrm || is_mov_rm_imm || is_alu_rm_r) ?
+        reg_src          = (is_mov_modrm || is_mov_rm_imm ||
+                            is_alu_rm_r || is_alu_r_rm) ?
                            modrm_latch[5:3] : 3'h0;
-        reg_rm           = (is_mov_modrm || is_mov_rm_imm || is_alu_rm_r) ?
+        reg_rm           = (is_mov_modrm || is_mov_rm_imm ||
+                            is_alu_rm_r || is_alu_r_rm) ?
                            modrm_latch[2:0] : 3'h0;
-        alu_op           = (is_alu_rm_r && (opcode_byte_latch == 8'h39)) ?
+        alu_op           = ((is_alu_rm_r && (opcode_byte_latch == 8'h39)) ||
+                            (is_alu_r_rm && (opcode_byte_latch == 8'h3B))) ?
                            ALU_CMP : ALU_ADD;
-        is_cmp           = is_alu_rm_r && (opcode_byte_latch == 8'h39);
+        is_cmp           = (is_alu_rm_r && (opcode_byte_latch == 8'h39)) ||
+                           (is_alu_r_rm && (opcode_byte_latch == 8'h3B));
         cond_code        = opcode_byte_latch[3:0];
 
         case (state)
