@@ -1,6 +1,6 @@
 // Keystone86 / Aegis
 // sim/tb/tb_rung7_alu_reg32_add_cmp.sv
-// Focused Rung 7 smoke: 01/03 /r ADD, 29 /r SUB, and 39/3B /r CMP
+// Focused Rung 7 smoke: 01/03 /r ADD, 29/2B /r SUB, and 39/3B /r CMP
 // register-register only.
 //
 // Each case seeds committed architectural state before the tested instruction.
@@ -510,6 +510,14 @@ module tb_rung7_alu_reg32_add_cmp;
                      3'd1, 3'd2, 32'h80000000, 32'h00000001);
         run_alu_case("SUB 29 /r equal ZF/PF", 8'h29, 1'b1, 1'b0, 1'b0,
                      3'd6, 3'd7, 32'h12345678, 32'h12345678);
+        run_alu_case("SUB 2B /r 5-3 normal", 8'h2B, 1'b1, 1'b0, 1'b1,
+                     3'd4, 3'd5, 32'h00000005, 32'h00000003);
+        run_alu_case("SUB 2B /r 0-1 CF/SF/AF/PF", 8'h2B, 1'b1, 1'b0, 1'b1,
+                     3'd0, 3'd3, 32'h00000000, 32'h00000001);
+        run_alu_case("SUB 2B /r 80000000-1 OF/AF/PF", 8'h2B, 1'b1, 1'b0, 1'b1,
+                     3'd1, 3'd2, 32'h80000000, 32'h00000001);
+        run_alu_case("SUB 2B /r equal ZF/PF", 8'h2B, 1'b1, 1'b0, 1'b1,
+                     3'd6, 3'd7, 32'h12345678, 32'h12345678);
         run_alu_case("CMP 39 /r 0-1 CF/SF/AF/PF", 8'h39, 1'b0, 1'b1, 1'b0,
                      3'd0, 3'd3, 32'h00000000, 32'h00000001);
         run_alu_case("CMP 39 /r 80000000-1 OF/AF/PF", 8'h39, 1'b0, 1'b1, 1'b0,
@@ -527,17 +535,20 @@ module tb_rung7_alu_reg32_add_cmp;
         run_unsupported("02 /r byte opposite ADD direction", 8'h02, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("38 /r byte CMP", 8'h38, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("3A /r byte opposite CMP direction", 8'h3A, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
+        run_unsupported("28 /r byte SUB", 8'h28, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
+        run_unsupported("2A /r byte opposite SUB direction", 8'h2A, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("66 01 /r operand override ADD", 8'h66, 8'h01, 8'hD8, 8'h90, 8'h90, 8'h90);
         run_unsupported("66 03 /r operand override ADD", 8'h66, 8'h03, 8'hD8, 8'h90, 8'h90, 8'h90);
         run_unsupported("66 29 /r operand override SUB", 8'h66, 8'h29, 8'hD8, 8'h90, 8'h90, 8'h90);
+        run_unsupported("66 2B /r operand override SUB", 8'h66, 8'h2B, 8'hD8, 8'h90, 8'h90, 8'h90);
         run_unsupported("66 39 /r operand override CMP", 8'h66, 8'h39, 8'hD8, 8'h90, 8'h90, 8'h90);
         run_unsupported("66 3B /r operand override CMP", 8'h66, 8'h3B, 8'hD8, 8'h90, 8'h90, 8'h90);
         run_unsupported("81 /0 id immediate ADD", 8'h81, 8'hC0, 8'h78, 8'h56, 8'h34, 8'h12);
         run_unsupported("83 /7 ib immediate CMP", 8'h83, 8'hF8, 8'h7F, 8'h90, 8'h90, 8'h90);
         run_unsupported("05 id accumulator ADD", 8'h05, 8'h78, 8'h56, 8'h34, 8'h12, 8'h90);
         run_unsupported("3D id accumulator CMP", 8'h3D, 8'h78, 8'h56, 8'h34, 8'h12, 8'h90);
-        run_unsupported("2B /r opposite SUB direction", 8'h2B, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("29 /r memory ModRM", 8'h29, 8'h00, 8'h90, 8'h90, 8'h90, 8'h90);
+        run_unsupported("2B /r memory ModRM", 8'h2B, 8'h00, 8'h90, 8'h90, 8'h90, 8'h90);
         run_unsupported("2D id accumulator SUB", 8'h2D, 8'h78, 8'h56, 8'h34, 8'h12, 8'h90);
         run_unsupported("83 /5 ib immediate SUB", 8'h83, 8'hE8, 8'h7F, 8'h90, 8'h90, 8'h90);
         run_unsupported("09 /r adjacent OR", 8'h09, 8'hD8, 8'h90, 8'h90, 8'h90, 8'h90);
@@ -551,9 +562,9 @@ module tb_rung7_alu_reg32_add_cmp;
         run_unsupported("3B /r memory ModRM", 8'h3B, 8'h00, 8'h90, 8'h90, 8'h90, 8'h90);
 
         check("six ADD cases ran", add_case_count == 6);
-        check("four SUB cases ran", sub_case_count == 4);
+        check("eight SUB cases ran", sub_case_count == 8);
         check("six CMP cases ran", cmp_case_count == 6);
-        check("twenty-six unsupported adjacent forms checked", unsupported_count == 26);
+        check("twenty-nine unsupported adjacent forms checked", unsupported_count == 29);
 
         if (failures == 0) begin
             $display("PASS: Rung 7 focused ADD/SUB/CMP reg32 smoke completed");

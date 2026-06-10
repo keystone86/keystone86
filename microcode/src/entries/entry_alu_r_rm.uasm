@@ -2,6 +2,7 @@
 
 ; Rung 7 bounded opposite-direction register slice:
 ;   03 /r ADD r32, r/m32, ModRM.mod=11 only
+;   2B /r SUB r32, r/m32, ModRM.mod=11 only
 ;   3B /r CMP r32, r/m32, ModRM.mod=11 only
 ;
 ; Decoder supplies M_ALU_OP, M_IS_CMP, M_REG_DST, M_REG_RM, M_OPSZ=32, and
@@ -25,6 +26,14 @@ ENTRY_ALU_R_RM:
     EXTRACT T4, M_ALU_OP
     EXTRACT T3, M_IS_CMP
     BR C_T3NZ, .cmp
+    MOV T3, T4
+    BR C_T3Z, .add
+    SVCW ALU_SUB32
+    BR C_FAULT, .alu_fault
+    STAGE STAGE_EFLAGS, T3, T4
+    STAGE STAGE_GPR, T0
+    ENDI CM_ALU_REG
+.add:
     SVCW ALU_ADD32
     BR C_FAULT, .alu_fault
     STAGE STAGE_EFLAGS, T3, T4
