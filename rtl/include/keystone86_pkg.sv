@@ -161,6 +161,7 @@ package keystone86_pkg;
     // ALU OPERATION SELECTORS (Appendix A Section 2.6)
     // ----------------------------------------------------------------
     localparam logic [3:0] ALU_ADD      = 4'h0;
+    localparam logic [3:0] ALU_SUB      = 4'h5;
     localparam logic [3:0] ALU_CMP      = 4'h7;
 
     // ----------------------------------------------------------------

@@ -108,6 +108,7 @@ STORE_RM32             = 0x25
 LOAD_REG_META          = 0x26
 STORE_REG_META         = 0x27
 ALU_ADD32              = 0x32
+ALU_SUB32              = 0x35
 ALU_CMP32              = 0x3B
 PUSH32                 = 0x41
 POP32                  = 0x43
@@ -450,14 +451,16 @@ rom[0x1CD] = br(C_FAULT, rel10(0x1CD, 0x000))
 rom[0x1CE] = endi(CM_NOP_EIP)
 
 # --------------------------------------------------------------------
-# Rung 7 bounded reg32 ADD/CMP register-register slices.
+# Rung 7 bounded reg32 register-register slices:
+#   ENTRY_ALU_R_RM supports ADD/CMP for 03/3B only.
+#   ENTRY_ALU_RM_R supports ADD/SUB/CMP for 01/29/39 only.
 #
 # ENTRY_ALU_R_RM is placed in the free 0x1D1 window before the existing
 # ENTRY_ALU_RM_R path so all direct BR instructions remain in range. Decoder
 # supplies only Appendix A metadata. Microcode explicitly loads both committed
 # register operands through LOAD_REG_META, invokes the bounded ALU service with
-# staged operands, stages masked candidate flags, then selects ADD writeback or
-# CMP flags-only commit at ENDI.
+# staged operands, stages masked candidate flags, then selects ADD/SUB
+# writeback or CMP flags-only commit at ENDI.
 # --------------------------------------------------------------------
 rom[0x1CF] = raise_fc(0x6)
 rom[0x1D0] = br(C_ALWAYS, rel10(0x1D0, 0x000))
@@ -494,16 +497,23 @@ rom[0x206] = br(C_FAULT, rel10(0x206, 0x1FE))
 rom[0x207] = mov(REG_T1, REG_T4)
 rom[0x208] = extract(REG_T4, MF_ALU_OP)
 rom[0x209] = extract(REG_T3, MF_IS_CMP)
-rom[0x20A] = br(C_T3NZ, rel10(0x20A, 0x214))
-rom[0x20B] = svcw_small(ALU_ADD32)
-rom[0x20C] = br(C_FAULT, rel10(0x20C, 0x1FE))
-rom[0x20D] = stage(STAGE_EFLAGS, REG_T3, REG_T4)
-rom[0x20E] = stage(STAGE_GPR, REG_T0)
-rom[0x20F] = endi(CM_ALU_REG)
-rom[0x214] = svcw_small(ALU_CMP32)
-rom[0x215] = br(C_FAULT, rel10(0x215, 0x1FE))
-rom[0x216] = stage(STAGE_EFLAGS, REG_T3, REG_T4)
-rom[0x217] = endi(CM_FLAGS)
+rom[0x20A] = br(C_T3NZ, rel10(0x20A, 0x219))
+rom[0x20B] = mov(REG_T3, REG_T4)
+rom[0x20C] = br(C_T3Z, rel10(0x20C, 0x212))
+rom[0x20D] = svcw_small(ALU_SUB32)
+rom[0x20E] = br(C_FAULT, rel10(0x20E, 0x1FE))
+rom[0x20F] = stage(STAGE_EFLAGS, REG_T3, REG_T4)
+rom[0x210] = stage(STAGE_GPR, REG_T0)
+rom[0x211] = endi(CM_ALU_REG)
+rom[0x212] = svcw_small(ALU_ADD32)
+rom[0x213] = br(C_FAULT, rel10(0x213, 0x1FE))
+rom[0x214] = stage(STAGE_EFLAGS, REG_T3, REG_T4)
+rom[0x215] = stage(STAGE_GPR, REG_T0)
+rom[0x216] = endi(CM_ALU_REG)
+rom[0x219] = svcw_small(ALU_CMP32)
+rom[0x21A] = br(C_FAULT, rel10(0x21A, 0x1FE))
+rom[0x21B] = stage(STAGE_EFLAGS, REG_T3, REG_T4)
+rom[0x21C] = endi(CM_FLAGS)
 
 (build / "ucode.hex").write_text("\n".join(rom) + "\n", encoding="utf-8")
 
@@ -514,8 +524,9 @@ listing = f"""; Keystone86 / Aegis bootstrap microcode listing
 ; and Rung 6 Pass 6H-3 bounded MOV immediate/register/direct-disp32,
 ; non-SIB, base-only-SIB, no-base-SIB-disp32, base-present indexed SIB,
 ; no-base indexed SIB, 0x67 direct disp16, and 0x67 no-displacement non-BP/BP
-; coverage, plus the bounded Rung 7 32-bit register-register ADD/CMP
-; 01/03/39/3B slices. No broader 16-bit addressing or broader Rung 7 behavior.
+; coverage, plus bounded Rung 7 32-bit register-register ADD/CMP
+; 03/3B and ADD/SUB/CMP 01/29/39 slices. No broader 16-bit addressing or
+; broader Rung 7 behavior.
 address  encoding     source
 0x000    {extract(REG_T4, MF_FC_TO_VECTOR)}   SUB_FAULT_HANDLER: EXTRACT T4, MF_FC_TO_VECTOR
 0x001    {ext_word()}   EXT
@@ -725,16 +736,23 @@ address  encoding     source
 0x207    {mov(REG_T1, REG_T4)}   MOV T1, T4
 0x208    {extract(REG_T4, MF_ALU_OP)}   EXTRACT T4, M_ALU_OP
 0x209    {extract(REG_T3, MF_IS_CMP)}   EXTRACT T3, M_IS_CMP
-0x20A    {br(C_T3NZ, rel10(0x20A, 0x214))}   BR C_T3NZ, alu_cmp
-0x20B    {svcw_small(ALU_ADD32)}   SVCW ALU_ADD32
-0x20C    {br(C_FAULT, rel10(0x20C, 0x1FE))}   BR C_FAULT, alu_fault
-0x20D    {stage(STAGE_EFLAGS, REG_T3, REG_T4)}   STAGE STAGE_EFLAGS, T3, T4
-0x20E    {stage(STAGE_GPR, REG_T0)}   STAGE STAGE_GPR, T0
-0x20F    {endi(CM_ALU_REG)}   ENDI CM_ALU_REG (0x{CM_ALU_REG:03X})
-0x214    {svcw_small(ALU_CMP32)}   alu_cmp: SVCW ALU_CMP32
-0x215    {br(C_FAULT, rel10(0x215, 0x1FE))}   BR C_FAULT, alu_fault
-0x216    {stage(STAGE_EFLAGS, REG_T3, REG_T4)}   STAGE STAGE_EFLAGS, T3, T4
-0x217    {endi(CM_FLAGS)}   ENDI CM_FLAGS (0x{CM_FLAGS:03X})
+0x20A    {br(C_T3NZ, rel10(0x20A, 0x219))}   BR C_T3NZ, alu_cmp
+0x20B    {mov(REG_T3, REG_T4)}   MOV T3, T4
+0x20C    {br(C_T3Z, rel10(0x20C, 0x212))}   BR C_T3Z, alu_add
+0x20D    {svcw_small(ALU_SUB32)}   SVCW ALU_SUB32
+0x20E    {br(C_FAULT, rel10(0x20E, 0x1FE))}   BR C_FAULT, alu_fault
+0x20F    {stage(STAGE_EFLAGS, REG_T3, REG_T4)}   STAGE STAGE_EFLAGS, T3, T4
+0x210    {stage(STAGE_GPR, REG_T0)}   STAGE STAGE_GPR, T0
+0x211    {endi(CM_ALU_REG)}   ENDI CM_ALU_REG (0x{CM_ALU_REG:03X})
+0x212    {svcw_small(ALU_ADD32)}   alu_add: SVCW ALU_ADD32
+0x213    {br(C_FAULT, rel10(0x213, 0x1FE))}   BR C_FAULT, alu_fault
+0x214    {stage(STAGE_EFLAGS, REG_T3, REG_T4)}   STAGE STAGE_EFLAGS, T3, T4
+0x215    {stage(STAGE_GPR, REG_T0)}   STAGE STAGE_GPR, T0
+0x216    {endi(CM_ALU_REG)}   ENDI CM_ALU_REG (0x{CM_ALU_REG:03X})
+0x219    {svcw_small(ALU_CMP32)}   alu_cmp: SVCW ALU_CMP32
+0x21A    {br(C_FAULT, rel10(0x21A, 0x1FE))}   BR C_FAULT, alu_fault
+0x21B    {stage(STAGE_EFLAGS, REG_T3, REG_T4)}   STAGE STAGE_EFLAGS, T3, T4
+0x21C    {endi(CM_FLAGS)}   ENDI CM_FLAGS (0x{CM_FLAGS:03X})
 """
 (build / "ucode.lst").write_text(listing, encoding="utf-8")
 
@@ -753,5 +771,5 @@ print(f"  CM_MOV_REG = 0x{CM_MOV_REG:03X}")
 print(f"  ENTRY_MOV       at dispatch[0x01] -> uPC 0x100 (Rung 6 Pass 6H-5 MOV immediate/register/memory/immediate-to-memory/immediate-to-register/SIB-base/SIB-no-base/SIB-indexed-base/SIB-indexed-no-base/addr16-direct/addr16-nobp-nodisp/addr16-bp-nodisp/addr16-disp8/addr16-disp16)")
 print(f"  CM_ALU_REG = 0x{CM_ALU_REG:03X}")
 print(f"  CM_FLAGS   = 0x{CM_FLAGS:03X}")
-print(f"  ENTRY_ALU_RM_R  at dispatch[0x02] -> uPC 0x200 (Rung 7 bounded ADD/CMP r/m32,r32 register-register)")
+print(f"  ENTRY_ALU_RM_R  at dispatch[0x02] -> uPC 0x200 (Rung 7 bounded ADD/SUB/CMP r/m32,r32 register-register)")
 print(f"  ENTRY_ALU_R_RM  at dispatch[0x03] -> uPC 0x1D1 (Rung 7 bounded ADD/CMP r32,r/m32 register-register)")

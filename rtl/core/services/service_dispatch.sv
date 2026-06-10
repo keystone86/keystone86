@@ -144,6 +144,7 @@ module service_dispatch (
             end
 
             ALU_ADD32,
+            ALU_SUB32,
             ALU_CMP32: begin
                 use_alu = 1'b1;
             end

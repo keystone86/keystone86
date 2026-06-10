@@ -3,7 +3,7 @@
 //
 // Bounded Rung 7 first-slice ALU service.
 //
-// This service is a leaf helper for 32-bit ADD/CMP only. It receives staged
+// This service is a leaf helper for 32-bit ADD/SUB/CMP only. It receives staged
 // operands from T0/T1 and an explicit ALU op selected by microcode. It returns
 // a result candidate in T0 plus EFLAGS-shaped candidate value/mask in T3/T4.
 // It does not read architectural registers, stage commits, decide CMP
@@ -55,9 +55,10 @@ module alu (
 
     assign add_ext = {1'b0, operand_a} + {1'b0, operand_b};
     assign sub_ext = {1'b0, operand_a} - {1'b0, operand_b};
-    assign is_sub_w = (alu_op == ALU_CMP);
+    assign is_sub_w = (alu_op == ALU_SUB) || (alu_op == ALU_CMP);
     assign valid_op_w = (meta_opsz == 2'h2) &&
                         (((svc_id == ALU_ADD32) && (alu_op == ALU_ADD)) ||
+                         ((svc_id == ALU_SUB32) && (alu_op == ALU_SUB)) ||
                          ((svc_id == ALU_CMP32) && (alu_op == ALU_CMP)));
     assign result_w = is_sub_w ? sub_ext[31:0] : add_ext[31:0];
     assign cf_w = is_sub_w ? (operand_a < operand_b) : add_ext[32];

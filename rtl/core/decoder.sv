@@ -2,7 +2,7 @@
 // rtl/core/decoder.sv
 //
 // Decoder role through bounded Rung 6 Pass 6H-5 plus the bounded Rung 7
-// ADD/CMP reg32 register-form slices:
+// ADD/SUB/CMP reg32 register-form slices:
 //   - Classify in-scope control-transfer forms and produce decode-owned
 //     metadata only.
 //   - Consume every byte that belongs to the instruction before decode_done,
@@ -43,7 +43,8 @@
 //     6H-5 additionally accepts only 0x67 ModRM.mod=10 disp16 16-bit
 //     addressing forms. Segment-base addition, default-SS linearization,
 //     protected/page behavior, and Rung 7 behavior outside the bounded
-//     ADD/CMP reg32 ModRM.mod=11 01/03/39/3B slices remain unsupported.
+//     ADD/SUB/CMP reg32 ModRM.mod=11 01/03/29/39/3B slices remain
+//     unsupported.
 //   - For the bounded Pass 6B-1 memory-destination slice, accept only 88/89
 //     and 66+89 with ModRM.mod=00 and r/m=101, consume the disp32 absolute
 //     address, and report M_NEXT_EIP after that displacement. Pass 6E-1
@@ -291,7 +292,9 @@ module decoder (
                         is_mov_rm_imm     <= !is_prefix_byte(q_data) &&
                                              ((q_data == 8'hC6) || (q_data == 8'hC7));
                         is_alu_rm_r        <= !is_prefix_byte(q_data) &&
-                                             ((q_data == 8'h01) || (q_data == 8'h39));
+                                             ((q_data == 8'h01) ||
+                                              (q_data == 8'h29) ||
+                                              (q_data == 8'h39));
                         is_alu_r_rm        <= !is_prefix_byte(q_data) &&
                                              ((q_data == 8'h03) || (q_data == 8'h3B));
                         prefix66_active   <= (q_data == 8'h66);
@@ -429,6 +432,7 @@ module decoder (
                     else if (q_data == 8'hE8 || q_data == 8'hC2)
                         state_next = DEC_DISP16;
                     else if (q_data == 8'hFF || q_data == 8'h01 ||
+                             q_data == 8'h29 ||
                              q_data == 8'h03 || q_data == 8'h39 ||
                              q_data == 8'h3B || q_data == 8'h88 ||
                              q_data == 8'h89 || q_data == 8'h8A ||
@@ -1313,6 +1317,7 @@ module decoder (
 
         case (op)
             8'h01,
+            8'h29,
             8'h39:            return ((!addr16 && (m[7:6] == 2'b11)) ?
                                       ENTRY_ALU_RM_R : ENTRY_NULL);
             8'h03,
@@ -1479,7 +1484,9 @@ module decoder (
                            modrm_latch[2:0] : 3'h0;
         alu_op           = ((is_alu_rm_r && (opcode_byte_latch == 8'h39)) ||
                             (is_alu_r_rm && (opcode_byte_latch == 8'h3B))) ?
-                           ALU_CMP : ALU_ADD;
+                           ALU_CMP :
+                           ((is_alu_rm_r && (opcode_byte_latch == 8'h29)) ?
+                            ALU_SUB : ALU_ADD);
         is_cmp           = (is_alu_rm_r && (opcode_byte_latch == 8'h39)) ||
                            (is_alu_r_rm && (opcode_byte_latch == 8'h3B));
         cond_code        = opcode_byte_latch[3:0];

@@ -455,6 +455,10 @@
       "value": 0
     },
     {
+      "name": "ALU_SUB",
+      "value": 5
+    },
+    {
       "name": "ALU_CMP",
       "value": 7
     }
