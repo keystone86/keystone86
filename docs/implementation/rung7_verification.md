@@ -4,16 +4,18 @@
 
 This document records only the verified partial Rung 7 reg32 subset.
 
-Previously verified forms:
+Currently verified forms:
 
 - `01 /r` `ADD r/m32, r32` with `ModRM.mod=11` only
 - `03 /r` `ADD r32, r/m32` with `ModRM.mod=11` only
+- `29 /r` `SUB r/m32, r32` with `ModRM.mod=11` only
+- `2B /r` `SUB r32, r/m32` with `ModRM.mod=11` only
 - `39 /r` `CMP r/m32, r32` with `ModRM.mod=11` only
 - `3B /r` `CMP r32, r/m32` with `ModRM.mod=11` only
 
 Newly verified by the latest post-commit session:
 
-- `29 /r` `SUB r/m32, r32` with `ModRM.mod=11` only
+- `2B /r` `SUB r32, r/m32` with `ModRM.mod=11` only
 
 This is partial Rung 7 verification only.
 This is not full Rung 7 completion.
@@ -34,13 +36,13 @@ complete. This document records actual subset evidence only.
 Implementation commit:
 
 ```text
-3a75607b009370fdb5c76a3ba06d8849e85a77a5
+addcacfda740f42a8ff59ddee61bfc16c864c956
 ```
 
 Subject:
 
 ```text
-rung7: implement reg32 SUB same-direction slice
+rung7: implement reg32 SUB opposite direction
 ```
 
 Directive commit:
@@ -51,35 +53,31 @@ Directive commit:
 
 ## Latest Commit Scope
 
-Commit `3a75607b009370fdb5c76a3ba06d8849e85a77a5` implemented only:
+Commit `addcacfda740f42a8ff59ddee61bfc16c864c956` implemented only:
 
-- `29 /r` `SUB r/m32, r32` with `ModRM.mod=11`
+- `2B /r` `SUB r32, r/m32` with `ModRM.mod=11`
 
-The implementation commit changed exactly 9 files:
+The implementation commit changed exactly 4 files:
 
-- `Makefile`
-- `microcode/src/entries/entry_alu_rm_r.uasm`
+- `microcode/src/entries/entry_alu_r_rm.uasm`
 - `rtl/core/decoder.sv`
-- `rtl/core/services/alu.sv`
-- `rtl/core/services/service_dispatch.sv`
-- `rtl/include/keystone86_pkg.sv`
 - `scripts/ucode_build.py`
 - `sim/tb/tb_rung7_alu_reg32_add_cmp.sv`
-- `tools/spec_codegen/appendix_a_codegen.json`
 
 No memory, read-modify-write, immediate, accumulator, 8-bit, 16-bit, logical,
 ADC, SBB, TEST, INC, DEC, NEG, or NOT support was added.
 
 The following adjacent forms remain unsupported:
 
-- `2B /r`
+- `66 2B /r`
+- `2B /r` with `ModRM.mod != 11`
 - `66 29 /r`
 - `29 /r` with `ModRM.mod != 11`
 
 ## Verification Commands and Results
 
 The following post-commit verification was run from clean implementation commit
-`3a75607b009370fdb5c76a3ba06d8849e85a77a5`.
+`addcacfda740f42a8ff59ddee61bfc16c864c956`.
 
 Verification session result: PASS.
 
@@ -107,6 +105,12 @@ PASS: Rung 7 focused ADD/SUB/CMP reg32 smoke completed
 PASS: Rung 6 Appendix D MOV matrix completed
 ```
 
+`make rung5-regress` passed, including:
+
+```text
+RESULT: RUNG 5 PASS 5 INT/IRET ROUND TRIP PASSED
+```
+
 No docs or acceptance docs changed during verification. No files were edited,
 staged, committed, or pushed during the verification session. This docs-only
 update records that evidence only.
@@ -118,13 +122,15 @@ The focused subset test proved the bounded register-register path for:
 - `ADD 01 /r` reg32 register-register path
 - `ADD 03 /r` reg32 register-register path
 - `SUB 29 /r` reg32 register-register path
+- `SUB 2B /r` reg32 register-register path
 - `CMP 39 /r` reg32 register-register path
 - `CMP 3B /r` reg32 register-register path
 
 The previously verified `01 /r`, `03 /r`, `39 /r`, and `3B /r` ADD/CMP
-subset remains part of the verified partial Rung 7 reg32 subset. The latest
-verified `29 /r` slice proves same-direction SUB for the same bounded
-`ModRM.mod=11` register-register class.
+subset and `29 /r` same-direction SUB slice remain part of the verified
+partial Rung 7 reg32 subset. The latest verified `2B /r` slice proves
+opposite-direction SUB for the same bounded `ModRM.mod=11`
+register-register class.
 
 The checked behavior included:
 
@@ -140,7 +146,7 @@ The checked behavior included:
 The proof uses the intended Rung 7 subset shape:
 
 - decoder routes only the verified `01/29/39` forms to `ENTRY_ALU_RM_R`
-- decoder routes only the verified `03/3B` forms to `ENTRY_ALU_R_RM`
+- decoder routes only the verified `03/2B/3B` forms to `ENTRY_ALU_R_RM`
 - microcode loads both register operands through `LOAD_REG_META`
 - bounded ALU services perform `ALU_ADD32`, `ALU_SUB32`, or `ALU_CMP32`
 - ADD and SUB end through `CM_ALU_REG`
@@ -158,20 +164,21 @@ Unsupported adjacent examples include:
 - `02 /r`
 - `28 /r`
 - `2A /r`
-- `2B /r`
 - `38 /r`
 - `3A /r`
 - `66 01 /r`
 - `66 29 /r`
+- `66 2B /r`
 - `66 39 /r`
 - immediate ADD/SUB/CMP samples
 - accumulator ADD/SUB/CMP samples
 - logical-operation adjacent samples
 - ADC/SBB adjacent samples
-- memory ModRM samples for `01 /r`, `29 /r`, and `39 /r`
+- memory ModRM samples for `01 /r`, `29 /r`, `2B /r`, and `39 /r`
 
 This record does not claim support for these adjacent forms. In particular,
-`2B /r`, `66 29 /r`, and `29 /r` with `ModRM.mod != 11` remain unsupported.
+`66 2B /r`, `2B /r` with `ModRM.mod != 11`, `66 29 /r`, and `29 /r` with
+`ModRM.mod != 11` remain unsupported.
 
 ## Generated Artifact Status
 
@@ -219,6 +226,23 @@ That run recorded the `01 /r`, `03 /r`, `39 /r`, and `3B /r` ADD/CMP
 `ModRM.mod=11` subset. The latest `3a75607...` verification extends the
 recorded partial subset only with `29 /r` same-direction SUB.
 
+The latest prior partial Rung 7 verification was recorded for implementation
+commit:
+
+```text
+3a75607b009370fdb5c76a3ba06d8849e85a77a5
+```
+
+Subject:
+
+```text
+rung7: implement reg32 SUB same-direction slice
+```
+
+That run recorded the `29 /r` SUB `ModRM.mod=11` subset. The latest
+`addcacf...` verification extends the recorded partial subset only with
+`2B /r` opposite-direction SUB.
+
 ## Non-Claims
 
 This document does not claim:
@@ -228,7 +252,9 @@ This document does not claim:
 - complete SUB implementation
 - AND/OR/XOR implementation
 - 8-bit or 16-bit ALU forms
-- `2B /r` support
+- `2B /r` support beyond unprefixed `SUB r32, r/m32` with `ModRM.mod=11`
+- `66 2B /r` support
+- `2B /r` with `ModRM.mod != 11` support
 - `66 29 /r` support
 - `29 /r` with `ModRM.mod != 11` support
 - immediate ALU forms
